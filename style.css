@@ -1,0 +1,1415 @@
+/* ==========================================================================
+   MINDSHIELD - 核心设计系统与样式表
+   基于高级暗黑玻璃态 (Dark Glassmorphism) 风格与 3D 物理模拟动画
+   ========================================================================== */
+
+/* 定义设计系统变量：和谐统一的色彩与排版梯度 */
+:root {
+    --bg-primary: #08090C;          /* 极深太空黑背景，模拟高端视网膜设备环境 */
+    --bg-card: rgba(20, 22, 28, 0.65); /* 半透明玻璃卡片底色 */
+    --border-glass: rgba(255, 255, 255, 0.08); /* 极细磨砂边框，创造高光质感 */
+    
+    --color-electric-blue: #00F2FE; /* 电光蓝：安全隔离、AI 运行与指示状态 */
+    --color-aurora-purple: #8A2BE2; /* 极光紫：辅助高光与深度专注渐变 */
+    --color-neon-pink: #F35588;     /* 警示粉红：意图偏离、黑名单拦截警报 */
+    --color-green-success: #00E676; /* 成功绿：意图达成、白名单放行 */
+    
+    --text-main: #FFFFFF;
+    --text-muted: #8E9AAB;
+    --font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ==================== 基础与布局 ==================== */
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    font-family: var(--font-family);
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    background-color: var(--bg-primary);
+    color: var(--text-main);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow-x: hidden;
+    position: relative;
+}
+
+/* 背景呼吸高光球，通过高斯模糊扩散，形成深邃的空间感 */
+.bg-glow {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(120px);
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.25;
+}
+
+.bg-glow-1 {
+    width: 500px;
+    height: 500px;
+    background: radial-gradient(circle, var(--color-electric-blue) 0%, transparent 70%);
+    top: -10%;
+    left: -10%;
+}
+
+.bg-glow-2 {
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, var(--color-aurora-purple) 0%, transparent 70%);
+    bottom: -15%;
+    right: -10%;
+}
+
+/* 主容器：采用左右分栏自适应布局，在大屏幕上分立，小屏幕上垂直排列 */
+.app-container {
+    display: flex;
+    gap: 80px;
+    max-width: 1200px;
+    width: 90%;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+    padding: 40px 0;
+}
+
+@media (max-width: 968px) {
+    .app-container {
+        flex-direction: column;
+        gap: 40px;
+    }
+    .info-panel {
+        text-align: center;
+    }
+    .principle-card {
+        text-align: left;
+    }
+}
+
+/* ==================== 左侧：产品阐释面板 ==================== */
+.info-panel {
+    flex: 1;
+    max-width: 500px;
+}
+
+.info-title {
+    font-size: 3.5rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #FFF 30%, var(--color-electric-blue) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 8px;
+    letter-spacing: -1px;
+}
+
+.info-subtitle {
+    font-size: 1.15rem;
+    color: var(--text-muted);
+    margin-bottom: 40px;
+    font-weight: 300;
+}
+
+.principle-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    padding: 24px;
+    display: flex;
+    gap: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    transition: transform 0.3s ease;
+}
+
+.principle-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(0, 242, 254, 0.2);
+}
+
+.card-icon {
+    font-size: 2rem;
+    color: var(--color-electric-blue);
+    display: flex;
+    align-items: flex-start;
+}
+
+.card-text h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--text-main);
+}
+
+.card-text p {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text-muted);
+}
+
+.tips-box {
+    margin-top: 30px;
+    padding: 20px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed rgba(255, 255, 255, 0.1);
+}
+
+.tips-box h4 {
+    font-size: 0.95rem;
+    margin-bottom: 10px;
+    color: var(--color-electric-blue);
+}
+
+.tips-box ul {
+    list-style: none;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.tips-box li {
+    margin-bottom: 8px;
+    line-height: 1.4;
+}
+
+/* ==================== 右侧：iPhone 3D 虚拟手机 ==================== */
+.device-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+}
+
+/* 顶部状态角标，提示用户当前的系统物理隔离状态 */
+.status-badge {
+    position: absolute;
+    top: -45px;
+    padding: 8px 18px;
+    border-radius: 30px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-glass);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    z-index: 10;
+    transition: all 0.3s ease;
+}
+
+.status-idle {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-muted);
+}
+
+.status-active {
+    background: rgba(0, 242, 254, 0.15);
+    color: var(--color-electric-blue);
+    border-color: rgba(0, 242, 254, 0.3);
+    box-shadow: 0 0 15px rgba(0, 242, 254, 0.2);
+}
+
+/* 手机外壳容器，设置 3D 视距空间 */
+.phone-container {
+    width: 375px;
+    height: 812px;
+    perspective: 1500px; /* 3D 深度，产生俯仰与翻转时的真实空间透视 */
+}
+
+/* 双面手机的中间桥梁，应用 3D preserve 并且支持平滑回弹的翻转动画 */
+.phone-inner {
+    width: 100%;
+    height: 100%;
+    position: relative;
+    transform-style: preserve-3d; /* 告知浏览器子元素要在 3D 空间保留各自位置 */
+    transition: transform 0.9s cubic-bezier(0.175, 0.885, 0.32, 1.2) ; /* 模拟带有些微物理阻尼回弹的翻转感 */
+}
+
+/* 当激活 flipped 状态时，沿 Y 轴自右向左翻转 180 度 */
+.phone-inner.flipped {
+    transform: rotateY(180deg);
+}
+
+/* 正面与反面的公用底壳属性 */
+.phone-front, .phone-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    backface-visibility: hidden; /* 翻转到背面时，隐藏正面图层，反之亦然 */
+    border-radius: 48px;
+    border: 12px solid #1C1E24;  /* 拟真 iPhone 哑光黑色外金属中框 */
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+}
+
+/* ==================== 手机正面 (Screen) ==================== */
+.phone-front {
+    background-color: #0E1015; /* 熄屏下的手机底色 */
+    display: flex;
+    flex-direction: column;
+    z-index: 2;
+}
+
+/* 手机屏幕本身 */
+.phone-screen {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    padding: 24px;
+    padding-top: 45px; /* 避开状态栏高度 */
+    display: flex;
+    flex-direction: column;
+}
+
+/* 拟真 iOS 顶部状态栏 */
+.phone-statusbar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 45px;
+    padding: 0 28px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 500;
+    z-index: 100;
+}
+
+.status-icons {
+    display: flex;
+    gap: 6px;
+}
+
+/* 灵动岛 (Dynamic Island) */
+.dynamic-island {
+    background-color: #000;
+    height: 28px;
+    width: 110px;
+    border-radius: 20px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    top: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 10px;
+    gap: 6px;
+    color: #FFF;
+    font-size: 0.7rem;
+    font-weight: 600;
+    transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.island-indicator {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--color-electric-blue);
+    display: none; /* 默认未运行时不亮 */
+}
+
+/* 灵动岛在运行专注时的扩展形态 */
+.dynamic-island.focusing {
+    width: 180px;
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.3);
+}
+.dynamic-island.focusing .island-indicator {
+    display: inline-block;
+    animation: led-pulse 1.5s infinite;
+}
+
+/* ==================== 屏幕各视图状态切换 ==================== */
+.view {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    opacity: 0;
+    transform: translateY(15px);
+    transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.view.active {
+    display: flex;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.btn-back {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    align-self: flex-start;
+    margin-bottom: 20px;
+}
+
+.view-header {
+    margin-bottom: 30px;
+}
+
+.view-header h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.view-header p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* 按钮通用样式 */
+.btn {
+    width: 100%;
+    padding: 15px;
+    border-radius: 16px;
+    border: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: all 0.3s ease;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--color-electric-blue) 0%, #4FACFE 100%);
+    color: #000;
+    box-shadow: 0 4px 20px rgba(0, 242, 254, 0.25);
+}
+
+.btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 25px rgba(0, 242, 254, 0.4);
+}
+
+.btn-primary:disabled {
+    background: #252830;
+    color: #5E6472;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border-glass);
+    color: var(--text-main);
+}
+
+.btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, var(--color-neon-pink) 0%, #D81B60 100%);
+    color: #FFF;
+    box-shadow: 0 4px 15px rgba(243, 85, 136, 0.2);
+}
+
+.btn-danger:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(243, 85, 136, 0.35);
+}
+
+.btn-danger:disabled {
+    background: #252830;
+    color: #5E6472;
+    box-shadow: none;
+    cursor: not-allowed;
+}
+
+.btn-pulse {
+    animation: btn-glow-pulse 2s infinite;
+}
+
+/* ==================== 1. DASHBOARD 视图 ==================== */
+.welcome-header h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-top: 10px;
+}
+
+.welcome-header p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.welcome-header span {
+    color: var(--color-neon-pink);
+    font-weight: 600;
+}
+
+.focus-metric-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    border-radius: 24px;
+    padding: 30px 20px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 30px 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.metric-circle {
+    width: 140px;
+    height: 140px;
+    position: relative;
+}
+
+.metric-circle svg {
+    width: 100%;
+    height: 100%;
+    transform: rotate(-90deg);
+}
+
+.metric-circle circle {
+    fill: none;
+    stroke-width: 8;
+    stroke-linecap: round;
+}
+
+.metric-circle circle.bg {
+    stroke: rgba(255, 255, 255, 0.05);
+}
+
+.metric-circle circle.fg {
+    stroke: url(#metric-gradient); /* 我们在 app.js 中动态渲染渐变线 */
+    stroke: var(--color-electric-blue);
+    transition: stroke-dashoffset 1s ease;
+}
+
+.metric-value {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.metric-value .num {
+    font-size: 2.2rem;
+    font-weight: 800;
+}
+
+.metric-value .unit {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: -4px;
+}
+
+.metric-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 15px;
+}
+
+.history-list {
+    flex: 1;
+    overflow-y: auto;
+    margin-bottom: 20px;
+}
+
+.section-title {
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    font-weight: 600;
+}
+
+.history-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255,255,255,0.03);
+    border-radius: 16px;
+    padding: 12px 16px;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.item-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+}
+
+.item-icon.success {
+    background: rgba(0, 230, 118, 0.12);
+    color: var(--color-green-success);
+}
+
+.item-info {
+    flex: 1;
+}
+
+.item-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+}
+
+.item-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* ==================== 2. INTENT_INPUT 视图 ==================== */
+.input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 24px;
+}
+
+.input-group label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.input-group textarea {
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    padding: 16px;
+    color: #FFF;
+    font-size: 0.95rem;
+    resize: none;
+    transition: border-color 0.3s ease;
+}
+
+.input-group textarea:focus {
+    outline: none;
+    border-color: var(--color-electric-blue);
+}
+
+.input-char-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.duration-selector {
+    margin-bottom: 35px;
+}
+
+.duration-selector label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    font-weight: 500;
+    display: block;
+    margin-bottom: 12px;
+}
+
+.duration-options {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.duration-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.duration-card.active {
+    background: rgba(0, 242, 254, 0.08);
+    border-color: var(--color-electric-blue);
+    box-shadow: 0 0 10px rgba(0, 242, 254, 0.1);
+}
+
+.duration-card .time {
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.duration-card .desc {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+/* ==================== 3. AI_ANALYZING 视图 ==================== */
+.analyzing-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+/* 扫描光环设计，代表 AI 的高维算力运作中 */
+.scanner-ring {
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: 2px solid rgba(0, 242, 254, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2.2rem;
+    color: var(--color-electric-blue);
+    position: relative;
+    margin-bottom: 24px;
+    box-shadow: 0 0 30px rgba(0, 242, 254, 0.05);
+}
+
+.scanner-ring i {
+    z-index: 2;
+}
+
+.scanner-line {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border-top: 2px solid var(--color-electric-blue);
+    border-right: 2px solid transparent;
+    animation: rotate-scanner 1.2s linear infinite;
+    z-index: 1;
+}
+
+.analyzing-container h3 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+
+.scrolling-log {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-family: monospace;
+    height: 20px;
+}
+
+.analyzing-result {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    animation: fade-in 0.5s ease forwards;
+}
+
+.intent-recap {
+    background: rgba(255, 255, 255, 0.02);
+    border-radius: 12px;
+    padding: 10px 14px;
+    border-left: 3px solid var(--color-electric-blue);
+}
+
+.intent-recap .label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.intent-recap .value {
+    font-size: 0.85rem;
+    font-weight: 500;
+    margin-top: 2px;
+}
+
+.whitelist-box, .blacklist-box {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 16px;
+    border: 1px solid var(--border-glass);
+    padding: 14px;
+}
+
+.box-header {
+    font-size: 0.8rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+}
+
+.box-header.green { color: var(--color-green-success); }
+.box-header.red { color: var(--color-neon-pink); }
+
+.box-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.box-content span {
+    font-size: 0.75rem;
+    padding: 4px 8px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #FFF;
+}
+
+/* ==================== 4. FLIP_PROMPT 视图 ==================== */
+.flip-animation-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 引导平放的 3D 动画手机，加强物理行为的用户感召 */
+.animated-phone {
+    width: 65px;
+    height: 125px;
+    border-radius: 12px;
+    border: 3px solid rgba(255, 255, 255, 0.2);
+    position: relative;
+    transform-style: preserve-3d;
+    animation: guide-flip 4s cubic-bezier(0.77, 0, 0.175, 1) infinite;
+}
+
+.animated-phone .ap-front {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: var(--color-electric-blue);
+    opacity: 0.1;
+    backface-visibility: hidden;
+}
+
+.animated-phone .ap-back {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: #0E1015;
+    transform: rotateY(180deg);
+    backface-visibility: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.animated-phone .ap-back::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background-color: var(--color-electric-blue);
+    box-shadow: 0 0 8px var(--color-electric-blue);
+}
+
+.prompt-text {
+    text-align: center;
+    margin-bottom: 30px;
+}
+
+.prompt-text h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.prompt-text p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+.alert-info-box {
+    background: rgba(0, 242, 254, 0.05);
+    border: 1px solid rgba(0, 242, 254, 0.1);
+    border-radius: 14px;
+    padding: 12px 16px;
+    display: flex;
+    gap: 10px;
+    text-align: left;
+    margin-top: 20px;
+}
+
+.alert-info-box i {
+    color: var(--color-electric-blue);
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.alert-info-box span {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* ==================== 5. 认知摩擦力阻断幕墙 (OVERLAY) ==================== */
+.intervention-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(14, 16, 21, 0.85); /* 深色磨砂背景 */
+    backdrop-filter: blur(24px);         /* 高斯模糊，彻底封锁其他操作区 */
+    z-index: 500;
+    padding: 24px;
+    padding-top: 60px;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(-100%);        /* 默认拉起到屏幕顶部外隐藏 */
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* 激活时，滑落到正中央 */
+.intervention-overlay.active {
+    transform: translateY(0);
+}
+
+.overlay-header {
+    text-align: center;
+    margin-bottom: 24px;
+}
+
+.warning-badge {
+    background: rgba(243, 85, 136, 0.1);
+    border: 1px solid rgba(243, 85, 136, 0.2);
+    color: var(--color-neon-pink);
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.overlay-header h2 {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #FFF;
+}
+
+.overlay-header p {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.active-intent-box {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 14px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    margin-bottom: 20px;
+}
+
+.active-intent-box .label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+}
+
+.active-intent-box .value {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-top: 2px;
+    color: var(--color-electric-blue);
+}
+
+.friction-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.friction-container h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.friction-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-bottom: 14px;
+}
+
+.friction-container textarea {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    padding: 14px;
+    color: #FFF;
+    font-size: 0.9rem;
+    resize: none;
+    width: 100%;
+    transition: all 0.3s ease;
+}
+
+.friction-container textarea:focus {
+    outline: none;
+    border-color: var(--color-neon-pink);
+    box-shadow: 0 0 10px rgba(243, 85, 136, 0.1);
+}
+
+.friction-char-counter {
+    margin-top: 8px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* 进度条外壳 */
+.progress-bar-wrap {
+    width: 120px;
+    height: 4px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+/* 进度条进度，宽度与颜色随着打字长度动态过渡 */
+.progress-bar-fill {
+    width: 0%;
+    height: 100%;
+    background-color: var(--color-neon-pink);
+    transition: width 0.3s ease, background-color 0.3s ease;
+}
+
+.overlay-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 20px;
+}
+
+/* ==================== 6. COMPLETED 视图 ==================== */
+.success-icon-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.icon-ring {
+    position: absolute;
+    width: 90px;
+    height: 90px;
+    border-radius: 50%;
+    border: 2px solid var(--color-green-success);
+    opacity: 0.3;
+    animation: ring-pulse 2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+}
+
+.success-icon-wrap i {
+    font-size: 3.5rem;
+    color: var(--color-green-success);
+    filter: drop-shadow(0 0 15px rgba(0, 230, 118, 0.3));
+    z-index: 2;
+}
+
+.completed-title {
+    text-align: center;
+    font-size: 1.4rem;
+    font-weight: 700;
+}
+
+.completed-subtitle {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    margin-bottom: 24px;
+}
+
+.metric-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.grid-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    padding: 14px;
+    text-align: center;
+}
+
+.grid-card .val {
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: var(--color-electric-blue);
+}
+
+.grid-card .lbl {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.evaluation-card {
+    background: rgba(0, 230, 118, 0.04);
+    border: 1px solid rgba(0, 230, 118, 0.1);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 30px;
+}
+
+.eval-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-green-success);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.evaluation-card p {
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--text-muted);
+}
+
+/* ==================== 手机背面 (Back Panel) ==================== */
+.phone-back {
+    background-color: #0E1015; /* 磨砂玻璃背板基底 */
+    transform: rotateY(180deg); /* 初始化翻转，使其位于 3D 正对立面 */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 40px 24px;
+    z-index: 1;
+}
+
+/* 拟真 iPhone 摄像头模组 */
+.camera-module {
+    width: 100px;
+    height: 100px;
+    background-color: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 28px;
+    padding: 12px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    align-self: flex-start;
+}
+
+.camera-module .lens {
+    border-radius: 50%;
+    background: #000;
+    border: 2px solid #1C1E24;
+}
+
+.camera-module .lens-1 {
+    width: 32px;
+    height: 32px;
+}
+
+.camera-module .lens-2 {
+    width: 32px;
+    height: 32px;
+}
+
+.camera-module .flash {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: #FEEA9A;
+    align-self: center;
+    justify-self: center;
+}
+
+/* 物理隔离状态 LED 呼吸指示灯 */
+.led-indicator-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    margin-top: 40px;
+}
+
+.led-light {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background-color: var(--color-electric-blue);
+    box-shadow: 0 0 10px var(--color-electric-blue);
+}
+
+/* 呼吸灯动画触发 */
+.phone-inner.flipped .led-light {
+    animation: led-breath 3s ease-in-out infinite;
+}
+
+.led-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.back-text {
+    text-align: center;
+    margin-bottom: 60px;
+}
+
+.back-text h3 {
+    font-size: 1.6rem;
+    font-weight: 800;
+    background: linear-gradient(135deg, #FFF, var(--color-electric-blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    margin-bottom: 6px;
+}
+
+.back-text p {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.remaining-countdown {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-top: 15px;
+    color: #FFF;
+    font-feature-settings: "tnum"; /* 保证等宽数字排版，倒计时不抖动 */
+}
+
+.brand-detail {
+    text-align: center;
+    font-size: 0.6rem;
+    color: rgba(255, 255, 255, 0.15);
+    letter-spacing: 0.5px;
+}
+
+/* ==================== 物理动作模拟器 (调试浮窗) ==================== */
+.simulator-controls {
+    margin-top: 25px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-glass);
+    border-radius: 20px;
+    padding: 16px 20px;
+    width: 375px;
+    text-align: center;
+    backdrop-filter: blur(15px);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    animation: fade-in 0.5s ease;
+}
+
+.control-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--color-electric-blue);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+}
+
+.btn-control {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px dashed rgba(255, 255, 255, 0.15);
+    color: #FFF;
+    border-radius: 12px;
+    padding: 10px 16px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: all 0.3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-control:hover {
+    background: rgba(243, 85, 136, 0.1);
+    border-color: var(--color-neon-pink);
+    color: var(--color-neon-pink);
+    box-shadow: 0 0 15px rgba(243, 85, 136, 0.15);
+}
+
+.control-desc {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+    line-height: 1.3;
+}
+
+/* 拟真底部手势线 */
+.phone-home-indicator {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 140px;
+    height: 5px;
+    background-color: rgba(255, 255, 255, 0.3);
+    border-radius: 10px;
+    z-index: 100;
+}
+
+/* ==================== 动画效果定义 ==================== */
+
+/* 扫描线上下位移动画 */
+@keyframes rotate-scanner {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* 呼吸指示灯动画：从深蓝到电光蓝 */
+@keyframes led-breath {
+    0%, 100% {
+        background-color: rgba(0, 242, 254, 0.2);
+        box-shadow: 0 0 4px rgba(0, 242, 254, 0.1);
+    }
+    50% {
+        background-color: var(--color-electric-blue);
+        box-shadow: 0 0 20px var(--color-electric-blue), 0 0 40px var(--color-electric-blue);
+    }
+}
+
+/* 闪烁呼吸灯动画 */
+@keyframes led-pulse {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+}
+
+/* 手机平放翻转引导动画 (3D空间自转) */
+@keyframes guide-flip {
+    0%, 100% {
+        transform: rotateX(15deg) rotateY(0deg);
+    }
+    40%, 60% {
+        transform: rotateX(15deg) rotateY(180deg);
+    }
+}
+
+/* 渐入动画 */
+@keyframes fade-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* 确认分析按钮的霓虹呼吸跳动 */
+@keyframes btn-glow-pulse {
+    0%, 100% {
+        box-shadow: 0 4px 15px rgba(0, 242, 254, 0.25);
+    }
+    50% {
+        box-shadow: 0 4px 28px rgba(0, 242, 254, 0.55), 0 0 10px var(--color-electric-blue);
+        transform: scale(1.01);
+    }
+}
+
+/* 成功杯的波纹震荡动画 */
+@keyframes ring-pulse {
+    0% {
+        transform: scale(0.8);
+        opacity: 0.8;
+    }
+    100% {
+        transform: scale(1.4);
+        opacity: 0;
+    }
+}
+
+/* ==================== 自动化测试面板样式 ==================== */
+.test-report-box {
+    margin-top: 25px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--border-glass);
+    border-radius: 16px;
+    padding: 16px;
+    animation: fade-in 0.4s ease;
+}
+
+.test-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    margin-bottom: 12px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    padding-bottom: 8px;
+    font-weight: 600;
+}
+
+.test-status-all-pass {
+    color: var(--color-green-success);
+    background: rgba(0, 230, 118, 0.1);
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+}
+
+.test-status-fail {
+    color: var(--color-neon-pink);
+    background: rgba(243, 85, 136, 0.1);
+    padding: 2px 8px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+}
+
+.test-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+
+.test-log-item {
+    font-size: 0.75rem;
+    font-family: monospace;
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    line-height: 1.4;
+}
+
+.test-log-item i {
+    font-size: 0.85rem;
+    margin-top: 2px;
+}
+
+.test-log-item.pass {
+    color: #A0C4FF;
+}
+
+.test-log-item.pass i {
+    color: var(--color-green-success);
+}
+
+.test-log-item.fail {
+    color: var(--color-neon-pink);
+}
+

@@ -1,0 +1,112 @@
+package com.sxpt.module.user.controller;
+
+import com.sxpt.common.api.ApiResult;
+import com.sxpt.module.user.dto.AddTeachUserOrgRequest;
+import com.sxpt.module.user.dto.RemoveTeachUserOrgRequest;
+import com.sxpt.module.user.entity.TeachUserOrg;
+import com.sxpt.module.user.service.TeachUserOrgService;
+import com.sxpt.module.user.vo.TeachUserOrgVO;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
+
+import javax.validation.Valid;
+import java.util.UUID;
+
+/**
+ * 教学用户组织关系接口。
+ *
+ * 业务功能：
+ * 1. 提供添加用户到班级、课程班或分组的入口。
+ * 2. 为课程成员、任务发布范围和学生可见任务提供基础成员关系。
+ *
+ * 关键流程：
+ * 1. 接收添加成员请求并触发 Bean Validation。
+ * 2. 将 DTO 转换为实体，并在应用层生成主键。
+ * 3. 调用 Service 完成关系写入和默认字段补齐。
+ * 4. 将保存后的实体转换为 VO 返回。
+ */
+@RestController
+@RequestMapping("/api/v1/orgs/users")
+@ConditionalOnProperty(name = "sxpt.user-org.controller.enabled", havingValue = "true", matchIfMissing = true)
+public class TeachUserOrgController {
+
+    private final TeachUserOrgService teachUserOrgService;
+
+    public TeachUserOrgController(TeachUserOrgService teachUserOrgService) {
+        this.teachUserOrgService = teachUserOrgService;
+    }
+
+    /**
+     * 添加用户到教学组织。
+     *
+     * @param request 添加用户到教学组织请求。
+     * @return 已保存的用户组织关系。
+     */
+    @PostMapping("/add")
+    public ApiResult<TeachUserOrgVO> add(@Valid @RequestBody AddTeachUserOrgRequest request) {
+        TeachUserOrg saved = teachUserOrgService.addUserToOrg(toEntity(request));
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 从教学组织移除用户。
+     *
+     * @param request 从教学组织移除用户请求。
+     * @return 已软删除的用户组织关系。
+     */
+    @PostMapping("/remove")
+    public ApiResult<TeachUserOrgVO> remove(@Valid @RequestBody RemoveTeachUserOrgRequest request) {
+        TeachUserOrg removed = teachUserOrgService.removeUserFromOrg(
+                request.getTenantId(),
+                request.getOrgId(),
+                request.getUserId());
+        return ApiResult.success(toVO(removed));
+    }
+
+    /**
+     * 将添加成员请求转换为用户组织关系实体。
+     *
+     * @param request 添加用户到教学组织请求。
+     * @return 用户组织关系实体。
+     */
+    private TeachUserOrg toEntity(AddTeachUserOrgRequest request) {
+        TeachUserOrg teachUserOrg = new TeachUserOrg();
+        teachUserOrg.setId(generateId());
+        teachUserOrg.setTenantId(request.getTenantId());
+        teachUserOrg.setUserId(request.getUserId());
+        teachUserOrg.setOrgId(request.getOrgId());
+        teachUserOrg.setRelationType(request.getRelationType());
+        return teachUserOrg;
+    }
+
+    /**
+     * 将实体转换为前端返回对象。
+     *
+     * @param teachUserOrg 用户组织关系实体。
+     * @return 用户组织关系返回对象。
+     */
+    private TeachUserOrgVO toVO(TeachUserOrg teachUserOrg) {
+        TeachUserOrgVO vo = new TeachUserOrgVO();
+        vo.setId(teachUserOrg.getId());
+        vo.setTenantId(teachUserOrg.getTenantId());
+        vo.setUserId(teachUserOrg.getUserId());
+        vo.setOrgId(teachUserOrg.getOrgId());
+        vo.setRelationType(teachUserOrg.getRelationType());
+        vo.setStatus(teachUserOrg.getStatus());
+        vo.setCreateTime(teachUserOrg.getCreateTime());
+        vo.setUpdateTime(teachUserOrg.getUpdateTime());
+        return vo;
+    }
+
+    /**
+     * 生成应用层主键。
+     *
+     * @return 32 位无横线字符串 ID。
+     */
+    private String generateId() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+}

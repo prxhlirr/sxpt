@@ -1,0 +1,63 @@
+# Java / Maven
+/sxpt_api/target/
+target/
+*.class
+*.jar
+*.war
+*.ear
+
+# IDE / local workspace
+.idea/
+.vscode/
+*.iml
+.agents/
+.codex/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Archives
+*.zip
+*.rar
+*.7z
+
+# Runtime / temp
+tmp/
+temp/
+scratch/
+
+# Secrets / local configs
+*.local
+*.env
+.env
+application-local.yml
+application-local.yaml
+
+# sxpt_api configuration files
+sxpt_api/src/main/resources/application*.yml
+sxpt_api/src/main/resources/application*.yaml
+sxpt_api/src/main/resources/application*.properties
+sxpt_api/src/main/resources/*.yml
+sxpt_api/src/main/resources/*.yaml
+sxpt_api/src/main/resources/*.properties
+
+# Documents
+*.md
+*.doc
+*.docx
+*.pdf
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+
+# Extensionless document
+方案
+
+# 过滤的内容
+!README.md

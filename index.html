@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>意图管控与物理隔离专注APP - 交互原型</title>
+    <!-- 引入 Outfit 现代字重排版字体，以提供高级数字与文本视觉感 -->
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- 引入 Remix Icon 矢量图标库，提升操作界面的拟物化与意图暗示直观度 -->
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <!-- 引入核心样式表 -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- 背景光效装饰物，打破纯黑的单调，创造极具呼吸感与未来感的数字物理氛围 -->
+    <div class="bg-glow bg-glow-1"></div>
+    <div class="bg-glow bg-glow-2"></div>
+
+    <div class="app-container">
+        <!-- 左侧：产品设计理念与第一性原理说明栏。让体验者一眼理解意图管控与物理隔离的核心原理 -->
+        <div class="info-panel">
+            <h1 class="info-title">MindShield</h1>
+            <p class="info-subtitle">基于意图管控与物理隔离的专注系统</p>
+            
+            <div class="principle-card">
+                <div class="card-icon"><i class="ri-focus-3-line"></i></div>
+                <div class="card-text">
+                    <h3>第一性原理：意图管控 (Intent Control)</h3>
+                    <p>分心大多源于“无意识冲动”（系统1思维）。本系统强制用户在专注前声明意图，由 AI 判定并仅放行相关网络与应用，当用户偏离意图时通过强迫“自我辩护”引入行为摩擦力，从而用“系统2理性”唤醒专注力。</p>
+                </div>
+            </div>
+
+            <div class="principle-card">
+                <div class="card-icon"><i class="ri-shield-flash-line"></i></div>
+                <div class="card-text">
+                    <h3>第一性原理：物理隔离 (Physical Isolation)</h3>
+                    <p>将屏幕物理翻转朝下放置，开启本地环回断网隧道。物理切断诱惑源，用最具仪式感的物理动作（Flip）在心智上划定“专注隔离区”。</p>
+                </div>
+            </div>
+
+            <div class="tips-box">
+                <h4>体验说明</h4>
+                <ul>
+                    <li>1. 在手机中声明意图（例：“学习编程”或“刷抖音视频”）。</li>
+                    <li>2. 选择时间，观察 AI 规则引擎分析的拦截策略。</li>
+                    <li>3. 点击“模拟翻转”使手机翻转至背面，进入专注。</li>
+                    <li>4. 点击“拿起手机”模拟分心，体验“打字辩护摩擦力幕墙”。</li>
+                </ul>
+            </div>
+
+            <!-- 自动化测试报告浮板：展现项目出具的测试实例及运行状态 -->
+            <div id="test-report-box" class="test-report-box" style="display: none;"></div>
+            <button class="btn btn-secondary" id="btn-run-tests" style="margin-top: 15px; border-style: dashed;">
+                <i class="ri-terminal-box-line"></i> 运行系统自动化测试
+            </button>
+        </div>
+
+        <!-- 右侧：核心 iPhone 3D 虚拟手机容器 -->
+        <div class="device-wrapper">
+            <!-- 手机外部悬浮的物理状态指示，便于演示时观察隔离状态 -->
+            <div id="external-status" class="status-badge status-idle">
+                <i class="ri-checkbox-blank-circle-fill"></i>
+                <span id="status-text">未隔离</span>
+            </div>
+
+            <!-- 3D 旋转的手机主容器 -->
+            <div class="phone-container" id="phone-container">
+                <div class="phone-inner" id="phone-inner">
+                    
+                    <!-- ==================== 手机正面 (屏幕面) ==================== -->
+                    <div class="phone-front">
+                        <!-- 手机状态栏：模拟真实的 iOS 顶部状态信息 -->
+                        <div class="phone-statusbar">
+                            <div class="status-time" id="status-time">18:00</div>
+                            <!-- 灵动岛 (Dynamic Island)：在不同状态下能动态变形，提供强烈的系统级状态反馈 -->
+                            <div class="dynamic-island" id="dynamic-island">
+                                <span class="island-indicator"></span>
+                                <span class="island-text" id="island-text">MindShield</span>
+                            </div>
+                            <div class="status-icons">
+                                <i class="ri-signal-tower-fill"></i>
+                                <i class="ri-wifi-line" id="status-wifi"></i>
+                                <i class="ri-battery-fill"></i>
+                            </div>
+                        </div>
+
+                        <!-- 屏幕内容区 -->
+                        <div class="phone-screen">
+                            
+                            <!-- 1. DASHBOARD 视图：主面板 -->
+                            <div class="view active" id="view-dashboard">
+                                <div class="welcome-header">
+                                    <h2>下午好, 专注者</h2>
+                                    <p>今天已安全阻断分心 <span>12</span> 次</p>
+                                </div>
+
+                                <div class="focus-metric-card">
+                                    <div class="metric-circle">
+                                        <svg viewBox="0 0 100 100">
+                                            <circle cx="50" cy="50" r="45" class="bg"></circle>
+                                            <circle cx="50" cy="50" r="45" class="fg" id="metric-progress" style="stroke-dashoffset: 70;"></circle>
+                                        </svg>
+                                        <div class="metric-value">
+                                            <span class="num">145</span>
+                                            <span class="unit">分钟</span>
+                                        </div>
+                                    </div>
+                                    <div class="metric-label">今日专注总时长</div>
+                                </div>
+
+                                <div class="history-list">
+                                    <div class="section-title">今日意图达成</div>
+                                    <div class="history-item">
+                                        <div class="item-icon success"><i class="ri-check-line"></i></div>
+                                        <div class="item-info">
+                                            <div class="item-title">编写 React 登录页代码</div>
+                                            <div class="item-meta">达成率 100% · 25 分钟</div>
+                                        </div>
+                                    </div>
+                                    <div class="history-item">
+                                        <div class="item-icon success"><i class="ri-check-line"></i></div>
+                                        <div class="item-info">
+                                            <div class="item-title">阅读人工智能论文</div>
+                                            <div class="item-meta">达成率 100% · 40 分钟</div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button class="btn btn-primary" id="btn-start-session">
+                                    <i class="ri-add-circle-fill"></i> 声明新意图并开启隔离
+                                </button>
+                            </div>
+
+                            <!-- 2. INTENT_INPUT 视图：声明意图 -->
+                            <div class="view" id="view-intent">
+                                <button class="btn-back" id="btn-intent-back"><i class="ri-arrow-left-s-line"></i> 返回</button>
+                                
+                                <div class="view-header">
+                                    <h2>你想专注做什么？</h2>
+                                    <p>明确具体且可衡量的意图能帮助 AI 锁定行为</p>
+                                </div>
+
+                                <div class="input-group">
+                                    <label for="intent-input">输入你的专注意图</label>
+                                    <textarea id="intent-input" placeholder="例如：在 VS Code 中编写 Python 脚本，或者查阅学术文献。避免输入模糊字眼..." rows="4"></textarea>
+                                    <div class="input-char-hint">建议输入具体动作</div>
+                                </div>
+
+                                <div class="duration-selector">
+                                    <label>预设专注时长</label>
+                                    <div class="duration-options">
+                                        <div class="duration-card active" data-time="10">
+                                            <span class="time">10s</span>
+                                            <span class="desc">体验版</span>
+                                        </div>
+                                        <div class="duration-card" data-time="1500">
+                                            <span class="time">25m</span>
+                                            <span class="desc">标准番茄</span>
+                                        </div>
+                                        <div class="duration-card" data-time="3000">
+                                            <span class="time">50m</span>
+                                            <span class="desc">深度沉浸</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <button class="btn btn-primary" id="btn-submit-intent" disabled>
+                                    <i class="ri-shield-user-fill"></i> AI 智能解析意图
+                                </button>
+                            </div>
+
+                            <!-- 3. AI_ANALYZING 视图：AI 动态分析白名单 -->
+                            <div class="view" id="view-analyzing">
+                                <div class="analyzing-container">
+                                    <div class="scanner-ring">
+                                        <div class="scanner-line"></div>
+                                        <i class="ri-cpu-line"></i>
+                                    </div>
+                                    <h3>MindShield AI 正在分析意图...</h3>
+                                    <p class="scrolling-log" id="scrolling-log">正在读取意图语义...</p>
+                                </div>
+
+                                <div class="analyzing-result" id="analyzing-result" style="display: none;">
+                                    <div class="intent-recap">
+                                        <div class="label">识别意图</div>
+                                        <div class="value" id="recap-intent-text">“编写 React 登录页代码”</div>
+                                    </div>
+
+                                    <div class="whitelist-box">
+                                        <div class="box-header green"><i class="ri-checkbox-circle-fill"></i> 动态放行应用 (白名单)</div>
+                                        <div class="box-content" id="whitelist-apps">
+                                            <span>VS Code</span><span>Chrome 开发者平台</span><span>本地终端</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="blacklist-box">
+                                        <div class="box-header red"><i class="ri-close-circle-fill"></i> 物理封锁网络 (黑名单)</div>
+                                        <div class="box-content" id="blacklist-apps">
+                                            <span>所有娱乐APP</span><span>微信/QQ消息通知</span><span>视频流媒体域名</span>
+                                        </div>
+                                    </div>
+
+                                    <button class="btn btn-primary btn-pulse" id="btn-confirm-analysis">
+                                        <i class="ri-wifi-off-line"></i> 确认并切断干扰
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 4. FLIP_PROMPT 视图：物理隔离翻转提示 -->
+                            <div class="view" id="view-flip-prompt">
+                                <div class="flip-animation-container">
+                                    <!-- 模拟翻转手机卡片，以视觉动画引导实体操作 -->
+                                    <div class="animated-phone">
+                                        <div class="ap-front"></div>
+                                        <div class="ap-back"></div>
+                                    </div>
+                                </div>
+
+                                <div class="prompt-text">
+                                    <h2>物理隔离就绪</h2>
+                                    <p>现在，请将手机屏幕朝下平放至桌面。</p>
+                                    <div class="alert-info-box">
+                                        <i class="ri-information-fill"></i>
+                                        <span>本地环回拦截 VPN 已启动，系统已进入单应用模式。</span>
+                                    </div>
+                                </div>
+
+                                <button class="btn btn-primary" id="btn-simulate-flip">
+                                    <i class="ri-phone-find-line"></i> 模拟屏幕朝下平放
+                                </button>
+                            </div>
+
+                            <!-- 6. COMPLETED 视图：专注达成报告 -->
+                            <div class="view" id="view-completed">
+                                <div class="success-icon-wrap">
+                                    <div class="icon-ring"></div>
+                                    <i class="ri-trophy-fill"></i>
+                                </div>
+
+                                <h2 class="completed-title">完成本次意图！</h2>
+                                <p class="completed-subtitle" id="completed-intent-name">“完成 React 登录页面开发”</p>
+
+                                <div class="metric-grid">
+                                    <div class="grid-card">
+                                        <div class="val" id="completed-time-val">25:00</div>
+                                        <div class="lbl">专注时长</div>
+                                    </div>
+                                    <div class="grid-card">
+                                        <div class="val" id="completed-interventions-val">0 次</div>
+                                        <div class="lbl">试图偏离次数</div>
+                                    </div>
+                                </div>
+
+                                <div class="evaluation-card">
+                                    <div class="eval-title"><i class="ri-shield-check-line"></i> 隔离评估</div>
+                                    <p id="evaluation-text">完美自控！在本次意图期间，您没有发生任何拿起手机或访问黑名单的行为。</p>
+                                </div>
+
+                                <button class="btn btn-primary" id="btn-finish-all">
+                                    <i class="ri-home-4-line"></i> 返回主面板
+                                </button>
+                            </div>
+
+                        </div> <!-- phone-screen end -->
+
+                        <!-- 5. 认知摩擦力阻断幕墙 (INTERVENTION OVERLAY) -->
+                        <!-- 默认隐藏，当在专注状态下被“拿起手机”触发时，以高优先级动画自上而下遮挡 -->
+                        <div class="intervention-overlay" id="intervention-overlay">
+                            <div class="overlay-header">
+                                <div class="warning-badge"><i class="ri-error-warning-fill"></i> 意图偏离警告</div>
+                                <h2>检测到拿起手机</h2>
+                                <p>当前的意图与您的动作冲突</p>
+                            </div>
+
+                            <div class="active-intent-box">
+                                <div class="label">当前声明意图</div>
+                                <div class="value" id="intervention-intent-text">正在写代码</div>
+                            </div>
+
+                            <div class="friction-container">
+                                <h3>写下您的偏离理由</h3>
+                                <p class="friction-hint">理性思考：您现在是否有不可抗拒的紧急事务需要打断？请手写陈述（必须输入不少于 15 个字以激活系统 2 思考）：</p>
+                                
+                                <textarea id="friction-reason-input" placeholder="例如：我需要打开微信接收组长的会议通知，该事宜直接影响我当前的开发进度..." rows="4"></textarea>
+                                
+                                <div class="friction-char-counter">
+                                    <span id="current-char-count">0</span>/15 字
+                                    <div class="progress-bar-wrap">
+                                        <div class="progress-bar-fill" id="char-progress-bar"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="overlay-actions">
+                                <button class="btn btn-secondary" id="btn-abandon-deviation">
+                                    <i class="ri-restart-line"></i> 我要坚持，继续专注
+                                </button>
+                                <button class="btn btn-danger" id="btn-submit-deviation" disabled>
+                                    <i class="ri-check-double-line"></i> 确认偏离 (获取2分钟放行)
+                                </button>
+                            </div>
+                        </div> <!-- intervention-overlay end -->
+
+                        <!-- 手机 Home 键条：拟真手势滑动条 -->
+                        <div class="phone-home-indicator"></div>
+                    </div> <!-- phone-front end -->
+
+
+                    <!-- ==================== 手机背面 ==================== -->
+                    <div class="phone-back">
+                        <!-- 手机摄像头模组，拟真细节 -->
+                        <div class="camera-module">
+                            <div class="lens lens-1"></div>
+                            <div class="lens lens-2"></div>
+                            <div class="flash"></div>
+                        </div>
+
+                        <!-- 手机物理隔离状态的核心视觉：LED 呼吸指示灯 -->
+                        <div class="led-indicator-wrap">
+                            <div class="led-light" id="led-light"></div>
+                            <div class="led-label">物理隔离隧道运行中</div>
+                        </div>
+
+                        <div class="back-text">
+                            <h3>MindShield</h3>
+                            <p>屏幕已朝下锁定 · 专心于物理世界</p>
+                            <div class="remaining-countdown" id="back-countdown">25:00</div>
+                        </div>
+
+                        <!-- 手机防伪刻字细节，体现 Premium 质感 -->
+                        <div class="brand-detail">Designed by Antigravity in Sandbox</div>
+                    </div> <!-- phone-back end -->
+
+                </div> <!-- phone-inner end -->
+            </div> <!-- phone-container end -->
+
+            <!-- 手机外部悬浮的辅助控制板，用来在 PC 浏览器上模拟“拿起/翻转”手机等物理手势 -->
+            <div class="simulator-controls" id="simulator-controls" style="display: none;">
+                <div class="control-title">物理动作模拟器</div>
+                <button class="btn-control" id="btn-sim-lift">
+                    <i class="ri-hand-up-line"></i> 拿起手机 (模拟分心)
+                </button>
+                <div class="control-desc">点击以模拟从桌面拿起手机，触发物理隔离被打破。</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 脚本入口 -->
+    <script src="app.js"></script>
+    <!-- 引入自动化测试套件 -->
+    <script src="test_suite.js"></script>
+</body>
+</html>

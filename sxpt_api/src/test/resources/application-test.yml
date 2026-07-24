@@ -1,0 +1,90 @@
+spring:
+  autoconfigure:
+    exclude: com.alibaba.druid.spring.boot.autoconfigure.DruidDataSourceAutoConfigure,org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration,org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration,org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+
+sxpt:
+  connector:
+    system-controller:
+      enabled: false
+    identity-binding-controller:
+      enabled: false
+    launch-context-controller:
+      enabled: false
+    origin-launch-probe-controller:
+      enabled: false
+    resource-controller:
+      enabled: false
+    data-template-controller:
+      enabled: false
+    data-instance-controller:
+      enabled: false
+  capture:
+    session-controller:
+      enabled: false
+    segment-switch-controller:
+      enabled: false
+    segment-switch-service:
+      enabled: false
+    event-controller:
+      enabled: false
+    resource-snapshot-controller:
+      enabled: false
+    action-draft-controller:
+      enabled: false
+  teaching:
+    point-controller:
+      enabled: false
+    task-step-controller:
+      enabled: false
+  evaluation:
+    config-controller:
+      enabled: false
+    auto-evaluation-controller:
+      enabled: false
+  course:
+    controller:
+      enabled: false
+  task:
+    publish-controller:
+      enabled: false
+  execution:
+    task-execution-controller:
+      enabled: false
+    context-controller:
+      enabled: false
+    runtime-context-service:
+      enabled: false
+    runtime-context-controller:
+      enabled: false
+    learning-context-controller:
+      enabled: false
+    practice-context-controller:
+      enabled: false
+    exam-context-controller:
+      enabled: false
+    identity-switch-controller:
+      enabled: false
+    trace-controller:
+      enabled: false
+  practice:
+    attempt-controller:
+      enabled: false
+    step-result-controller:
+      enabled: false
+    score-summary-controller:
+      enabled: false
+  user:
+    controller:
+      enabled: false
+  role:
+    controller:
+      enabled: false
+  user-role:
+    controller:
+      enabled: false
+  org:
+    controller:
+      enabled: false
+  user-org:
+    controller:
+      enabled: false
