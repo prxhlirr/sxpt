@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>采购业务管理系统</title>
+    <style>
+      :root {
+        color: #1f2a3d;
+        background: #f2f5fa;
+        font-family: Inter, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-width: 780px;
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        background: #f2f5fa;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        min-height: 36px;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        padding: 0 15px;
+        color: #4c5b70;
+        background: #fff;
+        cursor: pointer;
+      }
+
+      button.primary {
+        border-color: #1677ff;
+        color: #fff;
+        background: #1677ff;
+      }
+
+      button.success {
+        border-color: #0f8a68;
+        color: #fff;
+        background: #0f8a68;
+      }
+
+      button.danger {
+        border-color: #f3c3c7;
+        color: #be3442;
+        background: #fff6f6;
+      }
+
+      button:hover {
+        filter: brightness(0.97);
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid #d5dce7;
+        border-radius: 6px;
+        outline: none;
+        color: #273449;
+        background: #fff;
+        padding: 9px 10px;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        border-color: #5b9fff;
+        box-shadow: 0 0 0 2px rgb(22 119 255 / 9%);
+      }
+
+      textarea {
+        min-height: 86px;
+        resize: vertical;
+      }
+
+      .business-shell {
+        display: grid;
+        grid-template-columns: 208px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .business-sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        color: #c7d0dd;
+        background:
+          radial-gradient(circle at 15% 0, rgb(35 115 202 / 24%), transparent 26%),
+          #1f2c3d;
+        padding: 20px 14px;
+      }
+
+      .business-logo {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        margin: 0 8px 25px;
+      }
+
+      .business-logo i {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 9px;
+        color: #fff;
+        background: #1677ff;
+        font-style: normal;
+        font-weight: 900;
+      }
+
+      .business-logo span {
+        display: grid;
+        gap: 2px;
+      }
+
+      .business-logo strong {
+        color: #fff;
+        font-size: 14px;
+      }
+
+      .business-logo small {
+        color: #718097;
+        font-size: 8px;
+        letter-spacing: 0.08em;
+      }
+
+      .menu-caption {
+        margin: 0 10px 8px;
+        color: #637187;
+        font-size: 9px;
+      }
+
+      .business-menu {
+        display: grid;
+        gap: 4px;
+      }
+
+      .business-menu button {
+        display: grid;
+        grid-template-columns: 25px 1fr auto;
+        min-height: 42px;
+        align-items: center;
+        gap: 8px;
+        border: 0;
+        padding: 0 10px;
+        color: #aeb9c9;
+        background: transparent;
+        text-align: left;
+      }
+
+      .business-menu button:hover,
+      .business-menu button.active {
+        color: #fff;
+        background: rgb(255 255 255 / 8%);
+      }
+
+      .business-menu button.active {
+        box-shadow: inset 3px 0 #49a0ff;
+      }
+
+      .business-menu i {
+        color: #6f8098;
+        font-style: normal;
+        text-align: center;
+      }
+
+      .business-menu em {
+        min-width: 19px;
+        border-radius: 999px;
+        padding: 2px 5px;
+        color: #fff;
+        background: #e85a67;
+        font-size: 8px;
+        font-style: normal;
+        text-align: center;
+      }
+
+      .business-main {
+        min-width: 0;
+      }
+
+      .business-topbar {
+        display: flex;
+        min-height: 56px;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #e3e7ef;
+        color: #69768a;
+        background: #fff;
+        padding: 0 22px;
+        font-size: 11px;
+      }
+
+      .topbar-tools {
+        display: flex;
+        align-items: center;
+        gap: 15px;
+      }
+
+      .business-user {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+
+      .business-user i {
+        display: grid;
+        width: 27px;
+        height: 27px;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        background: #3978c7;
+        font-style: normal;
+        font-size: 10px;
+      }
+
+      .recording-indicator {
+        display: none;
+        align-items: center;
+        gap: 6px;
+        border: 1px solid #ffd1d5;
+        border-radius: 999px;
+        padding: 5px 9px;
+        color: #bd3543;
+        background: #fff5f5;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      body.recording .recording-indicator {
+        display: inline-flex;
+      }
+
+      .recording-indicator::before {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: #e64856;
+        box-shadow: 0 0 0 3px rgb(230 72 86 / 12%);
+        content: "";
+      }
+
+      .business-content {
+        padding: 21px 24px 46px;
+      }
+
+      .breadcrumb {
+        color: #929cad;
+        font-size: 9px;
+      }
+
+      .page-heading {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 18px;
+        margin: 16px 0;
+      }
+
+      .page-heading h1,
+      .page-heading p {
+        margin: 0;
+      }
+
+      .page-heading h1 {
+        font-size: 22px;
+      }
+
+      .page-heading p {
+        margin-top: 5px;
+        color: #7f8a9b;
+        font-size: 10px;
+      }
+
+      .business-card {
+        overflow: hidden;
+        border: 1px solid #e0e5ed;
+        border-radius: 9px;
+        background: #fff;
+        box-shadow: 0 7px 18px rgb(27 42 70 / 4%);
+      }
+
+      .filter-bar {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr)) auto;
+        gap: 11px;
+        border-bottom: 1px solid #e9ecf2;
+        padding: 15px;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        color: #69768a;
+        font-size: 10px;
+        font-weight: 700;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th,
+      td {
+        border-bottom: 1px solid #edf0f5;
+        padding: 13px 14px;
+        color: #45536a;
+        font-size: 10px;
+        text-align: left;
+      }
+
+      th {
+        color: #818c9d;
+        background: #fafbfc;
+        font-size: 9px;
+      }
+
+      .table-link {
+        min-height: auto;
+        border: 0;
+        padding: 0;
+        color: #1677ff;
+        background: transparent;
+      }
+
+      .status {
+        display: inline-flex;
+        border-radius: 999px;
+        padding: 4px 8px;
+        color: #94601c;
+        background: #fff2df;
+        font-size: 8px;
+        font-weight: 800;
+      }
+
+      .status.blue {
+        color: #1766b9;
+        background: #e9f3ff;
+      }
+
+      .status.green {
+        color: #08795b;
+        background: #e5f8f1;
+      }
+
+      .form-card {
+        padding: 20px;
+      }
+
+      .form-section + .form-section {
+        margin-top: 22px;
+        border-top: 1px solid #edf0f4;
+        padding-top: 20px;
+      }
+
+      .section-title {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 14px;
+        font-size: 12px;
+      }
+
+      .section-title::before {
+        width: 3px;
+        height: 14px;
+        border-radius: 4px;
+        background: #1677ff;
+        content: "";
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 15px 18px;
+      }
+
+      .form-grid .wide {
+        grid-column: 1 / -1;
+      }
+
+      .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 9px;
+        margin-top: 22px;
+        border-top: 1px solid #edf0f4;
+        padding-top: 16px;
+      }
+
+      .detail-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.5fr) minmax(230px, 0.55fr);
+        gap: 15px;
+      }
+
+      .detail-card {
+        padding: 19px;
+      }
+
+      .detail-list {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: hidden;
+        border: 1px solid #e5e9f0;
+        border-radius: 7px;
+      }
+
+      .detail-list div {
+        display: grid;
+        gap: 5px;
+        border-right: 1px solid #edf0f4;
+        border-bottom: 1px solid #edf0f4;
+        padding: 13px;
+      }
+
+      .detail-list span,
+      .timeline small {
+        color: #8a94a4;
+        font-size: 8px;
+      }
+
+      .detail-list strong {
+        font-size: 10px;
+      }
+
+      .timeline {
+        display: grid;
+        gap: 15px;
+        margin-top: 14px;
+      }
+
+      .timeline article {
+        display: grid;
+        grid-template-columns: 20px 1fr;
+        gap: 9px;
+      }
+
+      .timeline i {
+        display: grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        background: #25a47a;
+        font-style: normal;
+        font-size: 8px;
+      }
+
+      .timeline span {
+        display: grid;
+        gap: 3px;
+        font-size: 10px;
+      }
+
+      .summary-number {
+        border: 1px dashed #cbd5e1;
+        border-radius: 7px;
+        padding: 13px;
+        color: #40516a;
+        background: #f8fafc;
+        font-family: Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .pick-banner {
+        position: fixed;
+        z-index: 999;
+        top: 16px;
+        left: 50%;
+        display: none;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        padding: 9px 16px;
+        color: #fff;
+        background: #6d5dfc;
+        box-shadow: 0 10px 25px rgb(63 47 170 / 25%);
+        font-size: 10px;
+        font-weight: 800;
+        pointer-events: none;
+      }
+
+      body.picking .pick-banner {
+        display: block;
+      }
+
+      body.picking [data-training-id],
+      body.picking [data-action] {
+        cursor: crosshair !important;
+      }
+
+      body.picking [data-training-id]:hover,
+      body.picking [data-action]:hover {
+        outline: 2px solid #6d5dfc;
+        outline-offset: 3px;
+      }
+
+      .runtime-target {
+        position: relative;
+        z-index: 1;
+        outline: 3px solid rgb(109 93 252 / 82%) !important;
+        outline-offset: 4px;
+        box-shadow: 0 0 0 8px rgb(109 93 252 / 9%);
+      }
+
+      @media (max-width: 980px) {
+        .business-shell {
+          grid-template-columns: 176px minmax(0, 1fr);
+        }
+
+        .filter-bar {
+          grid-template-columns: repeat(2, minmax(120px, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pick-banner">元素选取中：请点击需要绑定的业务控件</div>
+    <div class="business-shell">
+      <aside class="business-sidebar">
+        <div class="business-logo">
+          <i>采</i>
+          <span><strong>采购业务平台</strong><small>ENTERPRISE SCM</small></span>
+        </div>
+        <p class="menu-caption">业务中心</p>
+        <nav class="business-menu">
+          <button data-training-id="nav-dashboard" data-navigate="applications">
+            <i>⌂</i><span>工作台</span>
+          </button>
+          <button data-training-id="nav-applications" data-navigate="applications">
+            <i>▤</i><span>采购申请</span>
+          </button>
+          <button data-training-id="nav-todos" data-navigate="todos">
+            <i>✓</i><span>审批中心</span><em>3</em>
+          </button>
+          <button data-training-id="nav-archive" data-navigate="archive">
+            <i>▣</i><span>采购归档</span>
+          </button>
+          <button data-training-id="nav-suppliers">
+            <i>♙</i><span>供应商管理</span>
+          </button>
+          <button data-training-id="nav-reports">
+            <i>◫</i><span>统计报表</span>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="business-main">
+        <header class="business-topbar">
+          <span>采购管理中心 / <strong id="topbarTitle">采购申请</strong></span>
+          <div class="topbar-tools">
+            <span class="recording-indicator">实训平台正在采集操作</span>
+            <span>帮助中心</span>
+            <span>消息 2</span>
+            <span class="business-user"><i>张</i>张老师（管理员）</span>
+          </div>
+        </header>
+        <section id="pageRoot" class="business-content"></section>
+      </main>
+    </div>
+
+    <script>
+      const PAGE_META = {
+        applications: {
+          title: "采购申请管理",
+          path: "/purchase/applications",
+          menu: "nav-applications"
+        },
+        create: {
+          title: "新建采购申请",
+          path: "/purchase/applications/create",
+          menu: "nav-applications"
+        },
+        detail: {
+          title: "采购申请详情",
+          path: "/purchase/applications/MOCK-2026-0718",
+          menu: "nav-applications"
+        },
+        todos: {
+          title: "采购审批待办",
+          path: "/workflow/todos",
+          menu: "nav-todos"
+        },
+        approval: {
+          title: "采购申请审批",
+          path: "/workflow/todos/MOCK-2026-0718",
+          menu: "nav-todos"
+        },
+        archive: {
+          title: "采购业务归档",
+          path: "/purchase/archive",
+          menu: "nav-archive"
+        },
+        archived: {
+          title: "采购归档详情",
+          path: "/purchase/archive/MOCK-2026-0718",
+          menu: "nav-archive"
+        }
+      };
+
+      const TARGET_PAGE = {
+        '[data-action="create"]': "applications",
+        '[data-action="submit"]': "create",
+        '[data-action="handle"]': "todos",
+        '[data-action="approve"]': "approval",
+        '[data-action="archive"]': "archive",
+        '[data-training-id="supplier"]': "create",
+        '[data-training-id="category"]': "create",
+        '[data-training-id="amount"]': "create",
+        '[data-training-id="arrival-date"]': "create",
+        '[data-training-id="reason"]': "create",
+        '[data-training-id="approval-comment"]': "approval"
+      };
+
+      let currentPage = "applications";
+      let picking = false;
+      let recording = false;
+      let highlightedElement;
+
+      function pageTemplate(page) {
+        if (page === "applications") {
+          return `
+            <div class="breadcrumb">采购管理 / 采购申请</div>
+            <div class="page-heading">
+              <div data-training-id="page-title"><h1>采购申请</h1><p>统一管理采购需求、审批状态及业务流转。</p></div>
+              <button class="primary" data-action="create" data-training-id="create" data-navigate="create">＋ 新建申请</button>
+            </div>
+            <section class="business-card">
+              <div class="filter-bar">
+                <label>申请编号<input data-training-id="search-code" placeholder="请输入申请编号" /></label>
+                <label>申请部门<select data-training-id="search-unit"><option>全部部门</option><option>东部事业部</option></select></label>
+                <label>流程状态<select data-training-id="search-status"><option>全部状态</option><option>待提交</option><option>审批中</option></select></label>
+                <label>申请日期<input data-training-id="search-date" value="2026-07-25" /></label>
+                <button data-training-id="search-button">查询</button>
+              </div>
+              <table>
+                <thead><tr><th>申请编号</th><th>申请主题</th><th>申请单位</th><th>金额</th><th>流程状态</th><th>更新时间</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr><td>CG-2026-0718</td><td>办公设备集中采购</td><td>东部事业部</td><td>¥ 68,500.00</td><td><span class="status blue">审批中</span></td><td>2026-07-25 09:38</td><td><button class="table-link" data-training-id="open-detail" data-navigate="detail">查看</button></td></tr>
+                  <tr><td>CG-2026-0715</td><td>研发软件服务采购</td><td>技术中心</td><td>¥ 120,000.00</td><td><span class="status green">已完成</span></td><td>2026-07-24 16:10</td><td><button class="table-link" data-training-id="open-detail-2">查看</button></td></tr>
+                </tbody>
+              </table>
+            </section>`;
+        }
+
+        if (page === "create") {
+          return `
+            <div class="breadcrumb">采购管理 / 采购申请 / 新建申请</div>
+            <div class="page-heading">
+              <div data-training-id="page-title"><h1>新建采购申请</h1><p>请填写采购基本信息并提交审批。</p></div>
+              <span class="status">草稿</span>
+            </div>
+            <section class="business-card form-card">
+              <div class="form-section">
+                <strong class="section-title">基本信息</strong>
+                <div class="form-grid">
+                  <label>申请单位<input value="东部事业部" disabled /></label>
+                  <label>申请人<input value="张敏" disabled /></label>
+                  <label>供应商<input data-training-id="supplier" value="上海示例供应商有限公司" /></label>
+                  <label>采购品类<select data-training-id="category"><option>办公设备</option><option>低值易耗品</option><option>软件服务</option></select></label>
+                  <label>申请金额<input data-training-id="amount" value="68500" /></label>
+                  <label>期望到货日期<input data-training-id="arrival-date" type="date" value="2026-08-15" /></label>
+                  <label class="wide">申请原因<textarea data-training-id="reason">用于新员工入职设备补充及旧设备更新。</textarea></label>
+                </div>
+              </div>
+              <div class="form-section">
+                <strong class="section-title">采购明细</strong>
+                <table>
+                  <thead><tr><th>物品名称</th><th>规格型号</th><th>数量</th><th>预算单价</th><th>预算金额</th></tr></thead>
+                  <tbody><tr><td>商务笔记本电脑</td><td>16G / 512G</td><td>10</td><td>6,500.00</td><td>65,000.00</td></tr></tbody>
+                </table>
+              </div>
+              <div class="form-actions">
+                <button data-training-id="save-draft">保存草稿</button>
+                <button class="primary" data-action="submit" data-training-id="submit" data-navigate="detail">提交申请</button>
+              </div>
+            </section>`;
+        }
+
+        if (page === "detail") {
+          return `
+            <div class="breadcrumb">采购管理 / 采购申请 / CG-2026-0718</div>
+            <div class="page-heading">
+              <div data-training-id="page-title"><h1>办公设备集中采购</h1><p>申请编号 CG-2026-0718</p></div>
+              <span class="status blue">审批中</span>
+            </div>
+            <div class="detail-grid">
+              <section class="business-card detail-card">
+                <strong class="section-title">申请信息</strong>
+                <div class="detail-list">
+                  <div><span>申请单位</span><strong>东部事业部</strong></div>
+                  <div><span>申请人</span><strong>张敏</strong></div>
+                  <div><span>供应商</span><strong>上海示例供应商有限公司</strong></div>
+                  <div><span>申请金额</span><strong>¥ 68,500.00</strong></div>
+                  <div><span>采购品类</span><strong>办公设备</strong></div>
+                  <div><span>期望到货日期</span><strong>2026-08-15</strong></div>
+                </div>
+              </section>
+              <aside class="business-card detail-card">
+                <strong class="section-title">流程进度</strong>
+                <div class="timeline">
+                  <article><i>✓</i><span><strong>申请已提交</strong><small>张敏 · 2026-07-25 09:38</small></span></article>
+                  <article><i>2</i><span><strong>等待部门审核</strong><small>当前环节</small></span></article>
+                </div>
+                <div class="form-actions"><button class="primary" data-training-id="go-todos" data-navigate="todos">进入审批中心</button></div>
+              </aside>
+            </div>`;
+        }
+
+        if (page === "todos") {
+          return `
+            <div class="breadcrumb">审批中心 / 我的待办</div>
+            <div class="page-heading">
+              <div data-training-id="page-title"><h1>我的审批待办</h1><p>待办数据由业务流程自动流转至当前账号。</p></div>
+              <span class="status blue">3 条待处理</span>
+            </div>
+            <section class="business-card">
+              <div class="filter-bar">
+                <label>业务编号<input data-training-id="todo-code" value="CG-2026-0718" /></label>
+                <label>业务类型<select data-training-id="todo-type"><option>采购申请</option></select></label>
+                <label>到达时间<input data-training-id="todo-date" value="2026-07-25" /></label>
+                <label>紧急程度<select data-training-id="todo-priority"><option>全部</option><option>加急</option></select></label>
+                <button data-training-id="todo-search">查询</button>
+              </div>
+              <table>
+                <thead><tr><th>业务编号</th><th>事项名称</th><th>申请人</th><th>申请单位</th><th>到达时间</th><th>紧急程度</th><th>操作</th></tr></thead>
+                <tbody>
+                  <tr><td>CG-2026-0718</td><td>办公设备集中采购</td><td>张敏</td><td>东部事业部</td><td>2026-07-25 09:38</td><td><span class="status">普通</span></td><td><button class="primary" data-action="handle" data-training-id="handle" data-navigate="approval">办理</button></td></tr>
+                </tbody>
+              </table>
+            </section>`;
+        }
+
+        if (page === "approval") {
+          return `
+            <div class="breadcrumb">审批中心 / 我的待办 / CG-2026-0718</div>
+            <div class="page-heading">
+              <div data-training-id="page-title"><h1>采购申请审批</h1><p>办公设备集中采购 · 申请编号 CG-2026-0718</p></div>
+              <span class="status blue">部门审核</span>
+            </div>
+            <div class="detail-grid">
+              <section class="business-card detail-card">
+                <strong class="section-title">申请内容</strong>
+                <div class="detail-list">
+                  <div><span>申请单位</span><strong>东部事业部</strong></div>
+                  <div><span>申请人</span><strong>张敏</strong></div>
+                  <div><span>采购品类</span><strong>办公设备</strong></div>
+                  <div><span>申请金额</span><strong>¥ 68,500.00</strong></div>
+                </div>
+                <div class="form-section">
+                  <label>审批意见<textarea data-training-id="approval-comment">经核对，采购事项符合年度预算及采购管理要求，同意提交。</textarea></label>
+                  <div class="form-actions">
+                    <button class="danger" data-training-id="reject">退回修改</button>
+                    <button class="success" data-action="approve" data-training-id="approve" data-navigate="archive">审批通过</button>
+                  </div>
+                </div>
+              </section>
+              <aside class="business-card detail-card">
+                <strong class="section-title">业务标识</strong>
+                <p style="color:#7c8798;font-size:10px;line-height:1.7">审批完成后，当前待办会被业务系统消费，并流转至后续归档角色。</p>
+                <div class="summary-number">CG-2026-0718</div>
+              </aside>
+            </div>`;
+        }
+
+        if (page === "archive") {
+          return `
+            <div class="breadcrumb">采购管理 / 采购归档 / 待归档</div>
+            <div class="page-heading">
+              <div data-training-id="page-title"><h1>采购业务归档</h1><p>核对流程材料并完成业务归档。</p></div>
+              <span class="status blue">1 条待归档</span>
+            </div>
+            <section class="business-card">
+              <table>
+                <thead><tr><th>业务编号</th><th>事项名称</th><th>申请单位</th><th>流程完成时间</th><th>材料完整度</th><th>操作</th></tr></thead>
+                <tbody><tr><td>CG-2026-0718</td><td>办公设备集中采购</td><td>东部事业部</td><td>2026-07-25 10:16</td><td><span class="status green">材料完整</span></td><td><button class="success" data-action="archive" data-training-id="archive" data-navigate="archived">确认归档</button></td></tr></tbody>
+              </table>
+            </section>`;
+        }
+
+        return `
+          <div class="breadcrumb">采购管理 / 采购归档 / CG-2026-0718</div>
+          <div class="page-heading">
+            <div data-training-id="page-title"><h1>采购归档详情</h1><p>申请编号 CG-2026-0718</p></div>
+            <span class="status green">已归档</span>
+          </div>
+          <section class="business-card detail-card">
+            <strong class="section-title">归档结果</strong>
+            <p style="color:#59677b;font-size:11px">业务材料完整，流程记录已归档。本页面仅用于实训录制演示。</p>
+            <div class="summary-number">ARCHIVE-CG-2026-0718</div>
+          </section>`;
+      }
+
+      function render(page, notify = true) {
+        currentPage = PAGE_META[page] ? page : "applications";
+        const meta = PAGE_META[currentPage];
+        document.getElementById("pageRoot").innerHTML = pageTemplate(currentPage);
+        document.getElementById("topbarTitle").textContent = meta.title;
+        document.querySelectorAll(".business-menu button").forEach((button) => {
+          button.classList.toggle("active", button.dataset.trainingId === meta.menu);
+        });
+        highlightedElement = undefined;
+        if (notify) requestAnimationFrame(postReady);
+      }
+
+      function post(type, payload) {
+        window.parent.postMessage({ type, payload }, window.location.origin);
+      }
+
+      function currentMeta() {
+        return PAGE_META[currentPage];
+      }
+
+      function postReady() {
+        post("SXPT_BUSINESS_READY", {
+          url: currentMeta().path,
+          pageTitle: currentMeta().title
+        });
+      }
+
+      function getActionElement(target) {
+        return target instanceof Element
+          ? target.closest("[data-training-id], [data-action]")
+          : null;
+      }
+
+      function getSelector(element) {
+        if (element.dataset.action) {
+          return `[data-action="${element.dataset.action}"]`;
+        }
+        return `[data-training-id="${element.dataset.trainingId}"]`;
+      }
+
+      function actionType(element, eventType) {
+        if (element.matches("input, textarea")) return "input";
+        if (element.matches("select")) return "select";
+        if (element.dataset.action === "submit" || eventType === "submit") return "submit";
+        return "click";
+      }
+
+      function actionText(element) {
+        const label = element.closest("label");
+        return (
+          element.dataset.label ||
+          (label && label.childNodes[0] && label.childNodes[0].textContent) ||
+          element.textContent ||
+          element.dataset.trainingId ||
+          "业务操作"
+        ).trim();
+      }
+
+      function maskValue(element) {
+        if (!("value" in element) || !element.value) return undefined;
+        const value = String(element.value);
+        return `已填写（${value.length} 字符）`;
+      }
+
+      function payloadFor(element, eventType) {
+        const rect = element.getBoundingClientRect();
+        const selector = getSelector(element);
+        return {
+          actionType: actionType(element, eventType),
+          url: currentMeta().path,
+          pageTitle: currentMeta().title,
+          selector,
+          selectorCandidates: [
+            selector,
+            element.id ? `#${element.id}` : "",
+            element.tagName.toLowerCase()
+          ].filter(Boolean),
+          text: actionText(element),
+          valueMasked: maskValue(element),
+          rect: {
+            x: Math.round(rect.x),
+            y: Math.round(rect.y),
+            width: Math.round(rect.width),
+            height: Math.round(rect.height)
+          },
+          recordedViewport: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          }
+        };
+      }
+
+      function navigateFrom(element) {
+        const nextPage = element.dataset.navigate;
+        if (nextPage) {
+          window.setTimeout(() => render(nextPage), 40);
+        }
+      }
+
+      document.addEventListener("click", (event) => {
+        const element = getActionElement(event.target);
+        if (!element) return;
+
+        if (picking) {
+          event.preventDefault();
+          event.stopPropagation();
+          picking = false;
+          document.body.classList.remove("picking");
+          post("SXPT_ELEMENT_PICKED", payloadFor(element, "click"));
+          return;
+        }
+
+        post("SXPT_BUSINESS_ACTION", payloadFor(element, "click"));
+        navigateFrom(element);
+      });
+
+      document.addEventListener("change", (event) => {
+        const element = getActionElement(event.target);
+        if (!element) return;
+        post("SXPT_BUSINESS_ACTION", payloadFor(element, "change"));
+      });
+
+      function targetPageFor(selector, requestedUrl) {
+        if (requestedUrl) {
+          const found = Object.entries(PAGE_META).find(([, meta]) => meta.path === requestedUrl);
+          if (found) return found[0];
+        }
+        if (TARGET_PAGE[selector]) return TARGET_PAGE[selector];
+        const match = selector.match(/data-training-id="([^"]+)"/);
+        if (!match) return currentPage;
+        const navigation = document.querySelector(`[data-training-id="${match[1]}"]`);
+        return navigation && navigation.dataset.navigate
+          ? navigation.dataset.navigate
+          : currentPage;
+      }
+
+      function resolveTarget(selector, requestedUrl, preview) {
+        const expectedPage = targetPageFor(selector, requestedUrl);
+        if (expectedPage !== currentPage) render(expectedPage, false);
+
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            if (highlightedElement) highlightedElement.classList.remove("runtime-target");
+            const element = document.querySelector(selector);
+            if (element && preview) {
+              highlightedElement = element;
+              element.classList.add("runtime-target");
+            }
+            if (!element) {
+              post("SXPT_TARGET_RECT", {
+                selector,
+                url: currentMeta().path,
+                pageTitle: currentMeta().title
+              });
+              postReady();
+              return;
+            }
+            const rect = element.getBoundingClientRect();
+            post("SXPT_TARGET_RECT", {
+              selector,
+              url: currentMeta().path,
+              pageTitle: currentMeta().title,
+              rect: {
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height)
+              }
+            });
+            postReady();
+          });
+        });
+      }
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== window.parent || event.origin !== window.location.origin) return;
+        const message = event.data || {};
+        if (message.type === "SXPT_SET_RECORDING") {
+          recording = Boolean(message.enabled);
+          document.body.classList.toggle("recording", recording);
+          return;
+        }
+        if (message.type === "SXPT_START_ELEMENT_PICK") {
+          picking = true;
+          document.body.classList.add("picking");
+          return;
+        }
+        if (message.type === "SXPT_CANCEL_ELEMENT_PICK") {
+          picking = false;
+          document.body.classList.remove("picking");
+          return;
+        }
+        if (message.type === "SXPT_RESOLVE_TARGET") {
+          resolveTarget(message.selector, message.url, false);
+          return;
+        }
+        if (message.type === "SXPT_PREVIEW_STEP") {
+          resolveTarget(message.selector, message.url, true);
+          return;
+        }
+        if (message.type === "SXPT_REQUEST_READY") postReady();
+      });
+
+      render("applications");
+    </script>
+  </body>
+</html>
