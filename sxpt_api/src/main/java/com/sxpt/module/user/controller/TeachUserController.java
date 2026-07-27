@@ -1,6 +1,9 @@
 package com.sxpt.module.user.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.PasswordHashService;
 import com.sxpt.module.user.dto.CreateTeachUserRequest;
 import com.sxpt.module.user.entity.TeachUser;
 import com.sxpt.module.user.service.TeachUserService;
@@ -10,8 +13,10 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.util.StringUtils;
 
 import javax.validation.Valid;
+import java.time.LocalDateTime;
 import java.util.UUID;
 
 /**
@@ -34,8 +39,11 @@ public class TeachUserController {
 
     private final TeachUserService teachUserService;
 
-    public TeachUserController(TeachUserService teachUserService) {
+    private final PasswordHashService passwordHashService;
+
+    public TeachUserController(TeachUserService teachUserService, PasswordHashService passwordHashService) {
         this.teachUserService = teachUserService;
+        this.passwordHashService = passwordHashService;
     }
 
     /**
@@ -67,7 +75,33 @@ public class TeachUserController {
         teachUser.setUserType(request.getUserType());
         teachUser.setSourceType(request.getSourceType());
         teachUser.setExternalInfoJson(request.getExternalInfoJson());
+        teachUser.setStudentNo(request.getStudentNo());
+        teachUser.setEmployeeNo(request.getEmployeeNo());
+        fillInitialPassword(request, teachUser);
         return teachUser;
+    }
+
+    /**
+     * 填充初始密码哈希。
+     *
+     * @param request 创建教学用户请求。
+     * @param teachUser 教学平台用户实体。
+     */
+    private void fillInitialPassword(CreateTeachUserRequest request, TeachUser teachUser) {
+        if (!StringUtils.hasText(request.getInitialPassword())) {
+            if ("LOCAL".equals(request.getSourceType())) {
+                throw new BusinessException(ApiResultCode.PARAM_ERROR);
+            }
+            return;
+        }
+        String salt = passwordHashService.generateSalt();
+        teachUser.setPasswordSalt(salt);
+        teachUser.setPasswordHash(passwordHashService.hash(request.getInitialPassword(), salt));
+        teachUser.setPasswordAlgorithm(PasswordHashService.ALGORITHM);
+        teachUser.setPasswordIterations(PasswordHashService.DEFAULT_ITERATIONS);
+        teachUser.setPasswordStatus("NORMAL");
+        teachUser.setPasswordUpdatedTime(LocalDateTime.now());
+        teachUser.setFailedLoginCount(0);
     }
 
     /**
@@ -86,6 +120,8 @@ public class TeachUserController {
         vo.setEmail(teachUser.getEmail());
         vo.setUserType(teachUser.getUserType());
         vo.setSourceType(teachUser.getSourceType());
+        vo.setStudentNo(teachUser.getStudentNo());
+        vo.setEmployeeNo(teachUser.getEmployeeNo());
         vo.setStatus(teachUser.getStatus());
         vo.setCreateTime(teachUser.getCreateTime());
         vo.setUpdateTime(teachUser.getUpdateTime());

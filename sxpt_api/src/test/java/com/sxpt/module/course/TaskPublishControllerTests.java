@@ -1,6 +1,7 @@
 package com.sxpt.module.course;
 
 import com.sxpt.SxptApiApplication;
+import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.course.entity.Task;
 import com.sxpt.module.course.entity.TaskTeachingPoint;
@@ -57,6 +58,9 @@ class TaskPublishControllerTests {
     @MockBean
     private TaskPublishService taskPublishService;
 
+    @MockBean
+    private AuthLoginService authLoginService;
+
     /**
      * 校验创建任务成功返回统一响应，并向 Service 传入完整任务实体。
      *
@@ -70,7 +74,7 @@ class TaskPublishControllerTests {
         mockMvc.perform(post("/api/v1/tasks/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"courseId\":\"course_001\",\"publishOrgId\":\"org_001\",\"taskCode\":\"TASK_LEARN_RECORD\",\"taskName\":\"备案学习任务\",\"taskType\":\"LEARNING\",\"taskGoal\":\"完成备案流程学习\",\"taskDescription\":\"任务说明\",\"timeLimitMinutes\":60,\"overlayPolicyJson\":\"{\\\"mask\\\":true}\",\"createBy\":\"teacher_001\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"courseId\":\"course_001\",\"publishOrgId\":\"org_001\",\"taskCode\":\"TASK_LEARN_RECORD\",\"taskName\":\"备案学习任务\",\"taskType\":\"LEARNING\",\"taskGoal\":\"完成备案流程学习\",\"taskDescription\":\"任务说明\",\"timeLimitMinutes\":60,\"overlayPolicyJson\":\"{\\\"mask\\\":true}\",\"createBy\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -87,6 +91,8 @@ class TaskPublishControllerTests {
         assertEquals("course_001", requestEntity.getCourseId());
         assertEquals("org_001", requestEntity.getPublishOrgId());
         assertEquals("完成备案流程学习", requestEntity.getTaskGoal());
+        assertEquals("teacher_001", requestEntity.getCreateBy());
+        assertEquals("teacher_001", requestEntity.getUpdateBy());
     }
 
     /**
@@ -149,7 +155,7 @@ class TaskPublishControllerTests {
                         .param("taskId", "task_001")
                         .param("teachingPointId", "tp_001")
                         .param("evaluationRuleId", "rule_001")
-                        .param("operatorId", "teacher_001"))
+                        .param("operatorId", "forged_teacher"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -173,7 +179,7 @@ class TaskPublishControllerTests {
         mockMvc.perform(post("/api/v1/tasks/teaching-points/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"requiredFlag\":true,\"sequenceNo\":1,\"createBy\":\"teacher_001\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"requiredFlag\":true,\"sequenceNo\":1,\"createBy\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -190,6 +196,8 @@ class TaskPublishControllerTests {
         assertEquals("task_001", requestEntity.getTaskId());
         assertEquals("tp_001", requestEntity.getTeachingPointId());
         assertEquals(1L, requestEntity.getSequenceNo());
+        assertEquals("teacher_001", requestEntity.getCreateBy());
+        assertEquals("teacher_001", requestEntity.getUpdateBy());
     }
 
     /**
@@ -284,6 +292,6 @@ class TaskPublishControllerTests {
      * @return Bearer Token 请求头值。
      */
     private String bearerToken() {
-        return "Bearer " + jwtService.generateToken("admin_001", "admin");
+        return "Bearer " + jwtService.generateToken("teacher_001", "teacher001");
     }
 }

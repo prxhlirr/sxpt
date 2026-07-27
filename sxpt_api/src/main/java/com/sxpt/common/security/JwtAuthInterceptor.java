@@ -42,16 +42,25 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(ApiResultCode.UNAUTHORIZED);
         }
-        ThreadContext.bind(securityManager);
-        Subject subject = new Subject.Builder(securityManager).buildSubject();
-        subject.login(new JwtAuthenticationToken(token));
-        ThreadContext.bind(subject);
-        SecurityUtils.getSubject();
-        return true;
+        try {
+            ThreadContext.bind(securityManager);
+            Subject subject = new Subject.Builder(securityManager).buildSubject();
+            subject.login(new JwtAuthenticationToken(token));
+            ThreadContext.bind(subject);
+            JwtPrincipal principal = (JwtPrincipal) SecurityUtils.getSubject().getPrincipal();
+            CurrentUserContext.set(new CurrentUserContext.CurrentUser(principal.getUserId(), principal.getUsername()));
+            return true;
+        } catch (RuntimeException ex) {
+            CurrentUserContext.clear();
+            ThreadContext.unbindSubject();
+            ThreadContext.unbindSecurityManager();
+            throw ex;
+        }
     }
 
     @Override
     public void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+        CurrentUserContext.clear();
         ThreadContext.unbindSubject();
         ThreadContext.unbindSecurityManager();
     }

@@ -8,7 +8,7 @@ import javax.validation.constraints.Size;
  *
  * 业务功能：
  * 1. 承载学生进入任务时创建 task_execution 主记录所需的最小参数。
- * 2. 明确任务、学生、原平台和执行模式，避免后续轨迹、评分、练习数据失去统一归属。
+ * 2. 明确任务、原平台和执行模式，学生身份由服务端当前用户上下文提供。
  *
  * 关键流程：
  * 1. Controller 接收请求并完成基础参数校验。
@@ -24,7 +24,6 @@ public class StartTaskExecutionRequest {
     @Size(max = 64, message = "任务 ID 长度不能超过 64")
     private String taskId;
 
-    @NotBlank(message = "学生 ID 不能为空")
     @Size(max = 64, message = "学生 ID 长度不能超过 64")
     private String studentId;
 

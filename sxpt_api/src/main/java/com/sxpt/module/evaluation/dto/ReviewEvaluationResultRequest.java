@@ -15,7 +15,7 @@ import java.math.BigDecimal;
  * 2. 用人工分覆盖最终分，保留自动分和证据摘要作为复核依据。
  *
  * 关键流程：
- * 1. Controller 校验租户、执行、评价规则、人工分和复核人。
+ * 1. Controller 校验租户、执行、评价规则和人工分，复核人由服务端当前用户上下文提供。
  * 2. Service 定位已有 evaluation_result，并写入人工分、最终分和复核状态。
  */
 public class ReviewEvaluationResultRequest {
@@ -37,7 +37,6 @@ public class ReviewEvaluationResultRequest {
     @Digits(integer = 8, fraction = 2, message = "人工分最多保留 2 位小数")
     private BigDecimal manualScore;
 
-    @NotBlank(message = "复核人不能为空")
     @Size(max = 64, message = "复核人长度不能超过 64")
     private String reviewedBy;
 

@@ -31,6 +31,10 @@ public class TeachUserVO {
 
     private String sourceType;
 
+    private String studentNo;
+
+    private String employeeNo;
+
     private String status;
 
     private LocalDateTime createTime;
@@ -99,6 +103,22 @@ public class TeachUserVO {
 
     public void setSourceType(String sourceType) {
         this.sourceType = sourceType;
+    }
+
+    public String getStudentNo() {
+        return studentNo;
+    }
+
+    public void setStudentNo(String studentNo) {
+        this.studentNo = studentNo;
+    }
+
+    public String getEmployeeNo() {
+        return employeeNo;
+    }
+
+    public void setEmployeeNo(String employeeNo) {
+        this.employeeNo = employeeNo;
     }
 
     public String getStatus() {

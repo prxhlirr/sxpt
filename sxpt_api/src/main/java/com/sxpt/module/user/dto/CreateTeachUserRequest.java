@@ -47,6 +47,15 @@ public class CreateTeachUserRequest {
     @Size(max = 4096, message = "外部信息 JSON 长度不能超过 4096")
     private String externalInfoJson;
 
+    @Size(min = 8, max = 256, message = "初始密码长度必须在 8 到 256 之间")
+    private String initialPassword;
+
+    @Size(max = 64, message = "学号长度不能超过 64")
+    private String studentNo;
+
+    @Size(max = 64, message = "工号长度不能超过 64")
+    private String employeeNo;
+
     public String getTenantId() {
         return tenantId;
     }
@@ -109,5 +118,29 @@ public class CreateTeachUserRequest {
 
     public void setExternalInfoJson(String externalInfoJson) {
         this.externalInfoJson = externalInfoJson;
+    }
+
+    public String getInitialPassword() {
+        return initialPassword;
+    }
+
+    public void setInitialPassword(String initialPassword) {
+        this.initialPassword = initialPassword;
+    }
+
+    public String getStudentNo() {
+        return studentNo;
+    }
+
+    public void setStudentNo(String studentNo) {
+        this.studentNo = studentNo;
+    }
+
+    public String getEmployeeNo() {
+        return employeeNo;
+    }
+
+    public void setEmployeeNo(String employeeNo) {
+        this.employeeNo = employeeNo;
     }
 }

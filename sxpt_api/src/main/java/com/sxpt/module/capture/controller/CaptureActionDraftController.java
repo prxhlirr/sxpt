@@ -1,6 +1,7 @@
 package com.sxpt.module.capture.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.capture.dto.ConfirmCaptureActionDraftRequest;
 import com.sxpt.module.capture.dto.CreateCaptureActionDraftRequest;
 import com.sxpt.module.capture.dto.DiscardCaptureActionDraftRequest;
@@ -136,13 +137,14 @@ public class CaptureActionDraftController {
     @PostMapping("/{id}/publish")
     public ApiResult<TaskStepVO> publish(@PathVariable String id,
                                          @Valid @RequestBody PublishCaptureActionDraftRequest request) {
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
         TaskStep taskStep = draftPublishService.publishDraftToTaskStep(
                 request.getTenantId(),
                 id,
                 request.getTaskId(),
                 request.getTeachingPointId(),
                 request.getEvaluationRuleId(),
-                request.getOperatorId());
+                currentUserId);
         return ApiResult.success(toTaskStepVO(taskStep));
     }
 

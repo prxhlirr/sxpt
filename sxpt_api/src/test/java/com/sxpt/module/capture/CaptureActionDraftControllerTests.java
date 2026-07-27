@@ -1,6 +1,7 @@
 package com.sxpt.module.capture;
 
 import com.sxpt.SxptApiApplication;
+import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.capture.entity.CaptureActionDraft;
 import com.sxpt.module.capture.service.CaptureActionDraftGenerateService;
@@ -62,6 +63,9 @@ class CaptureActionDraftControllerTests {
 
     @MockBean
     private CaptureDraftPublishService draftPublishService;
+
+    @MockBean
+    private AuthLoginService authLoginService;
 
     /**
      * 校验动作草稿创建成功返回统一响应。
@@ -232,7 +236,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/draft_001/publish")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"evaluationRuleId\":\"rule_001\",\"operatorId\":\"teacher_001\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"evaluationRuleId\":\"rule_001\",\"operatorId\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -347,6 +351,6 @@ class CaptureActionDraftControllerTests {
      * @return Bearer Token 请求头值。
      */
     private String bearerToken() {
-        return "Bearer " + jwtService.generateToken("admin_001", "admin");
+        return "Bearer " + jwtService.generateToken("teacher_001", "teacher001");
     }
 }

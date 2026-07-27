@@ -1,0 +1,38 @@
+import { ref, shallowRef, type Ref } from 'vue';
+import type { RunBatchApi } from '../api/v1/runBatchApi';
+import type { PagedRunDataItems, RunDataFilter, RunDataItem } from '../types/runBatch';
+
+export class RunDataPoolError extends Error { constructor(public readonly code: string, message: string) { super(message); this.name = 'RunDataPoolError'; } }
+export interface RunDataPool {
+  filter: Ref<RunDataFilter>; pageResult: Ref<PagedRunDataItems | null>; selectedItem: Ref<RunDataItem | null>; loading: Ref<boolean>; mutating: Ref<boolean>; error: Ref<unknown | null>;
+  load(batchId: string, filter?: RunDataFilter): Promise<void>; setFilter(filter: RunDataFilter): Promise<void>; select(itemId: string | null): Promise<RunDataItem | null>; refreshPage(): Promise<void>;
+  disable(itemId: string, reason: string): Promise<RunDataItem>; promote(itemId: string, reason: string): Promise<RunDataItem>; replace(itemId: string, reason: string, generationParameters: Record<string, unknown>): Promise<RunDataItem>; retry(itemId: string, reason: string): Promise<RunDataItem>;
+}
+export function createRunDataPool(api: RunBatchApi): RunDataPool {
+  const filter = shallowRef<RunDataFilter>({ page: 1, pageSize: 20 }); const pageResult = shallowRef<PagedRunDataItems | null>(null); const selectedItem = shallowRef<RunDataItem | null>(null);
+  const loading = ref(false); const mutating = ref(false); const error = shallowRef<unknown | null>(null); const requestIds = new Map<string, string>();
+  let batchId: string | null = null; let batchContextVersion = 0; let pageVersion = 0; let selectionVersion = 0; let operationVersion = 0; let loadingCount = 0; let mutationCount = 0;
+  const requireBatchId = () => { if (!batchId) throw new RunDataPoolError('BATCH_NOT_LOADED', 'Load a batch before operating on its data'); return batchId; };
+  const commandId = (key: string) => requestIds.get(key) ?? (() => { const id = api.createClientRequestId(); requestIds.set(key, id); return id; })();
+  const startOperation = () => { const version = ++operationVersion; error.value = null; return version; };
+  const recordError = (version: number, cause: unknown) => { if (version === operationVersion) error.value = cause; };
+  async function withLoading<T>(work: () => Promise<T>): Promise<T> { const version = startOperation(); loadingCount += 1; loading.value = true; try { return await work(); } catch (cause) { recordError(version, cause); throw cause; } finally { loadingCount -= 1; loading.value = loadingCount > 0; } }
+  async function withMutation<T>(work: () => Promise<T>): Promise<T> { const version = startOperation(); mutationCount += 1; mutating.value = true; try { return await work(); } catch (cause) { recordError(version, cause); throw cause; } finally { mutationCount -= 1; mutating.value = mutationCount > 0; } }
+  async function fetchPage(): Promise<void> { const capturedBatch = requireBatchId(); const capturedVersion = ++pageVersion; const result = await api.listDataItems(capturedBatch, { ...filter.value }); if (capturedVersion === pageVersion && batchId === capturedBatch) pageResult.value = result; }
+  async function fetchItem(itemId: string | null): Promise<RunDataItem | null> { const capturedVersion = ++selectionVersion; if (!itemId) { if (capturedVersion === selectionVersion) selectedItem.value = null; return null; } const capturedBatch = requireBatchId(); const result = await api.getDataItem(capturedBatch, itemId); if (capturedVersion === selectionVersion && batchId === capturedBatch) selectedItem.value = result; return result; }
+  async function refreshPage(): Promise<void> { await withLoading(fetchPage); }
+  async function select(itemId: string | null): Promise<RunDataItem | null> { return withLoading(() => fetchItem(itemId)); }
+  const isCurrentBatchContext = (contextVersion: number, expectedBatchId: string) => batchContextVersion === contextVersion && batchId === expectedBatchId;
+  async function load(nextBatchId: string, nextFilter?: RunDataFilter): Promise<void> { const contextVersion = ++batchContextVersion; batchId = nextBatchId; pageResult.value = null; selectedItem.value = null; selectionVersion += 1; filter.value = normalizeFilter(nextFilter ?? filter.value); await withLoading(async () => { await fetchPage(); }); }
+  async function setFilter(next: RunDataFilter): Promise<void> { await withLoading(async () => { filter.value = normalizeFilter(next); await fetchPage(); }); }
+  async function mutate(action: string, itemId: string, reason: string, generationParameters: Record<string, unknown> | undefined, operation: (capturedBatchId: string, clientRequestId: string, normalizedReason: string) => Promise<RunDataItem>): Promise<RunDataItem> { const capturedBatchId = requireBatchId(); const contextVersion = batchContextVersion; const capturedSelectionVersion = selectionVersion; const normalizedReason = requireReason(reason); const key = `data:${stableFingerprint({ batchId: capturedBatchId, action, itemId, reason: normalizedReason, generationParameters })}`; const clientRequestId = commandId(key); return withMutation(async () => { const result = await operation(capturedBatchId, clientRequestId, normalizedReason); if (isCurrentBatchContext(contextVersion, capturedBatchId)) { const refreshed = await api.getDataItem(capturedBatchId, result.id); if (isCurrentBatchContext(contextVersion, capturedBatchId) && selectionVersion === capturedSelectionVersion) selectedItem.value = refreshed; await fetchPage(); if (requestIds.get(key) === clientRequestId) requestIds.delete(key); return refreshed; } if (requestIds.get(key) === clientRequestId) requestIds.delete(key); return result; }); }
+  const disable = (itemId: string, reason: string) => mutate('disable', itemId, reason, undefined, (capturedBatchId, clientRequestId, normalizedReason) => api.disableData(capturedBatchId, itemId, { clientRequestId, reason: normalizedReason }));
+  const promote = (itemId: string, reason: string) => mutate('promote', itemId, reason, undefined, (capturedBatchId, clientRequestId, normalizedReason) => api.promoteData(capturedBatchId, itemId, { clientRequestId, reason: normalizedReason }));
+  const replace = (itemId: string, reason: string, generationParameters: Record<string, unknown>) => mutate('replace', itemId, reason, generationParameters, (capturedBatchId, clientRequestId, normalizedReason) => api.replaceData(capturedBatchId, itemId, { clientRequestId, reason: normalizedReason, generationParameters: { ...generationParameters } }));
+  const retry = (itemId: string, reason: string) => mutate('retry', itemId, reason, undefined, (capturedBatchId, clientRequestId, normalizedReason) => api.retryData(capturedBatchId, itemId, { clientRequestId, reason: normalizedReason }));
+  return { filter, pageResult, selectedItem, loading, mutating, error, load, setFilter, select, refreshPage, disable, promote, replace, retry };
+}
+function normalizeFilter(filter: RunDataFilter): RunDataFilter { return { ...filter, page: filter.page ?? 1, pageSize: filter.pageSize ?? 20 }; }
+function requireReason(reason: string) { const trimmed = reason.trim(); if (!trimmed) throw new RunDataPoolError('REASON_REQUIRED', 'A nonblank reason is required'); return trimmed; }
+function stableFingerprint(value: unknown): string { return stableSerialize(value); }
+function stableSerialize(value: unknown): string { if (Array.isArray(value)) return `[${value.map(stableSerialize).join(',')}]`; if (value && typeof value === 'object') { const record = value as Record<string, unknown>; return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableSerialize(record[key])}`).join(',')}}`; } return JSON.stringify(value); }

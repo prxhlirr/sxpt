@@ -1,6 +1,7 @@
 package com.sxpt.module.execution;
 
 import com.sxpt.SxptApiApplication;
+import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.execution.entity.TaskExecution;
 import com.sxpt.module.execution.service.TaskExecutionService;
@@ -62,6 +63,9 @@ class TaskExecutionControllerTests {
     @MockBean
     private TaskExecutionService taskExecutionService;
 
+    @MockBean
+    private AuthLoginService authLoginService;
+
     /**
      * 验证开始执行成功返回学生任务执行主记录。
      *
@@ -75,7 +79,7 @@ class TaskExecutionControllerTests {
         mockMvc.perform(post("/api/v1/student/task-executions/start")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"studentId\":\"student_001\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\",\"executionIdentityJson\":\"{\\\"identityMode\\\":\\\"STUDENT\\\"}\",\"createBy\":\"student_001\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"studentId\":\"forged_student\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\",\"executionIdentityJson\":\"{\\\"identityMode\\\":\\\"STUDENT\\\"}\",\"createBy\":\"forged_operator\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -92,24 +96,30 @@ class TaskExecutionControllerTests {
         assertEquals("tenant_001", requestEntity.getTenantId());
         assertEquals("task_001", requestEntity.getTaskId());
         assertEquals("student_001", requestEntity.getStudentId());
+        assertEquals("student_001", requestEntity.getCreateBy());
+        assertEquals("student_001", requestEntity.getUpdateBy());
         assertEquals("PRACTICE", requestEntity.getExecutionMode());
     }
 
     /**
-     * 验证缺少学生 ID 时开始执行返回参数错误。
+     * 验证缺少学生 ID 时仍可开始执行，因为学生身份来自 JWT 当前用户上下文。
      *
      * @throws Exception MockMvc 请求异常由测试框架处理。
      */
     @Test
-    void startShouldRejectMissingStudentId() throws Exception {
+    void startShouldUseCurrentUserWhenStudentIdMissing() throws Exception {
+        when(taskExecutionService.startExecution(any(TaskExecution.class))).thenReturn(buildRunningExecution());
+
         mockMvc.perform(post("/api/v1/student/task-executions/start")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\"}"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.success", is(false)))
-                .andExpect(jsonPath("$.code", is(400)))
-                .andExpect(jsonPath("$.timestamp", notNullValue()));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)));
+
+        ArgumentCaptor<TaskExecution> captor = ArgumentCaptor.forClass(TaskExecution.class);
+        verify(taskExecutionService).startExecution(captor.capture());
+        assertEquals("student_001", captor.getValue().getStudentId());
     }
 
     /**
@@ -126,7 +136,7 @@ class TaskExecutionControllerTests {
         mockMvc.perform(post("/api/v1/student/task-executions/submit")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"executionId\":\"execution_001\",\"operatorId\":\"student_001\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"executionId\":\"execution_001\",\"operatorId\":\"forged_operator\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -172,7 +182,7 @@ class TaskExecutionControllerTests {
         mockMvc.perform(get("/api/v1/student/task-executions")
                         .header("Authorization", bearerToken())
                         .param("tenantId", "tenant_001")
-                        .param("studentId", "student_001")
+                        .param("studentId", "forged_student")
                         .param("taskId", "task_001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
@@ -225,6 +235,6 @@ class TaskExecutionControllerTests {
      * @return Bearer Token 请求头值。
      */
     private String bearerToken() {
-        return "Bearer " + jwtService.generateToken("admin_001", "admin");
+        return "Bearer " + jwtService.generateToken("student_001", "student001");
     }
 }

@@ -2,6 +2,7 @@ package com.sxpt.controller;
 
 import com.sxpt.common.api.ApiResult;
 import com.sxpt.common.security.JwtService;
+import org.springframework.context.annotation.Profile;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -22,6 +23,7 @@ import java.util.Map;
  * 2. 调用 JwtService 生成 Token。
  */
 @RestController
+@Profile({"dev", "test"})
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 

@@ -1,6 +1,7 @@
 package com.sxpt.module.evaluation.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.evaluation.dto.GenerateAutoEvaluationRequest;
 import com.sxpt.module.evaluation.dto.ReviewEvaluationResultRequest;
 import com.sxpt.module.evaluation.entity.EvaluationResult;
@@ -108,7 +109,7 @@ public class AutoEvaluationController {
         result.setExecutionId(request.getExecutionId());
         result.setEvaluationRuleId(request.getEvaluationRuleId());
         result.setManualScore(request.getManualScore());
-        result.setReviewedBy(request.getReviewedBy());
+        result.setReviewedBy(CurrentUserContext.getRequiredUser().getUserId());
         return result;
     }
 

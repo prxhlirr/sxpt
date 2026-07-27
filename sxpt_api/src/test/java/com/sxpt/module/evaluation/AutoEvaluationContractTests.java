@@ -82,16 +82,16 @@ class AutoEvaluationContractTests {
     }
 
     /**
-     * 校验缺少复核人会被参数校验拦截。
+     * 校验缺少复核人不会被参数校验拦截，因为复核人来自服务端当前用户上下文。
      */
     @Test
-    void reviewEvaluationResultRequestShouldRejectMissingReviewer() {
+    void reviewEvaluationResultRequestShouldAllowMissingReviewer() {
         ReviewEvaluationResultRequest request = buildValidReviewRequest();
         request.setReviewedBy(null);
 
         Set<ConstraintViolation<ReviewEvaluationResultRequest>> violations = validator.validate(request);
 
-        assertEquals(1, violations.size());
+        assertTrue(violations.isEmpty());
     }
 
     /**

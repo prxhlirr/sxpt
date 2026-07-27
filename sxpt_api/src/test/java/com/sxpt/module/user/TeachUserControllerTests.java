@@ -1,6 +1,7 @@
 package com.sxpt.module.user;
 
 import com.sxpt.SxptApiApplication;
+import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.user.entity.TeachUser;
 import com.sxpt.module.user.service.TeachUserService;
@@ -52,6 +53,9 @@ class TeachUserControllerTests {
     @MockBean
     private TeachUserService teachUserService;
 
+    @MockBean
+    private AuthLoginService authLoginService;
+
     /**
      * 校验创建教学平台用户成功返回统一响应。
      *
@@ -65,12 +69,13 @@ class TeachUserControllerTests {
         mockMvc.perform(post("/api/v1/user/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"username\":\"teacher001\",\"realName\":\"教师一\",\"phone\":\"13800000000\",\"email\":\"teacher001@example.com\",\"userType\":\"TEACHER\",\"sourceType\":\"LOCAL\",\"externalInfoJson\":\"{}\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"username\":\"teacher001\",\"realName\":\"教师一\",\"phone\":\"13800000000\",\"email\":\"teacher001@example.com\",\"userType\":\"TEACHER\",\"sourceType\":\"LOCAL\",\"externalInfoJson\":\"{}\",\"employeeNo\":\"T001\",\"initialPassword\":\"StrongPassword123\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.result.id", is("user_001")))
                 .andExpect(jsonPath("$.result.username", is("teacher001")))
+                .andExpect(jsonPath("$.result.employeeNo", is("T001")))
                 .andExpect(jsonPath("$.result.externalInfoJson").doesNotExist());
 
         ArgumentCaptor<TeachUser> captor = ArgumentCaptor.forClass(TeachUser.class);
@@ -80,6 +85,11 @@ class TeachUserControllerTests {
         org.junit.jupiter.api.Assertions.assertEquals("tenant_001", requestEntity.getTenantId());
         org.junit.jupiter.api.Assertions.assertEquals("teacher001", requestEntity.getUsername());
         org.junit.jupiter.api.Assertions.assertEquals("{}", requestEntity.getExternalInfoJson());
+        org.junit.jupiter.api.Assertions.assertEquals("T001", requestEntity.getEmployeeNo());
+        org.junit.jupiter.api.Assertions.assertNotEquals("StrongPassword123", requestEntity.getPasswordHash());
+        org.junit.jupiter.api.Assertions.assertNotNull(requestEntity.getPasswordSalt());
+        org.junit.jupiter.api.Assertions.assertEquals("PBKDF2WithHmacSHA256", requestEntity.getPasswordAlgorithm());
+        org.junit.jupiter.api.Assertions.assertEquals("NORMAL", requestEntity.getPasswordStatus());
     }
 
     /**
@@ -92,11 +102,27 @@ class TeachUserControllerTests {
         mockMvc.perform(post("/api/v1/user/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"realName\":\"教师一\",\"userType\":\"TEACHER\",\"sourceType\":\"LOCAL\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"realName\":\"教师一\",\"userType\":\"TEACHER\",\"sourceType\":\"LOCAL\",\"initialPassword\":\"StrongPassword123\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.code", is(400)))
                 .andExpect(jsonPath("$.timestamp", notNullValue()));
+    }
+
+    /**
+     * 校验本地用户必须提供初始密码，因为本地账号没有外部身份源可校验。
+     *
+     * @throws Exception MockMvc 请求异常由测试框架处理。
+     */
+    @Test
+    void createShouldRejectLocalUserWithoutInitialPassword() throws Exception {
+        mockMvc.perform(post("/api/v1/user/create")
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tenantId\":\"tenant_001\",\"username\":\"teacher001\",\"realName\":\"教师一\",\"userType\":\"TEACHER\",\"sourceType\":\"LOCAL\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.code", is(400)));
     }
 
     /**
@@ -114,6 +140,7 @@ class TeachUserControllerTests {
         teachUser.setEmail("teacher001@example.com");
         teachUser.setUserType("TEACHER");
         teachUser.setSourceType("LOCAL");
+        teachUser.setEmployeeNo("T001");
         teachUser.setStatus("ACTIVE");
         teachUser.setCreateTime(LocalDateTime.now());
         teachUser.setUpdateTime(LocalDateTime.now());

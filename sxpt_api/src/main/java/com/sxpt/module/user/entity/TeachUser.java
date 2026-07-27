@@ -41,6 +41,28 @@ public class TeachUser {
 
     private LocalDateTime lastSyncTime;
 
+    private String passwordHash;
+
+    private String passwordSalt;
+
+    private String passwordAlgorithm;
+
+    private Integer passwordIterations;
+
+    private String passwordStatus;
+
+    private LocalDateTime passwordUpdatedTime;
+
+    private LocalDateTime lastLoginTime;
+
+    private Integer failedLoginCount;
+
+    private LocalDateTime lockedUntil;
+
+    private String studentNo;
+
+    private String employeeNo;
+
     private String createBy;
 
     private LocalDateTime createTime;
@@ -131,6 +153,94 @@ public class TeachUser {
 
     public void setLastSyncTime(LocalDateTime lastSyncTime) {
         this.lastSyncTime = lastSyncTime;
+    }
+
+    public String getPasswordHash() {
+        return passwordHash;
+    }
+
+    public void setPasswordHash(String passwordHash) {
+        this.passwordHash = passwordHash;
+    }
+
+    public String getPasswordSalt() {
+        return passwordSalt;
+    }
+
+    public void setPasswordSalt(String passwordSalt) {
+        this.passwordSalt = passwordSalt;
+    }
+
+    public String getPasswordAlgorithm() {
+        return passwordAlgorithm;
+    }
+
+    public void setPasswordAlgorithm(String passwordAlgorithm) {
+        this.passwordAlgorithm = passwordAlgorithm;
+    }
+
+    public Integer getPasswordIterations() {
+        return passwordIterations;
+    }
+
+    public void setPasswordIterations(Integer passwordIterations) {
+        this.passwordIterations = passwordIterations;
+    }
+
+    public String getPasswordStatus() {
+        return passwordStatus;
+    }
+
+    public void setPasswordStatus(String passwordStatus) {
+        this.passwordStatus = passwordStatus;
+    }
+
+    public LocalDateTime getPasswordUpdatedTime() {
+        return passwordUpdatedTime;
+    }
+
+    public void setPasswordUpdatedTime(LocalDateTime passwordUpdatedTime) {
+        this.passwordUpdatedTime = passwordUpdatedTime;
+    }
+
+    public LocalDateTime getLastLoginTime() {
+        return lastLoginTime;
+    }
+
+    public void setLastLoginTime(LocalDateTime lastLoginTime) {
+        this.lastLoginTime = lastLoginTime;
+    }
+
+    public Integer getFailedLoginCount() {
+        return failedLoginCount;
+    }
+
+    public void setFailedLoginCount(Integer failedLoginCount) {
+        this.failedLoginCount = failedLoginCount;
+    }
+
+    public LocalDateTime getLockedUntil() {
+        return lockedUntil;
+    }
+
+    public void setLockedUntil(LocalDateTime lockedUntil) {
+        this.lockedUntil = lockedUntil;
+    }
+
+    public String getStudentNo() {
+        return studentNo;
+    }
+
+    public void setStudentNo(String studentNo) {
+        this.studentNo = studentNo;
+    }
+
+    public String getEmployeeNo() {
+        return employeeNo;
+    }
+
+    public void setEmployeeNo(String employeeNo) {
+        this.employeeNo = employeeNo;
     }
 
     public String getCreateBy() {

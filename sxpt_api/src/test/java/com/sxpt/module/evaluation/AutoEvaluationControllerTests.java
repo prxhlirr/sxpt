@@ -1,6 +1,7 @@
 package com.sxpt.module.evaluation;
 
 import com.sxpt.SxptApiApplication;
+import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.evaluation.entity.EvaluationResult;
 import com.sxpt.module.evaluation.service.AutoEvaluationService;
@@ -60,6 +61,9 @@ class AutoEvaluationControllerTests {
 
     @MockBean
     private AutoEvaluationService autoEvaluationService;
+
+    @MockBean
+    private AuthLoginService authLoginService;
 
     /**
      * 验证生成自动评分成功返回评分结果。
@@ -140,7 +144,7 @@ class AutoEvaluationControllerTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tenantId\":\"tenant_001\",\"executionId\":\"execution_001\","
                                 + "\"evaluationRuleId\":\"rule_001\",\"manualScore\":8.50,"
-                                + "\"reviewedBy\":\"teacher_001\"}"))
+                                + "\"reviewedBy\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -199,6 +203,6 @@ class AutoEvaluationControllerTests {
      * @return Bearer Token 请求头值。
      */
     private String bearerToken() {
-        return "Bearer " + jwtService.generateToken("admin_001", "admin");
+        return "Bearer " + jwtService.generateToken("teacher_001", "teacher001");
     }
 }

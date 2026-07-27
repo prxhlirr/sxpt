@@ -1,6 +1,9 @@
 package com.sxpt.module.execution.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.execution.dto.StartTaskExecutionRequest;
 import com.sxpt.module.execution.dto.SubmitTaskExecutionRequest;
 import com.sxpt.module.execution.entity.TaskExecution;
@@ -63,8 +66,9 @@ public class TaskExecutionController {
      */
     @PostMapping("/submit")
     public ApiResult<TaskExecutionVO> submit(@Valid @RequestBody SubmitTaskExecutionRequest request) {
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
         TaskExecution saved = taskExecutionService.submitExecution(
-                request.getTenantId(), request.getExecutionId(), request.getOperatorId());
+                request.getTenantId(), request.getExecutionId(), currentUserId);
         return ApiResult.success(toVO(saved));
     }
 
@@ -78,7 +82,9 @@ public class TaskExecutionController {
     @GetMapping("/{executionId}")
     public ApiResult<TaskExecutionVO> getExecution(@PathVariable String executionId,
                                                    @RequestParam String tenantId) {
-        return ApiResult.success(toVO(taskExecutionService.getExecution(tenantId, executionId)));
+        TaskExecution execution = taskExecutionService.getExecution(tenantId, executionId);
+        ensureCurrentStudentOwnsExecution(execution);
+        return ApiResult.success(toVO(execution));
     }
 
     /**
@@ -93,8 +99,9 @@ public class TaskExecutionController {
     public ApiResult<List<TaskExecutionVO>> listByStudentAndTask(@RequestParam String tenantId,
                                                                  @RequestParam String studentId,
                                                                  @RequestParam String taskId) {
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
         return ApiResult.success(toVOList(
-                taskExecutionService.listByStudentAndTask(tenantId, studentId, taskId)));
+                taskExecutionService.listByStudentAndTask(tenantId, currentUserId, taskId)));
     }
 
     /**
@@ -108,14 +115,26 @@ public class TaskExecutionController {
         execution.setId(generateId());
         execution.setTenantId(request.getTenantId());
         execution.setTaskId(request.getTaskId());
-        execution.setStudentId(request.getStudentId());
+        execution.setStudentId(CurrentUserContext.getRequiredUser().getUserId());
         execution.setConnectorSystemId(request.getConnectorSystemId());
         execution.setExecutionMode(request.getExecutionMode());
         execution.setSdkMode(request.getSdkMode());
         execution.setExecutionIdentityJson(request.getExecutionIdentityJson());
-        execution.setCreateBy(request.getCreateBy());
-        execution.setUpdateBy(request.getCreateBy());
+        execution.setCreateBy(CurrentUserContext.getRequiredUser().getUserId());
+        execution.setUpdateBy(CurrentUserContext.getRequiredUser().getUserId());
         return execution;
+    }
+
+    /**
+     * 校验当前学生是否拥有该执行记录。
+     *
+     * @param execution 学生任务执行实体。
+     */
+    private void ensureCurrentStudentOwnsExecution(TaskExecution execution) {
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        if (!currentUserId.equals(execution.getStudentId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
     }
 
     /**

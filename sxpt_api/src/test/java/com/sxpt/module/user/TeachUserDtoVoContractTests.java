@@ -79,6 +79,17 @@ class TeachUserDtoVoContractTests {
     }
 
     /**
+     * 校验返回对象不暴露密码哈希等认证凭据字段。
+     */
+    @Test
+    void teachUserVoShouldNotExposePasswordCredentialFields() {
+        assertThrows(NoSuchFieldException.class, () -> findField("passwordHash"));
+        assertThrows(NoSuchFieldException.class, () -> findField("passwordSalt"));
+        assertThrows(NoSuchFieldException.class, () -> findField("passwordAlgorithm"));
+        assertThrows(NoSuchFieldException.class, () -> findField("initialPassword"));
+    }
+
+    /**
      * 通过反射查找 VO 字段。
      *
      * @param fieldName 字段名。
@@ -103,6 +114,8 @@ class TeachUserDtoVoContractTests {
         request.setEmail("teacher001@example.com");
         request.setUserType("TEACHER");
         request.setSourceType("LOCAL");
+        request.setEmployeeNo("T001");
+        request.setInitialPassword("StrongPassword123");
         return request;
     }
 }

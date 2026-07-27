@@ -1,6 +1,7 @@
 package com.sxpt.module.course.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.course.dto.CreateTaskRequest;
 import com.sxpt.module.course.dto.CreateTaskTeachingPointRequest;
 import com.sxpt.module.course.entity.Task;
@@ -52,7 +53,8 @@ public class TaskPublishController {
      */
     @PostMapping("/create")
     public ApiResult<TaskVO> createTask(@Valid @RequestBody CreateTaskRequest request) {
-        return ApiResult.success(toTaskVO(taskPublishService.createTask(toTaskEntity(request))));
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        return ApiResult.success(toTaskVO(taskPublishService.createTask(toTaskEntity(request, currentUserId))));
     }
 
     /**
@@ -79,8 +81,9 @@ public class TaskPublishController {
     @PostMapping("/teaching-points/create")
     public ApiResult<TaskTeachingPointVO> createTaskTeachingPoint(
             @Valid @RequestBody CreateTaskTeachingPointRequest request) {
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
         return ApiResult.success(toTaskTeachingPointVO(
-                taskPublishService.createTaskTeachingPoint(toTaskTeachingPointEntity(request))));
+                taskPublishService.createTaskTeachingPoint(toTaskTeachingPointEntity(request, currentUserId))));
     }
 
     /**
@@ -112,9 +115,10 @@ public class TaskPublishController {
                                                             @RequestParam String taskId,
                                                             @RequestParam String teachingPointId,
                                                             @RequestParam String evaluationRuleId,
-                                                            @RequestParam String operatorId) {
+                                                            @RequestParam(required = false) String operatorId) {
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
         return ApiResult.success(toTaskVO(taskPublishService.publishTaskTeachingPointAssets(
-                tenantId, taskId, teachingPointId, evaluationRuleId, operatorId)));
+                tenantId, taskId, teachingPointId, evaluationRuleId, currentUserId)));
     }
 
     /**
@@ -123,7 +127,7 @@ public class TaskPublishController {
      * @param request 创建任务请求。
      * @return 教学任务实体。
      */
-    private Task toTaskEntity(CreateTaskRequest request) {
+    private Task toTaskEntity(CreateTaskRequest request, String currentUserId) {
         Task task = new Task();
         task.setId(generateId());
         task.setTenantId(request.getTenantId());
@@ -138,8 +142,8 @@ public class TaskPublishController {
         task.setEndTime(request.getEndTime());
         task.setTimeLimitMinutes(request.getTimeLimitMinutes());
         task.setOverlayPolicyJson(request.getOverlayPolicyJson());
-        task.setCreateBy(request.getCreateBy());
-        task.setUpdateBy(request.getCreateBy());
+        task.setCreateBy(currentUserId);
+        task.setUpdateBy(currentUserId);
         return task;
     }
 
@@ -149,7 +153,7 @@ public class TaskPublishController {
      * @param request 创建任务教学点关联请求。
      * @return 任务教学点关联实体。
      */
-    private TaskTeachingPoint toTaskTeachingPointEntity(CreateTaskTeachingPointRequest request) {
+    private TaskTeachingPoint toTaskTeachingPointEntity(CreateTaskTeachingPointRequest request, String currentUserId) {
         TaskTeachingPoint taskTeachingPoint = new TaskTeachingPoint();
         taskTeachingPoint.setId(generateId());
         taskTeachingPoint.setTenantId(request.getTenantId());
@@ -157,8 +161,8 @@ public class TaskPublishController {
         taskTeachingPoint.setTeachingPointId(request.getTeachingPointId());
         taskTeachingPoint.setRequiredFlag(request.getRequiredFlag());
         taskTeachingPoint.setSequenceNo(request.getSequenceNo());
-        taskTeachingPoint.setCreateBy(request.getCreateBy());
-        taskTeachingPoint.setUpdateBy(request.getCreateBy());
+        taskTeachingPoint.setCreateBy(currentUserId);
+        taskTeachingPoint.setUpdateBy(currentUserId);
         return taskTeachingPoint;
     }
 

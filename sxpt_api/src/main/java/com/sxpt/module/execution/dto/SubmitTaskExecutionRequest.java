@@ -11,7 +11,7 @@ import javax.validation.constraints.Size;
  * 2. 后续提交服务会基于 executionId 触发评分和结果回写，调用方不再手工串联评分接口。
  *
  * 关键流程：
- * 1. Controller 校验租户、执行记录和操作人。
+ * 1. Controller 校验租户和执行记录，操作人由服务端当前用户上下文提供。
  * 2. Service 校验执行状态，只允许 RUNNING 状态进入提交流程。
  */
 public class SubmitTaskExecutionRequest {
@@ -24,7 +24,6 @@ public class SubmitTaskExecutionRequest {
     @Size(max = 64, message = "执行记录 ID 长度不能超过 64")
     private String executionId;
 
-    @NotBlank(message = "操作人 ID 不能为空")
     @Size(max = 64, message = "操作人 ID 长度不能超过 64")
     private String operatorId;
 
