@@ -1,5 +1,6 @@
 import type {
   ActivityEvent,
+  BusinessPlatform,
   ExamDataItem,
   ExamSettings,
   GroupPlan,
@@ -17,11 +18,13 @@ const DEMO_START = relativeDemoTime(-60);
 const DEMO_END = relativeDemoTime(180);
 
 export function createMockTrainingState(): TrainingState {
+  const businessPlatforms = createDefaultBusinessPlatforms();
   const lessons = createLessons();
   const lessonId = lessons[0].id;
 
   return {
     currentRole: 'admin',
+    businessPlatforms,
     lessons,
     examSettings: { [lessonId]: createExamSettings(lessonId) },
     groupPlans: { [lessonId]: createGroupPlan(lessonId) },
@@ -33,6 +36,80 @@ export function createMockTrainingState(): TrainingState {
   };
 }
 
+export function createDefaultBusinessPlatforms(): BusinessPlatform[] {
+  return [
+    {
+      id: 'business-platform-purchase',
+      code: 'PURCHASE',
+      name: '采购业务管理平台',
+      baseUrl: 'internal://purchase',
+      description: '采购申请、审核与业务档案归集系统。',
+      status: 'ENABLED',
+      modules: [
+        {
+          id: 'business-module-purchase-approval',
+          code: 'PURCHASE_APPROVAL',
+          name: '采购申请与审批',
+          path: '/approval',
+          description: '发起采购申请，并完成采购业务审核。',
+          status: 'ENABLED',
+          updatedAt: '2026-07-24T09:00:00.000Z'
+        },
+        {
+          id: 'business-module-purchase-archive',
+          code: 'PURCHASE_ARCHIVE',
+          name: '采购档案归集',
+          path: '/archive',
+          description: '检查采购流程材料并完成业务归档。',
+          status: 'ENABLED',
+          updatedAt: '2026-07-24T09:00:00.000Z'
+        }
+      ],
+      updatedAt: '2026-07-24T09:00:00.000Z'
+    },
+    {
+      id: 'business-platform-expense',
+      code: 'EXPENSE',
+      name: '财务共享报销平台',
+      baseUrl: 'internal://expense',
+      description: '费用报销填报、财务复核与付款流程系统。',
+      status: 'ENABLED',
+      modules: [
+        {
+          id: 'business-module-expense-reimbursement',
+          code: 'EXPENSE_REIMBURSEMENT',
+          name: '费用报销与复核',
+          path: '/reimbursement',
+          description: '填报报销单并完成财务复核。',
+          status: 'ENABLED',
+          updatedAt: '2026-07-23T09:00:00.000Z'
+        }
+      ],
+      updatedAt: '2026-07-23T09:00:00.000Z'
+    },
+    {
+      id: 'business-platform-contract',
+      code: 'CONTRACT',
+      name: '合同全生命周期平台',
+      baseUrl: 'internal://contract',
+      description: '合同起草、审批、签署与归档管理系统。',
+      status: 'ENABLED',
+      modules: [
+        {
+          id: 'business-module-contract-filing',
+          code: 'CONTRACT_FILING',
+          name: '合同备案管理',
+          path: '/filing',
+          description: '完成合同备案、审批和归档。',
+          status: 'ENABLED',
+          updatedAt: '2026-07-22T09:00:00.000Z'
+        }
+      ],
+      updatedAt: '2026-07-22T09:00:00.000Z'
+    }
+  ];
+}
+
 function createLessons(): LessonPlan[] {
   return [
     {
@@ -40,6 +117,8 @@ function createLessons(): LessonPlan[] {
       code: 'CGSQ-001',
       title: '采购申请全流程实训教案',
       moduleName: '采购业务管理',
+      businessPlatformId: 'business-platform-purchase',
+      businessPlatformModuleId: 'business-module-purchase-approval',
       description: '覆盖采购申请、部门审核与档案归集的三角色串行业务。',
       version: 3,
       status: 'PUBLISHED',
@@ -141,6 +220,8 @@ function createLessons(): LessonPlan[] {
       code: 'FYBX-002',
       title: '费用报销业务办理教案',
       moduleName: '财务报销',
+      businessPlatformId: 'business-platform-expense',
+      businessPlatformModuleId: 'business-module-expense-reimbursement',
       description: '录制已完成，等待校验后发布。',
       version: 1,
       status: 'RECORDED',
@@ -201,6 +282,8 @@ function createLessons(): LessonPlan[] {
       code: 'HTBA-003',
       title: '合同备案教案',
       moduleName: '合同管理',
+      businessPlatformId: 'business-platform-contract',
+      businessPlatformModuleId: 'business-module-contract-filing',
       description: '正在配置业务阶段和录制内容。',
       version: 1,
       status: 'DRAFT',

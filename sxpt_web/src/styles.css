@@ -46,13 +46,19 @@ textarea {
 
 button,
 .button {
+  display: inline-flex;
   min-height: 38px;
+  align-items: center;
+  justify-content: center;
   border: 1px solid transparent;
   border-radius: 9px;
   padding: 0 15px;
   background: #fff;
   color: #4e5b70;
   font-weight: 720;
+  line-height: 1.2;
+  text-align: center;
+  vertical-align: middle;
   cursor: pointer;
   transition:
     transform 150ms ease,
@@ -179,6 +185,25 @@ td {
   min-height: 100vh;
 }
 
+.app-shell--immersive {
+  display: block;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell--immersive > .app-sidebar,
+.app-shell--immersive > .app-workspace > .topbar {
+  display: none;
+}
+
+.app-shell--immersive > .app-workspace,
+.app-shell--immersive .app-content--immersive {
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+}
+
 .app-sidebar {
   position: sticky;
   top: 0;
@@ -273,6 +298,66 @@ td {
 
 .role-switcher button.active span {
   background: var(--purple-soft);
+}
+
+.identity-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 28px;
+  min-height: 62px;
+  align-items: center;
+  gap: 9px;
+  margin: 26px 0 24px;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 11px;
+  padding: 9px;
+  background: rgb(255 255 255 / 4%);
+}
+
+.identity-card > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 9px;
+  color: #d9d4ff;
+  background: rgb(116 96 239 / 20%);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.identity-card > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.identity-card small {
+  color: #747d94;
+  font-size: 8px;
+}
+
+.identity-card strong {
+  overflow: hidden;
+  color: #e9ebf5;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity-card > a {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 7px;
+  color: #8e97ad;
+  background: rgb(255 255 255 / 5%);
+  font-size: 11px;
+}
+
+.identity-card > a:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 10%);
 }
 
 .nav-caption {
@@ -476,6 +561,25 @@ td {
   border-radius: 50%;
   background: #6d5dfc;
   box-shadow: 0 0 0 3px rgb(109 93 252 / 13%);
+}
+
+.platform-home-link {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  border: 1px solid #e2e6ed;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #667287;
+  background: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.platform-home-link:hover {
+  border-color: #d0caff;
+  color: #5d4ed4;
+  background: #f7f5ff;
 }
 
 .icon-button {

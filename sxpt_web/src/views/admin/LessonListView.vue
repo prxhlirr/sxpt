@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
@@ -18,10 +18,9 @@ const feedbackTone = ref<'success' | 'danger'>('success');
 const createForm = reactive({
   code: '',
   title: '',
-  moduleName: '',
-  description: '',
-  objectiveMaxScore: 80,
-  subjectiveMaxScore: 20
+  businessPlatformId: '',
+  businessPlatformModuleId: '',
+  description: ''
 });
 
 const statusLabels: Record<LessonStatus, string> = {
@@ -33,6 +32,38 @@ const statusLabels: Record<LessonStatus, string> = {
 
 const moduleOptions = computed(() =>
   [...new Set(store.state.lessons.map((lesson) => lesson.moduleName))].sort()
+);
+const enabledBusinessPlatforms = computed(() =>
+  store.state.businessPlatforms.filter((platform) => platform.status === 'ENABLED')
+);
+const selectedCreatePlatform = computed(() =>
+  store.getBusinessPlatform(createForm.businessPlatformId)
+);
+const enabledBusinessPlatformModules = computed(() =>
+  (selectedCreatePlatform.value?.modules ?? []).filter(
+    (businessModule) => businessModule.status === 'ENABLED'
+  )
+);
+const selectedCreateModule = computed(() =>
+  store.getBusinessPlatformModule(
+    createForm.businessPlatformId,
+    createForm.businessPlatformModuleId
+  )
+);
+
+watch(
+  () => createForm.businessPlatformId,
+  () => {
+    if (
+      !enabledBusinessPlatformModules.value.some(
+        (businessModule) =>
+          businessModule.id === createForm.businessPlatformModuleId
+      )
+    ) {
+      createForm.businessPlatformModuleId =
+        enabledBusinessPlatformModules.value[0]?.id ?? '';
+    }
+  }
 );
 
 const filteredLessons = computed(() => {
@@ -74,10 +105,11 @@ function openCreateDialog() {
   feedback.value = '';
   createForm.code = `LESSON-${String(store.state.lessons.length + 1).padStart(3, '0')}`;
   createForm.title = '';
-  createForm.moduleName = moduleOptions.value[0] ?? '综合业务';
+  createForm.businessPlatformId =
+    enabledBusinessPlatforms.value[0]?.id ?? '';
+  createForm.businessPlatformModuleId =
+    enabledBusinessPlatformModules.value[0]?.id ?? '';
   createForm.description = '';
-  createForm.objectiveMaxScore = 80;
-  createForm.subjectiveMaxScore = 20;
   createDialog.value?.showModal();
 }
 
@@ -86,19 +118,24 @@ function closeCreateDialog() {
 }
 
 async function createLesson() {
-  if (!createForm.code.trim() || !createForm.title.trim() || !createForm.moduleName.trim()) {
+  if (
+    !createForm.code.trim() ||
+    !createForm.title.trim() ||
+    !createForm.businessPlatformId ||
+    !createForm.businessPlatformModuleId
+  ) {
     feedbackTone.value = 'danger';
-    feedback.value = '请填写教案编号、名称和业务模块。';
+    feedback.value = '请填写教案编号和名称，并选择业务平台及平台模块。';
     return;
   }
   try {
     const lesson = store.createLesson({
       code: createForm.code.trim(),
       title: createForm.title.trim(),
-      moduleName: createForm.moduleName.trim(),
-      description: createForm.description.trim(),
-      objectiveMaxScore: Number(createForm.objectiveMaxScore),
-      subjectiveMaxScore: Number(createForm.subjectiveMaxScore)
+      moduleName: selectedCreateModule.value?.name,
+      businessPlatformId: createForm.businessPlatformId,
+      businessPlatformModuleId: createForm.businessPlatformModuleId,
+      description: createForm.description.trim()
     });
     closeCreateDialog();
     await router.push({ name: 'lesson-editor', params: { lessonId: lesson.id } });
@@ -192,6 +229,7 @@ function publishLesson(lesson: LessonPlan) {
             <tr>
               <th>教案</th>
               <th>业务模块</th>
+              <th>业务平台</th>
               <th>录制与阶段</th>
               <th>版本 / 状态</th>
               <th>最近更新</th>
@@ -210,6 +248,26 @@ function publishLesson(lesson: LessonPlan) {
                 </div>
               </td>
               <td>{{ lesson.moduleName }}</td>
+              <td class="business-platform-cell">
+                <strong>
+                  {{ store.getBusinessPlatform(lesson.businessPlatformId)?.name ?? '平台已删除' }}
+                </strong>
+                <small>
+                  {{
+                    store.getBusinessPlatformModule(
+                      lesson.businessPlatformId,
+                      lesson.businessPlatformModuleId
+                    )?.name ?? '模块未配置'
+                  }}
+                  ·
+                  {{
+                    store.getBusinessPlatformModule(
+                      lesson.businessPlatformId,
+                      lesson.businessPlatformModuleId
+                    )?.path ?? '未配置路径'
+                  }}
+                </small>
+              </td>
               <td>
                 <strong>{{ lesson.stages.length }} 个阶段</strong>
                 <span class="subtle">
@@ -232,12 +290,41 @@ function publishLesson(lesson: LessonPlan) {
                   >
                     查看录制
                   </RouterLink>
-                  <RouterLink
-                    class="button secondary compact"
-                    :to="{ name: 'lesson-editor', params: { lessonId: lesson.id } }"
-                  >
-                    教案编排
-                  </RouterLink>
+                  <details class="lesson-actions-menu">
+                    <summary>业务配置</summary>
+                    <div>
+                      <RouterLink
+                        :to="{ name: 'lesson-editor', params: { lessonId: lesson.id } }"
+                      >
+                        <span>⌘</span>
+                        <span><strong>录制与编排教案</strong><small>业务界面录制、阶段与节点</small></span>
+                      </RouterLink>
+                      <RouterLink
+                        :to="{ name: 'exam-setup', params: { lessonId: lesson.id } }"
+                      >
+                        <span>◫</span>
+                        <span><strong>考试设置</strong><small>时间、计分与提交规则</small></span>
+                      </RouterLink>
+                      <RouterLink
+                        :to="{ name: 'group-setup', params: { lessonId: lesson.id } }"
+                      >
+                        <span>♟</span>
+                        <span><strong>分组设置</strong><small>角色分组与成员安排</small></span>
+                      </RouterLink>
+                      <RouterLink
+                        :to="{ name: 'exam-data', params: { lessonId: lesson.id } }"
+                      >
+                        <span>◈</span>
+                        <span><strong>考试数据</strong><small>生成、检查与替换数据</small></span>
+                      </RouterLink>
+                      <RouterLink
+                        :to="{ name: 'publish-center', params: { lessonId: lesson.id } }"
+                      >
+                        <span>↗</span>
+                        <span><strong>发布中心</strong><small>就绪检查与任务发布</small></span>
+                      </RouterLink>
+                    </div>
+                  </details>
                   <button class="compact" type="button" @click="duplicateLesson(lesson)">复制</button>
                   <button
                     class="primary compact"
@@ -274,9 +361,53 @@ function publishLesson(lesson: LessonPlan) {
               <span>教案编号 *</span>
               <input v-model="createForm.code" required />
             </label>
-            <label>
-              <span>业务模块 *</span>
-              <input v-model="createForm.moduleName" required />
+            <label class="wide">
+              <span>业务平台 *</span>
+              <select v-model="createForm.businessPlatformId" required>
+                <option value="" disabled>请选择录制时打开的业务平台</option>
+                <option
+                  v-for="platform in enabledBusinessPlatforms"
+                  :key="platform.id"
+                  :value="platform.id"
+                >
+                  {{ platform.name }} · {{ platform.baseUrl }}
+                </option>
+              </select>
+              <small v-if="!enabledBusinessPlatforms.length" class="field-warning">
+                暂无已启用业务平台，请管理员先到“业务平台管理”中维护。
+              </small>
+            </label>
+            <label class="wide">
+              <span>平台模块 *</span>
+              <select
+                v-model="createForm.businessPlatformModuleId"
+                :disabled="!createForm.businessPlatformId"
+                required
+              >
+                <option value="" disabled>
+                  {{
+                    createForm.businessPlatformId
+                      ? '请选择录制时进入的平台模块'
+                      : '请先选择业务平台'
+                  }}
+                </option>
+                <option
+                  v-for="businessModule in enabledBusinessPlatformModules"
+                  :key="businessModule.id"
+                  :value="businessModule.id"
+                >
+                  {{ businessModule.name }} · {{ businessModule.path }}
+                </option>
+              </select>
+              <small
+                v-if="
+                  createForm.businessPlatformId &&
+                  !enabledBusinessPlatformModules.length
+                "
+                class="field-warning"
+              >
+                当前平台暂无已启用模块，请管理员先为该平台新增模块。
+              </small>
             </label>
             <label class="wide">
               <span>教案名称 *</span>
@@ -285,14 +416,6 @@ function publishLesson(lesson: LessonPlan) {
             <label class="wide">
               <span>教学简介</span>
               <textarea v-model="createForm.description" rows="3" />
-            </label>
-            <label>
-              <span>客观分</span>
-              <input v-model.number="createForm.objectiveMaxScore" type="number" min="0" max="100" />
-            </label>
-            <label>
-              <span>主观分</span>
-              <input v-model.number="createForm.subjectiveMaxScore" type="number" min="0" max="100" />
             </label>
           </div>
         </div>
@@ -348,6 +471,36 @@ function publishLesson(lesson: LessonPlan) {
   font-size: 11px;
 }
 
+.business-platform-cell {
+  max-width: 190px;
+}
+
+.business-platform-cell strong,
+.business-platform-cell small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.business-platform-cell strong {
+  font-size: 11px;
+}
+
+.business-platform-cell small {
+  max-width: 180px;
+  margin-top: 4px;
+  color: #8b95a6;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 8px;
+}
+
+.field-warning {
+  color: #c27a22;
+  font-size: 10px;
+  font-weight: 600;
+}
+
 .tag-line {
   display: flex;
   gap: 4px;
@@ -375,7 +528,8 @@ function publishLesson(lesson: LessonPlan) {
 
 .row-actions {
   display: flex;
-  min-width: 310px;
+  min-width: 330px;
+  align-items: center;
   gap: 6px;
 }
 
@@ -385,6 +539,93 @@ function publishLesson(lesson: LessonPlan) {
   align-items: center;
   padding: 0 10px;
   font-size: 11px;
+}
+
+.lesson-actions-menu {
+  position: relative;
+}
+
+.lesson-actions-menu summary {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  border: 1px solid #d9d4ff;
+  border-radius: 8px;
+  padding: 0 10px;
+  color: #5d4ed1;
+  background: #f7f5ff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lesson-actions-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.lesson-actions-menu summary::after {
+  margin-left: 6px;
+  content: "⌄";
+}
+
+.lesson-actions-menu[open] summary {
+  border-color: #8679ed;
+  background: #eeeaff;
+}
+
+.lesson-actions-menu > div {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 7px);
+  right: 0;
+  display: grid;
+  width: 270px;
+  overflow: hidden;
+  border: 1px solid #e0e3eb;
+  border-radius: 11px;
+  padding: 6px;
+  background: #fff;
+  box-shadow: 0 18px 45px rgb(27 32 65 / 18%);
+}
+
+.lesson-actions-menu > div a {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.lesson-actions-menu > div a:hover {
+  background: #f5f3ff;
+}
+
+.lesson-actions-menu > div a > span:first-child {
+  display: grid;
+  width: 29px;
+  height: 29px;
+  place-items: center;
+  border-radius: 8px;
+  color: #6555d8;
+  background: #eeebff;
+  font-size: 12px;
+}
+
+.lesson-actions-menu > div a > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.lesson-actions-menu strong {
+  color: #3f4a5d;
+  font-size: 10px;
+}
+
+.lesson-actions-menu small {
+  color: #8b95a5;
+  font-size: 8px;
 }
 
 .native-dialog {

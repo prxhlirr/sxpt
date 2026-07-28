@@ -1,38 +1,46 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed } from 'vue';
+import { useRoute } from 'vue-router';
 import type { PortalRole } from '../domain/models';
 import { useTrainingStore } from '../stores/trainingStore';
 
 const route = useRoute();
-const router = useRouter();
 const store = useTrainingStore();
 
-const roleOptions: Array<{
-  key: PortalRole;
-  label: string;
-  shortLabel: string;
-  home: string;
-}> = [
-  { key: 'admin', label: '后台管理', shortLabel: '管', home: '/admin/overview' },
-  { key: 'teacher', label: '教师端', shortLabel: '教', home: '/teacher/dashboard' },
-  { key: 'student', label: '学生端', shortLabel: '学', home: '/student/tasks' }
-];
-
-const activeLessonId = computed(() => {
-  const routeLessonId = String(route.params.lessonId ?? '');
-  return (
-    store.state.lessons.find((lesson) => lesson.id === routeLessonId)?.id ??
-    store.state.lessons[0]?.id ??
-    ''
-  );
-});
+const identityProfiles: Record<
+  PortalRole,
+  {
+    label: string;
+    shortLabel: string;
+    name: string;
+    accountLabel: string;
+  }
+> = {
+  admin: {
+    label: '后台管理',
+    shortLabel: '管',
+    name: '薛管理员',
+    accountLabel: '平台管理员'
+  },
+  teacher: {
+    label: '教师端',
+    shortLabel: '教',
+    name: '薛老师',
+    accountLabel: '授课教师'
+  },
+  student: {
+    label: '学生端',
+    shortLabel: '学',
+    name: '林同学',
+    accountLabel: '参训学员'
+  }
+};
 
 const navigation = computed(() => {
-  const lessonId = activeLessonId.value;
   if (store.state.currentRole === 'teacher') {
     return [
       { label: '教学工作台', icon: '⌂', to: '/teacher/dashboard' },
+      { label: '录制教案', icon: '⌘', to: '/admin/lessons' },
       { label: '评阅与反馈', icon: '✓', to: '/teacher/review' }
     ];
   }
@@ -45,73 +53,22 @@ const navigation = computed(() => {
   return [
     { label: '运营总览', icon: '⌂', to: '/admin/overview' },
     { label: '教案管理', icon: '▤', to: '/admin/lessons' },
-    {
-      label: '教案编排',
-      icon: '⌘',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/editor`
-        : '/admin/lessons'
-    },
-    {
-      label: '考试设置',
-      icon: '◫',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/exam`
-        : '/admin/lessons'
-    },
-    {
-      label: '分组设置',
-      icon: '♟',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/groups`
-        : '/admin/lessons'
-    },
-    {
-      label: '考试数据',
-      icon: '◈',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/data`
-        : '/admin/lessons'
-    },
-    {
-      label: '发布中心',
-      icon: '↗',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/publish`
-        : '/admin/lessons'
-    }
+    { label: '业务平台', icon: '◎', to: '/admin/business-platforms' }
   ];
 });
 
-const currentRole = computed(() =>
-  roleOptions.find((item) => item.key === store.state.currentRole)
+const currentRole = computed(
+  () => identityProfiles[store.state.currentRole]
 );
-
-watch(
-  () => route.path,
-  (path) => {
-    const role: PortalRole = path.startsWith('/student')
-      ? 'student'
-      : path.startsWith('/teacher')
-        ? 'teacher'
-        : 'admin';
-    if (store.state.currentRole !== role) store.setRole(role);
-  },
-  { immediate: true }
-);
-
-async function switchRole(role: PortalRole) {
-  const option = roleOptions.find((item) => item.key === role);
-  if (!option) return;
-  store.setRole(role);
-  await router.push(option.home);
-}
 </script>
 
 <template>
-  <div class="app-shell">
+  <div
+    class="app-shell"
+    :class="{ 'app-shell--immersive': route.name === 'lesson-editor' }"
+  >
     <aside class="app-sidebar">
-      <RouterLink class="brand" to="/admin/overview">
+      <RouterLink class="brand" to="/platforms">
         <span class="brand-mark">SX</span>
         <span>
           <strong>实训云台</strong>
@@ -119,20 +76,16 @@ async function switchRole(role: PortalRole) {
         </span>
       </RouterLink>
 
-      <div class="role-switcher" aria-label="切换门户">
-        <button
-          v-for="role in roleOptions"
-          :key="role.key"
-          type="button"
-          :class="{ active: store.state.currentRole === role.key }"
-          @click="switchRole(role.key)"
-        >
-          <span>{{ role.shortLabel }}</span>
-          {{ role.label }}
-        </button>
+      <div class="identity-card" aria-label="当前登录身份">
+        <span>{{ currentRole.shortLabel }}</span>
+        <div>
+          <small>当前身份</small>
+          <strong>{{ currentRole.label }}</strong>
+        </div>
+        <RouterLink to="/platforms" title="返回平台选择">↗</RouterLink>
       </div>
 
-      <p class="nav-caption">{{ currentRole?.label }}功能</p>
+      <p class="nav-caption">{{ currentRole.label }}功能</p>
       <nav class="main-nav">
         <RouterLink
           v-for="item in navigation"
@@ -154,8 +107,11 @@ async function switchRole(role: PortalRole) {
       </section>
 
       <footer class="sidebar-footer">
-        <span class="avatar">薛</span>
-        <span><strong>薛老师</strong><small>平台管理员</small></span>
+        <span class="avatar">{{ currentRole.name.slice(0, 1) }}</span>
+        <span>
+          <strong>{{ currentRole.name }}</strong>
+          <small>{{ currentRole.accountLabel }}</small>
+        </span>
         <button type="button" aria-label="更多账号操作">•••</button>
       </footer>
     </aside>
@@ -163,11 +119,12 @@ async function switchRole(role: PortalRole) {
     <section class="app-workspace">
       <header class="topbar">
         <div>
-          <span class="breadcrumb">业务实训平台 / {{ currentRole?.label }}</span>
+          <span class="breadcrumb">业务实训平台 / {{ currentRole.label }}</span>
           <strong>{{ String(route.meta.title ?? '工作台') }}</strong>
         </div>
         <div class="topbar-actions">
-          <span class="environment-badge"><i></i> MOCK 演示环境</span>
+          <RouterLink class="platform-home-link" to="/platforms">平台首页</RouterLink>
+          <span class="environment-badge"><i></i> 实训环境</span>
           <button class="icon-button" type="button" aria-label="搜索">⌕</button>
           <button class="icon-button" type="button" aria-label="通知">♢</button>
           <span class="today">2026 · 秋季学期</span>

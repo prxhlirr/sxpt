@@ -1,6 +1,8 @@
 import { reactive } from 'vue';
 import type {
   ActivityEvent,
+  BusinessPlatform,
+  BusinessPlatformModule,
   DataAuditEvent,
   ExamDataItem,
   ExamSettings,
@@ -54,6 +56,28 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const lesson = state.lessons.find((candidate) => candidate.id === lessonId);
     if (!lesson) throw new Error(`未找到教案：${lessonId}`);
     return lesson;
+  };
+
+  const requireBusinessPlatform = (platformId: string) => {
+    const platform = state.businessPlatforms.find(
+      (candidate) => candidate.id === platformId
+    );
+    if (!platform) throw new Error(`未找到业务平台：${platformId}`);
+    return platform;
+  };
+
+  const requireBusinessPlatformModule = (
+    platformId: string,
+    moduleId: string
+  ) => {
+    const platform = requireBusinessPlatform(platformId);
+    const businessModule = platform.modules.find(
+      (candidate) => candidate.id === moduleId
+    );
+    if (!businessModule) {
+      throw new Error(`未在“${platform.name}”中找到业务模块：${moduleId}`);
+    }
+    return businessModule;
   };
 
   const requireDataItem = (lessonId: string, itemId: string) => {
@@ -148,6 +172,208 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     persist();
   }
 
+  function getBusinessPlatform(platformId: string) {
+    return state.businessPlatforms.find((platform) => platform.id === platformId);
+  }
+
+  function getBusinessPlatformModule(platformId: string, moduleId: string) {
+    return getBusinessPlatform(platformId)?.modules.find(
+      (businessModule) => businessModule.id === moduleId
+    );
+  }
+
+  function createBusinessPlatform(
+    input: Pick<BusinessPlatform, 'code' | 'name' | 'baseUrl'> &
+      Partial<Pick<BusinessPlatform, 'description' | 'status'>>
+  ): BusinessPlatform {
+    const code = input.code.trim().toUpperCase();
+    const name = input.name.trim();
+    const baseUrl = input.baseUrl.trim();
+    if (!code || !name || !baseUrl) {
+      throw new Error('平台编码、平台名称和访问地址不能为空');
+    }
+    if (state.businessPlatforms.some((platform) => platform.code === code)) {
+      throw new Error(`业务平台编码已存在：${code}`);
+    }
+    const created: BusinessPlatform = {
+      id: idFactory('business-platform'),
+      code,
+      name,
+      baseUrl,
+      description: input.description?.trim() ?? '',
+      status: input.status ?? 'ENABLED',
+      modules: [],
+      updatedAt: now()
+    };
+    state.businessPlatforms.unshift(created);
+    addActivity('BUSINESS_PLATFORM_CREATED', `新增业务平台：${name}`, baseUrl);
+    persist();
+    return requireBusinessPlatform(created.id);
+  }
+
+  function updateBusinessPlatform(
+    platformId: string,
+    patch: Partial<Omit<BusinessPlatform, 'id' | 'updatedAt' | 'modules'>>
+  ): BusinessPlatform {
+    const platform = requireBusinessPlatform(platformId);
+    const nextCode = patch.code?.trim().toUpperCase() ?? platform.code;
+    const nextName = patch.name?.trim() ?? platform.name;
+    const nextBaseUrl = patch.baseUrl?.trim() ?? platform.baseUrl;
+    if (!nextCode || !nextName || !nextBaseUrl) {
+      throw new Error('平台编码、平台名称和访问地址不能为空');
+    }
+    if (
+      state.businessPlatforms.some(
+        (candidate) => candidate.id !== platformId && candidate.code === nextCode
+      )
+    ) {
+      throw new Error(`业务平台编码已存在：${nextCode}`);
+    }
+    const normalizedPatch = {
+      ...toPlain(patch),
+      ...(patch.code !== undefined ? { code: nextCode } : {}),
+      ...(patch.name !== undefined ? { name: nextName } : {}),
+      ...(patch.baseUrl !== undefined ? { baseUrl: nextBaseUrl } : {}),
+      ...(patch.description !== undefined
+        ? { description: patch.description.trim() }
+        : {})
+    };
+    Object.assign(platform, normalizedPatch, {
+      id: platformId,
+      updatedAt: now()
+    });
+    addActivity(
+      'BUSINESS_PLATFORM_UPDATED',
+      `更新业务平台：${platform.name}`,
+      platform.baseUrl
+    );
+    persist();
+    return platform;
+  }
+
+  function removeBusinessPlatform(platformId: string) {
+    const platform = requireBusinessPlatform(platformId);
+    if (
+      state.lessons.some((lesson) => lesson.businessPlatformId === platformId)
+    ) {
+      throw new Error('该业务平台已被教案使用，请停用平台而不要删除');
+    }
+    state.businessPlatforms.splice(
+      state.businessPlatforms.findIndex((candidate) => candidate.id === platformId),
+      1
+    );
+    addActivity('BUSINESS_PLATFORM_REMOVED', `删除业务平台：${platform.name}`, platform.code);
+    persist();
+    return platform;
+  }
+
+  function createBusinessPlatformModule(
+    platformId: string,
+    input: Pick<BusinessPlatformModule, 'code' | 'name' | 'path'> &
+      Partial<Pick<BusinessPlatformModule, 'description' | 'status'>>
+  ): BusinessPlatformModule {
+    const platform = requireBusinessPlatform(platformId);
+    const code = input.code.trim().toUpperCase();
+    const name = input.name.trim();
+    const path = normalizeBusinessModulePath(input.path);
+    if (!code || !name || !path) {
+      throw new Error('模块编码、模块名称和模块路径不能为空');
+    }
+    if (platform.modules.some((businessModule) => businessModule.code === code)) {
+      throw new Error(`“${platform.name}”中已存在模块编码：${code}`);
+    }
+    const created: BusinessPlatformModule = {
+      id: idFactory('business-module'),
+      code,
+      name,
+      path,
+      description: input.description?.trim() ?? '',
+      status: input.status ?? 'ENABLED',
+      updatedAt: now()
+    };
+    platform.modules.push(created);
+    platform.updatedAt = created.updatedAt;
+    addActivity(
+      'BUSINESS_PLATFORM_MODULE_CREATED',
+      `新增平台模块：${name}`,
+      `${platform.name} · ${path}`
+    );
+    persist();
+    return requireBusinessPlatformModule(platformId, created.id);
+  }
+
+  function updateBusinessPlatformModule(
+    platformId: string,
+    moduleId: string,
+    patch: Partial<Omit<BusinessPlatformModule, 'id' | 'updatedAt'>>
+  ): BusinessPlatformModule {
+    const platform = requireBusinessPlatform(platformId);
+    const businessModule = requireBusinessPlatformModule(platformId, moduleId);
+    const nextCode = patch.code?.trim().toUpperCase() ?? businessModule.code;
+    const nextName = patch.name?.trim() ?? businessModule.name;
+    const nextPath =
+      patch.path !== undefined
+        ? normalizeBusinessModulePath(patch.path)
+        : businessModule.path;
+    if (!nextCode || !nextName || !nextPath) {
+      throw new Error('模块编码、模块名称和模块路径不能为空');
+    }
+    if (
+      platform.modules.some(
+        (candidate) =>
+          candidate.id !== moduleId && candidate.code === nextCode
+      )
+    ) {
+      throw new Error(`“${platform.name}”中已存在模块编码：${nextCode}`);
+    }
+    Object.assign(
+      businessModule,
+      toPlain(patch),
+      {
+        code: nextCode,
+        name: nextName,
+        path: nextPath,
+        ...(patch.description !== undefined
+          ? { description: patch.description.trim() }
+          : {}),
+        id: moduleId,
+        updatedAt: now()
+      }
+    );
+    platform.updatedAt = businessModule.updatedAt;
+    addActivity(
+      'BUSINESS_PLATFORM_MODULE_UPDATED',
+      `更新平台模块：${businessModule.name}`,
+      platform.name
+    );
+    persist();
+    return businessModule;
+  }
+
+  function removeBusinessPlatformModule(platformId: string, moduleId: string) {
+    const platform = requireBusinessPlatform(platformId);
+    const businessModule = requireBusinessPlatformModule(platformId, moduleId);
+    if (
+      state.lessons.some(
+        (lesson) => lesson.businessPlatformModuleId === moduleId
+      )
+    ) {
+      throw new Error('该平台模块已被教案使用，请停用模块而不要删除');
+    }
+    platform.modules.splice(
+      platform.modules.findIndex((candidate) => candidate.id === moduleId),
+      1
+    );
+    platform.updatedAt = now();
+    addActivity(
+      'BUSINESS_PLATFORM_MODULE_REMOVED',
+      `删除平台模块：${businessModule.name}`,
+      platform.name
+    );
+    persist();
+    return businessModule;
+  }
+
   function refreshPublishedTaskStatuses(): PublishedTask[] {
     let changed = false;
     state.publishedTasks.forEach((task) => {
@@ -172,11 +398,34 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   function createLesson(input: Partial<LessonPlan> = {}): LessonPlan {
     const timestamp = now();
     const lessonId = idFactory('lesson');
+    const businessPlatformId =
+      input.businessPlatformId ??
+      state.businessPlatforms.find((platform) => platform.status === 'ENABLED')?.id ??
+      '';
+    const businessPlatform = requireBusinessPlatform(businessPlatformId);
+    if (businessPlatform.status !== 'ENABLED') {
+      throw new Error('请选择已启用的业务平台');
+    }
+    const businessPlatformModuleId =
+      input.businessPlatformModuleId ??
+      businessPlatform.modules.find(
+        (businessModule) => businessModule.status === 'ENABLED'
+      )?.id ??
+      '';
+    const businessPlatformModule = requireBusinessPlatformModule(
+      businessPlatformId,
+      businessPlatformModuleId
+    );
+    if (businessPlatformModule.status !== 'ENABLED') {
+      throw new Error('请选择已启用的平台模块');
+    }
     const created: LessonPlan = {
       id: lessonId,
       code: input.code?.trim() || `LESSON-${state.lessons.length + 1}`,
       title: input.title?.trim() || '未命名实训教案',
-      moduleName: input.moduleName?.trim() || '未分类业务',
+      moduleName: input.moduleName?.trim() || businessPlatformModule.name,
+      businessPlatformId,
+      businessPlatformModuleId,
       description: input.description?.trim() || '',
       version: 1,
       status: 'DRAFT',
@@ -234,6 +483,26 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   ): LessonPlan {
     assertLessonConfigurationMutable(lessonId);
     const lesson = requireLesson(lessonId);
+    if (
+      patch.businessPlatformId !== undefined ||
+      patch.businessPlatformModuleId !== undefined
+    ) {
+      const nextPlatformId =
+        patch.businessPlatformId ?? lesson.businessPlatformId;
+      const nextModuleId =
+        patch.businessPlatformModuleId ?? lesson.businessPlatformModuleId;
+      const platform = requireBusinessPlatform(nextPlatformId);
+      const businessModule = requireBusinessPlatformModule(
+        nextPlatformId,
+        nextModuleId
+      );
+      if (
+        platform.status !== 'ENABLED' ||
+        businessModule.status !== 'ENABLED'
+      ) {
+        throw new Error('教案只能绑定已启用的业务平台和平台模块');
+      }
+    }
     const stableId = lesson.id;
     Object.assign(lesson, toPlain(patch), { id: stableId, updatedAt: now() });
     addActivity('LESSON_UPDATED', `更新教案：${lesson.title}`, '教案元数据已保存');
@@ -328,6 +597,26 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const issues: string[] = [];
     if (!lesson.title.trim()) issues.push('教案名称不能为空');
     if (!lesson.moduleName.trim()) issues.push('业务模块不能为空');
+    const platform = getBusinessPlatform(lesson.businessPlatformId);
+    if (!platform) {
+      issues.push('教案必须绑定有效的业务平台');
+    } else if (platform.status !== 'ENABLED') {
+      issues.push('教案绑定的业务平台已停用');
+    } else if (!platform.baseUrl.trim()) {
+      issues.push('教案绑定的业务平台尚未配置访问地址');
+    } else {
+      const businessModule = getBusinessPlatformModule(
+        platform.id,
+        lesson.businessPlatformModuleId
+      );
+      if (!businessModule) {
+        issues.push('教案必须绑定当前业务平台下的有效模块');
+      } else if (businessModule.status !== 'ENABLED') {
+        issues.push('教案绑定的平台模块已停用');
+      } else if (!businessModule.path.trim()) {
+        issues.push('教案绑定的平台模块尚未配置访问路径');
+      }
+    }
     if (lesson.stages.length === 0) issues.push('教案至少需要一个业务阶段');
     if (lesson.stages.some((stage) => !stage.groupKey.trim())) {
       issues.push('每个阶段必须指定负责角色组');
@@ -1121,7 +1410,15 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     state,
     currentLesson,
     getLesson,
+    getBusinessPlatform,
+    getBusinessPlatformModule,
     setRole,
+    createBusinessPlatform,
+    updateBusinessPlatform,
+    removeBusinessPlatform,
+    createBusinessPlatformModule,
+    updateBusinessPlatformModule,
+    removeBusinessPlatformModule,
     refreshPublishedTaskStatuses,
     createLesson,
     duplicateLesson,
@@ -1178,6 +1475,14 @@ function requiredReason(reason: string, message = '操作原因不能为空'): s
   const normalized = reason.trim();
   if (!normalized) throw new Error(message);
   return normalized;
+}
+
+function normalizeBusinessModulePath(value: string): string {
+  const path = value.trim();
+  if (!path || path.startsWith('/') || /^[a-z][a-z\d+.-]*:\/\//i.test(path)) {
+    return path;
+  }
+  return `/${path}`;
 }
 
 function maskedReference(unitId: string, id: string, index: number): string {

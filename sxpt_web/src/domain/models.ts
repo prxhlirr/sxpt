@@ -14,6 +14,27 @@ export type DataItemStatus =
   | 'DISABLED'
   | 'IN_USE';
 
+export interface BusinessPlatformModule {
+  id: string;
+  code: string;
+  name: string;
+  path: string;
+  description: string;
+  status: 'ENABLED' | 'DISABLED';
+  updatedAt: string;
+}
+
+export interface BusinessPlatform {
+  id: string;
+  code: string;
+  name: string;
+  baseUrl: string;
+  description: string;
+  status: 'ENABLED' | 'DISABLED';
+  modules: BusinessPlatformModule[];
+  updatedAt: string;
+}
+
 export interface CaptureRect {
   x: number;
   y: number;
@@ -64,6 +85,8 @@ export interface LessonPlan {
   code: string;
   title: string;
   moduleName: string;
+  businessPlatformId: string;
+  businessPlatformModuleId: string;
   description: string;
   version: number;
   status: LessonStatus;
@@ -200,6 +223,7 @@ export interface ActivityEvent {
 
 export interface TrainingState {
   currentRole: PortalRole;
+  businessPlatforms: BusinessPlatform[];
   lessons: LessonPlan[];
   examSettings: Record<string, ExamSettings>;
   groupPlans: Record<string, GroupPlan>;
