@@ -55,6 +55,10 @@ public class VerifiedPlatformLaunchContextVO {
 
     private String dataScopeJson;
 
+    private String sdkConfigSnapshotJson;
+
+    private String dataInstanceValidationSnapshotJson;
+
     private String launchStatus;
 
     private LocalDateTime verifiedTime;
@@ -219,6 +223,22 @@ public class VerifiedPlatformLaunchContextVO {
 
     public void setDataScopeJson(String dataScopeJson) {
         this.dataScopeJson = dataScopeJson;
+    }
+
+    public String getSdkConfigSnapshotJson() {
+        return sdkConfigSnapshotJson;
+    }
+
+    public void setSdkConfigSnapshotJson(String sdkConfigSnapshotJson) {
+        this.sdkConfigSnapshotJson = sdkConfigSnapshotJson;
+    }
+
+    public String getDataInstanceValidationSnapshotJson() {
+        return dataInstanceValidationSnapshotJson;
+    }
+
+    public void setDataInstanceValidationSnapshotJson(String dataInstanceValidationSnapshotJson) {
+        this.dataInstanceValidationSnapshotJson = dataInstanceValidationSnapshotJson;
     }
 
     public String getLaunchStatus() {

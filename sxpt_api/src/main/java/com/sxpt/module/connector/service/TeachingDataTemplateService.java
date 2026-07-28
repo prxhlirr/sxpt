@@ -26,6 +26,38 @@ public interface TeachingDataTemplateService {
     TeachingDataTemplate createTeachingDataTemplate(TeachingDataTemplate template);
 
     /**
+     * 更新教学业务数据模板。
+     *
+     * @param template 教学业务数据模板实体，必须包含 ID 和可编辑模板字段。
+     * @return 已更新的教学业务数据模板。
+     */
+    TeachingDataTemplate updateTeachingDataTemplate(TeachingDataTemplate template);
+
+    /**
+     * 启用教学业务数据模板。
+     *
+     * @param id 模板 ID。
+     * @return 已启用的教学业务数据模板。
+     */
+    TeachingDataTemplate enableTeachingDataTemplate(String id);
+
+    /**
+     * 停用教学业务数据模板。
+     *
+     * @param id 模板 ID。
+     * @return 已停用的教学业务数据模板。
+     */
+    TeachingDataTemplate disableTeachingDataTemplate(String id);
+
+    /**
+     * 查询教学业务数据模板详情。
+     *
+     * @param id 模板 ID。
+     * @return 未删除的教学业务数据模板。
+     */
+    TeachingDataTemplate getTeachingDataTemplateById(String id);
+
+    /**
      * 查询指定租户和原平台下的教学业务数据模板。
      *
      * @param tenantId 租户 ID。
@@ -33,6 +65,20 @@ public interface TeachingDataTemplateService {
      * @return 教学业务数据模板列表。
      */
     List<TeachingDataTemplate> listTemplatesByConnector(String tenantId, String connectorSystemId);
+
+    /**
+     * 查询指定平台、模块和场景下的模板，避免跨业务模块误选模板。
+     *
+     * @param tenantId 租户 ID。
+     * @param connectorSystemId 原平台配置 ID。
+     * @param moduleCode 业务模块编码。
+     * @param sceneType 教学场景。
+     * @return 模板列表。
+     */
+    List<TeachingDataTemplate> listTemplatesByModuleAndScene(String tenantId,
+                                                             String connectorSystemId,
+                                                             String moduleCode,
+                                                             String sceneType);
 
     /**
      * 查询指定教学点和场景下的可用教学业务数据模板。

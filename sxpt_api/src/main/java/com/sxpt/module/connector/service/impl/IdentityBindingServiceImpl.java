@@ -6,6 +6,7 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.IdentityBinding;
 import com.sxpt.module.connector.mapper.IdentityBindingMapper;
 import com.sxpt.module.connector.service.IdentityBindingService;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +29,6 @@ import java.time.LocalDateTime;
 @Service
 @Profile("!test")
 public class IdentityBindingServiceImpl implements IdentityBindingService {
-
-    private static final String DEFAULT_STATUS = "ACTIVE";
 
     private final IdentityBindingMapper identityBindingMapper;
 
@@ -118,7 +117,7 @@ public class IdentityBindingServiceImpl implements IdentityBindingService {
             identityBinding.setUpdateTime(now);
         }
         if (!StringUtils.hasText(identityBinding.getStatus())) {
-            identityBinding.setStatus(DEFAULT_STATUS);
+            identityBinding.setStatus(RecordStatus.ACTIVE.getValue());
         }
         if (identityBinding.getDeleted() == null) {
             identityBinding.setDeleted(Boolean.FALSE);

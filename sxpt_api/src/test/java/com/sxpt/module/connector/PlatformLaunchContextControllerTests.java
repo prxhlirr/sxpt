@@ -4,6 +4,10 @@ import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.connector.entity.PlatformLaunchContext;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
+import com.sxpt.module.user.mapper.TeachRoleMapper;
+import com.sxpt.module.user.mapper.TeachUserMapper;
+import com.sxpt.module.user.mapper.TeachUserOrgMapper;
+import com.sxpt.module.user.mapper.TeachUserRoleMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +56,18 @@ class PlatformLaunchContextControllerTests {
     @MockBean
     private PlatformLaunchContextService platformLaunchContextService;
 
+    @MockBean
+    private TeachUserMapper teachUserMapper;
+
+    @MockBean
+    private TeachUserRoleMapper teachUserRoleMapper;
+
+    @MockBean
+    private TeachRoleMapper teachRoleMapper;
+
+    @MockBean
+    private TeachUserOrgMapper teachUserOrgMapper;
+
     /**
      * 校验创建启动上下文成功返回统一响应。
      *
@@ -66,7 +82,7 @@ class PlatformLaunchContextControllerTests {
         mockMvc.perform(post("/api/v1/connector/launch-contexts/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"userId\":\"user_001\",\"connectorSystemId\":\"connector_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"executionId\":\"exec_001\",\"sceneType\":\"RECORD\",\"sdkMode\":\"CAPTURE\",\"targetUrl\":\"/record/apply\",\"segmentNo\":1,\"actorType\":\"APPLICANT\",\"requiredExternalOrgId\":\"org_ext_001\",\"requiredExternalRoleId\":\"role_ext_001\",\"dataScopeJson\":\"{}\"}"))
+                        .content("{\"tenantId\":\"tenant_001\",\"userId\":\"user_001\",\"connectorSystemId\":\"connector_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"executionId\":\"exec_001\",\"dataInstanceId\":\"instance_001\",\"sceneType\":\"RECORD\",\"sdkMode\":\"CAPTURE\",\"targetUrl\":\"/record/apply\",\"segmentNo\":1,\"actorType\":\"APPLICANT\",\"requiredExternalOrgId\":\"org_ext_001\",\"requiredExternalRoleId\":\"role_ext_001\",\"dataScopeJson\":\"{}\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -92,6 +108,7 @@ class PlatformLaunchContextControllerTests {
         org.junit.jupiter.api.Assertions.assertEquals("task_001", requestEntity.getTaskId());
         org.junit.jupiter.api.Assertions.assertEquals("tp_001", requestEntity.getTeachingPointId());
         org.junit.jupiter.api.Assertions.assertEquals("exec_001", requestEntity.getExecutionId());
+        org.junit.jupiter.api.Assertions.assertEquals("instance_001", requestEntity.getDataInstanceId());
         org.junit.jupiter.api.Assertions.assertEquals("RECORD", requestEntity.getSceneType());
         org.junit.jupiter.api.Assertions.assertEquals("CAPTURE", requestEntity.getSdkMode());
         org.junit.jupiter.api.Assertions.assertEquals("/record/apply", requestEntity.getTargetUrl());
@@ -264,6 +281,7 @@ class PlatformLaunchContextControllerTests {
         launchContext.setTaskId("task_001");
         launchContext.setTeachingPointId("tp_001");
         launchContext.setExecutionId("exec_001");
+        launchContext.setDataInstanceId("instance_001");
         launchContext.setSceneType("RECORD");
         launchContext.setSdkMode("CAPTURE");
         launchContext.setTargetUrl("/record/apply");

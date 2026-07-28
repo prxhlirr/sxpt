@@ -1,8 +1,16 @@
 <script setup lang="ts">
 import { computed, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import type { RouteLocationRaw } from 'vue-router';
 import type { PortalRole } from '../domain/models';
 import { useTrainingStore } from '../stores/trainingStore';
+
+interface NavigationItem {
+  label: string;
+  icon: string;
+  to: RouteLocationRaw;
+  group?: 'data-prepare';
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -15,7 +23,7 @@ const roleOptions: Array<{
   home: string;
 }> = [
   { key: 'admin', label: '后台管理', shortLabel: '管', home: '/admin/overview' },
-  { key: 'teacher', label: '教师端', shortLabel: '教', home: '/teacher/dashboard' },
+  { key: 'teacher', label: '教师端', shortLabel: '师', home: '/teacher/dashboard' },
   { key: 'student', label: '学生端', shortLabel: '学', home: '/student/tasks' }
 ];
 
@@ -28,54 +36,60 @@ const activeLessonId = computed(() => {
   );
 });
 
-const navigation = computed(() => {
+const navigation = computed<NavigationItem[]>(() => {
   const lessonId = activeLessonId.value;
   if (store.state.currentRole === 'teacher') {
     return [
-      { label: '教学工作台', icon: '⌂', to: '/teacher/dashboard' },
-      { label: '评阅与反馈', icon: '✓', to: '/teacher/review' }
+      { label: '教学工作台', icon: '01', to: '/teacher/dashboard' },
+      { label: '评阅反馈', icon: '02', to: '/teacher/review' },
+      { label: '批次准备', icon: '03', to: '/teacher/data-prepare', group: 'data-prepare' }
     ];
   }
   if (store.state.currentRole === 'student') {
     return [
-      { label: '我的任务', icon: '▣', to: '/student/tasks' },
-      { label: '成绩反馈', icon: '★', to: '/student/results' }
+      { label: '我的任务', icon: '01', to: '/student/tasks' },
+      { label: '成绩反馈', icon: '02', to: '/student/results' }
     ];
   }
   return [
-    { label: '运营总览', icon: '⌂', to: '/admin/overview' },
-    { label: '教案管理', icon: '▤', to: '/admin/lessons' },
+    { label: '运营总览', icon: '01', to: '/admin/overview' },
+    { label: '教案管理', icon: '02', to: '/admin/lessons' },
     {
       label: '教案编排',
-      icon: '⌘',
+      icon: '03',
       to: lessonId
         ? `/admin/lessons/${encodeURIComponent(lessonId)}/editor`
         : '/admin/lessons'
     },
     {
       label: '考试设置',
-      icon: '◫',
+      icon: '04',
       to: lessonId
         ? `/admin/lessons/${encodeURIComponent(lessonId)}/exam`
         : '/admin/lessons'
     },
     {
       label: '分组设置',
-      icon: '♟',
+      icon: '05',
       to: lessonId
         ? `/admin/lessons/${encodeURIComponent(lessonId)}/groups`
         : '/admin/lessons'
     },
     {
       label: '考试数据',
-      icon: '◈',
+      icon: '06',
       to: lessonId
         ? `/admin/lessons/${encodeURIComponent(lessonId)}/data`
         : '/admin/lessons'
     },
+    { label: '平台接入', icon: '07', to: '/admin/data-prepare/systems', group: 'data-prepare' },
+    { label: '业务模块', icon: '08', to: '/admin/data-prepare/modules', group: 'data-prepare' },
+    { label: '模板管理', icon: '09', to: '/admin/data-prepare/templates', group: 'data-prepare' },
+    { label: '策略管理', icon: '10', to: '/admin/data-prepare/strategies', group: 'data-prepare' },
+    { label: '批次准备', icon: '11', to: '/admin/data-prepare', group: 'data-prepare' },
     {
       label: '发布中心',
-      icon: '↗',
+      icon: '12',
       to: lessonId
         ? `/admin/lessons/${encodeURIComponent(lessonId)}/publish`
         : '/admin/lessons'
@@ -138,6 +152,7 @@ async function switchRole(role: PortalRole) {
           v-for="item in navigation"
           :key="item.label"
           :to="item.to"
+          :class="{ 'data-prepare-nav': item.group === 'data-prepare' }"
         >
           <span class="nav-icon">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
@@ -150,13 +165,13 @@ async function switchRole(role: PortalRole) {
         <div class="mini-progress">
           <span style="width: 72%"></span>
         </div>
-        <small>教案 → 考试 → 分组 → 数据 → 发布</small>
+        <small>教案 / 考试 / 分组 / 数据 / 发布</small>
       </section>
 
       <footer class="sidebar-footer">
-        <span class="avatar">薛</span>
-        <span><strong>薛老师</strong><small>平台管理员</small></span>
-        <button type="button" aria-label="更多账号操作">•••</button>
+        <span class="avatar">师</span>
+        <span><strong>教师账号</strong><small>平台管理员</small></span>
+        <button type="button" aria-label="更多账号操作">···</button>
       </footer>
     </aside>
 
@@ -167,10 +182,10 @@ async function switchRole(role: PortalRole) {
           <strong>{{ String(route.meta.title ?? '工作台') }}</strong>
         </div>
         <div class="topbar-actions">
-          <span class="environment-badge"><i></i> MOCK 演示环境</span>
-          <button class="icon-button" type="button" aria-label="搜索">⌕</button>
-          <button class="icon-button" type="button" aria-label="通知">♢</button>
-          <span class="today">2026 · 秋季学期</span>
+          <span class="environment-badge"><i></i> 本地联调环境</span>
+          <button class="icon-button" type="button" aria-label="搜索">S</button>
+          <button class="icon-button" type="button" aria-label="通知">N</button>
+          <span class="today">2026 秋季学期</span>
         </div>
       </header>
       <main

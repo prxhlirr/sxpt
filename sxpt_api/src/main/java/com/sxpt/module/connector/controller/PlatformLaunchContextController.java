@@ -178,6 +178,8 @@ public class PlatformLaunchContextController {
         vo.setExternalBusinessId(launchContext.getExternalBusinessId());
         vo.setExternalBusinessNo(launchContext.getExternalBusinessNo());
         vo.setDataScopeJson(launchContext.getDataScopeJson());
+        vo.setSdkConfigSnapshotJson(launchContext.getSdkConfigSnapshotJson());
+        vo.setDataInstanceValidationSnapshotJson(launchContext.getDataInstanceValidationSnapshotJson());
         vo.setLaunchStatus(launchContext.getLaunchStatus());
         vo.setVerifiedTime(launchContext.getVerifiedTime());
         vo.setExpireTime(launchContext.getExpireTime());

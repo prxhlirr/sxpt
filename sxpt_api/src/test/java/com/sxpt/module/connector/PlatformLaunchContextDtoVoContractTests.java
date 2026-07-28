@@ -53,6 +53,19 @@ class PlatformLaunchContextDtoVoContractTests {
     }
 
     /**
+     * 校验缺少教学数据实例 ID 时参数校验失败，避免启动上下文绕过数据准备校验闭环。
+     */
+    @Test
+    void createPlatformLaunchContextRequestShouldRejectMissingDataInstanceId() {
+        CreatePlatformLaunchContextRequest request = buildValidRequest();
+        request.setDataInstanceId(" ");
+
+        Set<ConstraintViolation<CreatePlatformLaunchContextRequest>> violations = validator.validate(request);
+
+        assertEquals(1, violations.size());
+    }
+
+    /**
      * 校验数据范围摘要超长时参数校验失败。
      */
     @Test
@@ -88,6 +101,7 @@ class PlatformLaunchContextDtoVoContractTests {
         request.setTenantId("tenant_001");
         request.setUserId("user_001");
         request.setConnectorSystemId("connector_001");
+        request.setDataInstanceId("instance_001");
         request.setSceneType("RECORD");
         request.setSdkMode("CAPTURE");
         request.setTargetUrl("/record/apply");

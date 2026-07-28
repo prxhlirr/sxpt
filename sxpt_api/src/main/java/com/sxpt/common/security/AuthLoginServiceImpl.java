@@ -1,18 +1,28 @@
 package com.sxpt.common.security;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.config.JwtProperties;
 import com.sxpt.controller.AuthLoginRequest;
 import com.sxpt.controller.AuthLoginResponse;
+import com.sxpt.module.user.entity.TeachRole;
 import com.sxpt.module.user.entity.TeachUser;
+import com.sxpt.module.user.entity.TeachUserOrg;
+import com.sxpt.module.user.entity.TeachUserRole;
+import com.sxpt.module.user.mapper.TeachRoleMapper;
 import com.sxpt.module.user.mapper.TeachUserMapper;
+import com.sxpt.module.user.mapper.TeachUserOrgMapper;
+import com.sxpt.module.user.mapper.TeachUserRoleMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * 正式登录服务实现。
@@ -35,7 +45,17 @@ public class AuthLoginServiceImpl implements AuthLoginService {
 
     private static final String PASSWORD_STATUS_NORMAL = "NORMAL";
 
+    private static final int LOGIN_FAILED_CODE = 401;
+
+    private static final String LOGIN_FAILED_MESSAGE = "账号或密码错误";
+
     private final TeachUserMapper teachUserMapper;
+
+    private final TeachUserRoleMapper teachUserRoleMapper;
+
+    private final TeachRoleMapper teachRoleMapper;
+
+    private final TeachUserOrgMapper teachUserOrgMapper;
 
     private final PasswordHashService passwordHashService;
 
@@ -45,11 +65,17 @@ public class AuthLoginServiceImpl implements AuthLoginService {
 
     public AuthLoginServiceImpl(
             TeachUserMapper teachUserMapper,
+            TeachUserRoleMapper teachUserRoleMapper,
+            TeachRoleMapper teachRoleMapper,
+            TeachUserOrgMapper teachUserOrgMapper,
             PasswordHashService passwordHashService,
             JwtService jwtService,
             JwtProperties jwtProperties
     ) {
         this.teachUserMapper = teachUserMapper;
+        this.teachUserRoleMapper = teachUserRoleMapper;
+        this.teachRoleMapper = teachRoleMapper;
+        this.teachUserOrgMapper = teachUserOrgMapper;
         this.passwordHashService = passwordHashService;
         this.jwtService = jwtService;
         this.jwtProperties = jwtProperties;
@@ -74,7 +100,7 @@ public class AuthLoginServiceImpl implements AuthLoginService {
                 teachUser.getPasswordIterations()
         )) {
             recordLoginFailure(teachUser);
-            throw new BusinessException(ApiResultCode.UNAUTHORIZED);
+            throw loginFailedException();
         }
         recordLoginSuccess(teachUser);
         return buildLoginResponse(teachUser);
@@ -108,7 +134,7 @@ public class AuthLoginServiceImpl implements AuthLoginService {
                 .eq(TeachUser::getUsername, username)
                 .eq(TeachUser::getDeleted, Boolean.FALSE));
         if (teachUser == null) {
-            throw new BusinessException(ApiResultCode.UNAUTHORIZED);
+            throw loginFailedException();
         }
         return teachUser;
     }
@@ -125,8 +151,23 @@ public class AuthLoginServiceImpl implements AuthLoginService {
                 || !StringUtils.hasText(teachUser.getPasswordSalt())
                 || teachUser.getPasswordIterations() == null
                 || isLocked(teachUser)) {
-            throw new BusinessException(ApiResultCode.UNAUTHORIZED);
+            throw loginFailedException();
         }
+    }
+
+    /**
+     * 构造登录失败异常。
+     *
+     * 业务功能：
+     * 1. 将账号不存在、密码错误、密码状态异常统一表达为登录失败。
+     * 2. 避免向前端暴露账号是否存在，同时避免误提示为“用户未登录”。
+     *
+     * 关键流程：
+     * 1. 复用 401 业务码表达认证失败。
+     * 2. 使用登录场景专属文案，帮助用户定位是账号密码校验未通过。
+     */
+    private BusinessException loginFailedException() {
+        return new BusinessException(LOGIN_FAILED_CODE, LOGIN_FAILED_MESSAGE);
     }
 
     /**
@@ -184,7 +225,69 @@ public class AuthLoginServiceImpl implements AuthLoginService {
         user.setUserType(teachUser.getUserType());
         user.setStudentNo(teachUser.getStudentNo());
         user.setEmployeeNo(teachUser.getEmployeeNo());
+        user.setRoles(listRoleCodes(teachUser));
+        user.setOrgIds(listOrgIds(teachUser));
         response.setUser(user);
         return response;
+    }
+
+    /**
+     * 查询登录用户的教学平台角色编码。
+     *
+     * 业务功能：
+     * 1. 登录成功后返回服务端确认过的角色，而不是让前端自行推断门户权限。
+     * 2. 支撑教师、学生、专家和后台入口按真实授权跳转。
+     *
+     * 关键流程：
+     * 1. 先按 tenantId + userId 查询有效用户角色关系。
+     * 2. 再按 roleId 查询有效角色定义，只返回 roleCode。
+     */
+    private List<String> listRoleCodes(TeachUser teachUser) {
+        List<TeachUserRole> userRoles = teachUserRoleMapper.selectList(new QueryWrapper<TeachUserRole>()
+                .eq("tenant_id", teachUser.getTenantId())
+                .eq("user_id", teachUser.getId())
+                .eq("status", USER_STATUS_ACTIVE)
+                .eq("deleted", Boolean.FALSE));
+        if (userRoles.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> roleIds = new ArrayList<>();
+        for (TeachUserRole userRole : userRoles) {
+            roleIds.add(userRole.getRoleId());
+        }
+        List<TeachRole> roles = teachRoleMapper.selectList(new QueryWrapper<TeachRole>()
+                .eq("tenant_id", teachUser.getTenantId())
+                .in("id", roleIds)
+                .eq("status", USER_STATUS_ACTIVE)
+                .eq("deleted", Boolean.FALSE));
+        List<String> roleCodes = new ArrayList<>();
+        for (TeachRole role : roles) {
+            roleCodes.add(role.getRoleCode());
+        }
+        return roleCodes;
+    }
+
+    /**
+     * 查询登录用户所属教学组织。
+     *
+     * 业务功能：
+     * 1. 登录成功后返回班级、课程班或专家组等教学组织范围。
+     * 2. 为后续数据准备策略按组织、班级、学生范围生成需求提供前置上下文。
+     *
+     * 关键流程：
+     * 1. 按 tenantId + userId 查询有效用户组织关系。
+     * 2. 只返回 orgId，避免登录响应携带过重组织明细。
+     */
+    private List<String> listOrgIds(TeachUser teachUser) {
+        List<TeachUserOrg> userOrgs = teachUserOrgMapper.selectList(new QueryWrapper<TeachUserOrg>()
+                .eq("tenant_id", teachUser.getTenantId())
+                .eq("user_id", teachUser.getId())
+                .eq("status", USER_STATUS_ACTIVE)
+                .eq("deleted", Boolean.FALSE));
+        List<String> orgIds = new ArrayList<>();
+        for (TeachUserOrg userOrg : userOrgs) {
+            orgIds.add(userOrg.getOrgId());
+        }
+        return orgIds;
     }
 }

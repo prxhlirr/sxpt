@@ -4,8 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.ConnectorSystem;
+import com.sxpt.module.connector.entity.PlatformCapability;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
+import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
 import com.sxpt.module.connector.service.ConnectorSystemService;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,6 +16,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 原业务平台配置服务实现。
@@ -30,14 +34,20 @@ import java.util.List;
 @Profile("!test")
 public class ConnectorSystemServiceImpl implements ConnectorSystemService {
 
-    private static final String DEFAULT_STATUS = "ACTIVE";
+    private static final String LOCAL_DEV_SYSTEM_TYPE = "LOCAL_DEV";
 
-    private static final String DISABLED_STATUS = "DISABLED";
+    private static final String[] LOCAL_CAPABILITY_CODES = {
+            "DATA_CREATE", "DATA_QUERY", "DATA_VALIDATE", "DATA_LOCK", "DATA_ARCHIVE", "RESULT_CHECK"
+    };
 
     private final ConnectorSystemMapper connectorSystemMapper;
 
-    public ConnectorSystemServiceImpl(ConnectorSystemMapper connectorSystemMapper) {
+    private final PlatformCapabilityMapper platformCapabilityMapper;
+
+    public ConnectorSystemServiceImpl(ConnectorSystemMapper connectorSystemMapper,
+                                      PlatformCapabilityMapper platformCapabilityMapper) {
         this.connectorSystemMapper = connectorSystemMapper;
+        this.platformCapabilityMapper = platformCapabilityMapper;
     }
 
     /**
@@ -52,6 +62,7 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
         validateRequiredFields(connectorSystem);
         fillCreateDefaults(connectorSystem);
         connectorSystemMapper.insert(connectorSystem);
+        createLocalCapabilitiesIfNeeded(connectorSystem);
         return connectorSystem;
     }
 
@@ -70,7 +81,9 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
         existing.setSystemType(connectorSystem.getSystemType());
         existing.setBaseUrl(connectorSystem.getBaseUrl());
         existing.setAuthType(connectorSystem.getAuthType());
-        existing.setConfigJson(connectorSystem.getConfigJson());
+        if (connectorSystem.getConfigJson() != null) {
+            existing.setConfigJson(connectorSystem.getConfigJson());
+        }
         existing.setUpdateBy(connectorSystem.getUpdateBy());
         existing.setUpdateTime(LocalDateTime.now());
         connectorSystemMapper.updateById(existing);
@@ -86,7 +99,7 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ConnectorSystem enableConnectorSystem(String id) {
-        return changeStatus(id, DEFAULT_STATUS);
+        return changeStatus(id, RecordStatus.ACTIVE.getValue());
     }
 
     /**
@@ -98,7 +111,7 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public ConnectorSystem disableConnectorSystem(String id) {
-        return changeStatus(id, DISABLED_STATUS);
+        return changeStatus(id, RecordStatus.DISABLED.getValue());
     }
 
     /**
@@ -209,11 +222,96 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
             connectorSystem.setUpdateTime(now);
         }
         if (!StringUtils.hasText(connectorSystem.getStatus())) {
-            connectorSystem.setStatus(DEFAULT_STATUS);
+            connectorSystem.setStatus(RecordStatus.ACTIVE.getValue());
+        }
+        if (!StringUtils.hasText(connectorSystem.getCreateBy())) {
+            connectorSystem.setCreateBy("system");
+        }
+        if (!StringUtils.hasText(connectorSystem.getUpdateBy())) {
+            connectorSystem.setUpdateBy(connectorSystem.getCreateBy());
         }
         if (connectorSystem.getDeleted() == null) {
             connectorSystem.setDeleted(Boolean.FALSE);
         }
+    }
+
+    /**
+     * 本地联调平台默认注册完整数据准备能力，保证后续模块策略可以直接启用。
+     *
+     * @param connectorSystem 原平台配置。
+     */
+    private void createLocalCapabilitiesIfNeeded(ConnectorSystem connectorSystem) {
+        if (!LOCAL_DEV_SYSTEM_TYPE.equals(connectorSystem.getSystemType())) {
+            return;
+        }
+        for (String capabilityCode : LOCAL_CAPABILITY_CODES) {
+            if (hasCapability(connectorSystem, capabilityCode)) {
+                continue;
+            }
+            platformCapabilityMapper.insert(buildLocalCapability(connectorSystem, capabilityCode));
+        }
+    }
+
+    /**
+     * 判断能力是否已存在，避免重复创建本地联调能力声明。
+     *
+     * @param connectorSystem 原平台配置。
+     * @param capabilityCode 能力编码。
+     * @return true 表示已存在。
+     */
+    private boolean hasCapability(ConnectorSystem connectorSystem, String capabilityCode) {
+        Integer count = platformCapabilityMapper.selectCount(new QueryWrapper<PlatformCapability>()
+                .eq("tenant_id", connectorSystem.getTenantId())
+                .eq("connector_system_id", connectorSystem.getId())
+                .eq("capability_code", capabilityCode)
+                .eq("deleted", Boolean.FALSE));
+        return count != null && count > 0;
+    }
+
+    /**
+     * 构造本地联调能力记录，使策略启用前的能力校验有明确依据。
+     *
+     * @param connectorSystem 原平台配置。
+     * @param capabilityCode 能力编码。
+     * @return 平台能力记录。
+     */
+    private PlatformCapability buildLocalCapability(ConnectorSystem connectorSystem, String capabilityCode) {
+        LocalDateTime now = LocalDateTime.now();
+        String operator = resolveOperator(connectorSystem);
+        PlatformCapability capability = new PlatformCapability();
+        capability.setId(UUID.randomUUID().toString().replace("-", ""));
+        capability.setTenantId(connectorSystem.getTenantId());
+        capability.setConnectorSystemId(connectorSystem.getId());
+        capability.setCapabilityCode(capabilityCode);
+        capability.setCapabilityName(capabilityCode);
+        capability.setCapabilityType(capabilityCode);
+        capability.setSupportFlag(Boolean.TRUE);
+        capability.setEndpointUrl(connectorSystem.getBaseUrl());
+        capability.setMethod("POST");
+        // 平台能力是系统自动补齐的基础配置，必须显式写入审计字段以满足数据库非空约束。
+        capability.setCreateBy(operator);
+        capability.setCreateTime(now);
+        capability.setUpdateBy(operator);
+        capability.setUpdateTime(now);
+        capability.setStatus(RecordStatus.ACTIVE.getValue());
+        capability.setDeleted(Boolean.FALSE);
+        return capability;
+    }
+
+    /**
+     * 解析平台能力自动注册时使用的操作人。
+     *
+     * @param connectorSystem 原平台配置。
+     * @return 优先使用平台创建人，缺失时使用系统操作人。
+     */
+    private String resolveOperator(ConnectorSystem connectorSystem) {
+        if (StringUtils.hasText(connectorSystem.getCreateBy())) {
+            return connectorSystem.getCreateBy();
+        }
+        if (StringUtils.hasText(connectorSystem.getUpdateBy())) {
+            return connectorSystem.getUpdateBy();
+        }
+        return "system";
     }
 }
 

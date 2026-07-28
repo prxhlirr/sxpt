@@ -37,6 +37,7 @@ public class CreatePlatformLaunchContextRequest {
     @Size(max = 64, message = "任务执行 ID 长度不能超过 64")
     private String executionId;
 
+    @NotBlank(message = "教学业务数据实例 ID 不能为空")
     @Size(max = 64, message = "教学业务数据实例 ID 长度不能超过 64")
     private String dataInstanceId;
 

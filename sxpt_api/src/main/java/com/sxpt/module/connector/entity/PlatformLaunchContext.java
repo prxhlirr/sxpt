@@ -63,9 +63,17 @@ public class PlatformLaunchContext {
 
     private String dataScopeJson;
 
+    private String sdkConfigSnapshotJson;
+
+    private String dataInstanceValidationSnapshotJson;
+
     private String launchStatus;
 
     private LocalDateTime verifiedTime;
+
+    private String verifyRequestId;
+
+    private LocalDateTime verifyTime;
 
     private LocalDateTime usedTime;
 
@@ -253,6 +261,22 @@ public class PlatformLaunchContext {
         this.dataScopeJson = dataScopeJson;
     }
 
+    public String getSdkConfigSnapshotJson() {
+        return sdkConfigSnapshotJson;
+    }
+
+    public void setSdkConfigSnapshotJson(String sdkConfigSnapshotJson) {
+        this.sdkConfigSnapshotJson = sdkConfigSnapshotJson;
+    }
+
+    public String getDataInstanceValidationSnapshotJson() {
+        return dataInstanceValidationSnapshotJson;
+    }
+
+    public void setDataInstanceValidationSnapshotJson(String dataInstanceValidationSnapshotJson) {
+        this.dataInstanceValidationSnapshotJson = dataInstanceValidationSnapshotJson;
+    }
+
     public String getLaunchStatus() {
         return launchStatus;
     }
@@ -267,6 +291,22 @@ public class PlatformLaunchContext {
 
     public void setVerifiedTime(LocalDateTime verifiedTime) {
         this.verifiedTime = verifiedTime;
+    }
+
+    public String getVerifyRequestId() {
+        return verifyRequestId;
+    }
+
+    public void setVerifyRequestId(String verifyRequestId) {
+        this.verifyRequestId = verifyRequestId;
+    }
+
+    public LocalDateTime getVerifyTime() {
+        return verifyTime;
+    }
+
+    public void setVerifyTime(LocalDateTime verifyTime) {
+        this.verifyTime = verifyTime;
     }
 
     public LocalDateTime getUsedTime() {

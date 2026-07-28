@@ -4,8 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.PlatformLaunchContext;
+import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.PlatformLaunchContextMapper;
+import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.LaunchStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.ValidationStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -35,28 +41,22 @@ import java.util.Base64;
 @Profile("!test")
 public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextService {
 
-    private static final String DEFAULT_STATUS = "ACTIVE";
-
-    private static final String DEFAULT_LAUNCH_STATUS = "CREATED";
-
-    private static final String VERIFIED_LAUNCH_STATUS = "VERIFIED";
-
-    private static final String EXPIRED_LAUNCH_STATUS = "EXPIRED";
-
-    private static final String USED_LAUNCH_STATUS = "USED";
-
-    private static final String FAILED_LAUNCH_STATUS = "FAILED";
-
     private static final int TOKEN_RANDOM_BYTES = 32;
 
     private static final int DEFAULT_EXPIRE_MINUTES = 5;
 
+    private static final String VERIFY_REQUEST_PREFIX = "verify_";
+
     private final PlatformLaunchContextMapper platformLaunchContextMapper;
+
+    private final TeachingDataInstanceMapper teachingDataInstanceMapper;
 
     private final SecureRandom secureRandom = new SecureRandom();
 
-    public PlatformLaunchContextServiceImpl(PlatformLaunchContextMapper platformLaunchContextMapper) {
+    public PlatformLaunchContextServiceImpl(PlatformLaunchContextMapper platformLaunchContextMapper,
+                                            TeachingDataInstanceMapper teachingDataInstanceMapper) {
         this.platformLaunchContextMapper = platformLaunchContextMapper;
+        this.teachingDataInstanceMapper = teachingDataInstanceMapper;
     }
 
     /**
@@ -69,6 +69,7 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     @Transactional(rollbackFor = Exception.class)
     public CreatedLaunchContext createLaunchContext(PlatformLaunchContext launchContext) {
         validateCreateFields(launchContext);
+        validateLaunchDataInstance(launchContext);
         String launchToken = generateLaunchToken();
         launchContext.setLaunchTokenHash(hashToken(launchToken));
         fillCreateDefaults(launchContext);
@@ -96,9 +97,12 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
             throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
         }
         ensureLaunchContextCanBeVerified(launchContext);
+        validateLaunchDataInstance(launchContext);
         LocalDateTime now = LocalDateTime.now();
-        launchContext.setLaunchStatus(VERIFIED_LAUNCH_STATUS);
+        launchContext.setLaunchStatus(LaunchStatus.VERIFIED.getValue());
         launchContext.setVerifiedTime(now);
+        launchContext.setVerifyTime(now);
+        launchContext.setVerifyRequestId(generateVerifyRequestId());
         launchContext.setUpdateTime(now);
         platformLaunchContextMapper.updateById(launchContext);
         return launchContext;
@@ -114,11 +118,11 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     @Transactional(rollbackFor = Exception.class)
     public PlatformLaunchContext markLaunchContextUsed(String id) {
         PlatformLaunchContext launchContext = getActiveLaunchContextById(id);
-        if (!VERIFIED_LAUNCH_STATUS.equals(launchContext.getLaunchStatus())) {
+        if (!LaunchStatus.VERIFIED.getValue().equals(launchContext.getLaunchStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
         LocalDateTime now = LocalDateTime.now();
-        launchContext.setLaunchStatus(USED_LAUNCH_STATUS);
+        launchContext.setLaunchStatus(LaunchStatus.USED.getValue());
         launchContext.setUsedTime(now);
         launchContext.setUpdateTime(now);
         platformLaunchContextMapper.updateById(launchContext);
@@ -138,7 +142,7 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
         requireText(errorMessage);
         PlatformLaunchContext launchContext = getActiveLaunchContextById(id);
         LocalDateTime now = LocalDateTime.now();
-        launchContext.setLaunchStatus(FAILED_LAUNCH_STATUS);
+        launchContext.setLaunchStatus(LaunchStatus.FAILED.getValue());
         launchContext.setErrorMessage(errorMessage);
         launchContext.setUpdateTime(now);
         platformLaunchContextMapper.updateById(launchContext);
@@ -158,9 +162,60 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
         requireText(launchContext.getTenantId());
         requireText(launchContext.getUserId());
         requireText(launchContext.getConnectorSystemId());
+        requireText(launchContext.getDataInstanceId());
         requireText(launchContext.getSceneType());
         requireText(launchContext.getSdkMode());
         requireText(launchContext.getTargetUrl());
+    }
+
+    /**
+     * 校验启动上下文绑定的数据实例已经完成原平台校验。
+     *
+     * @param launchContext 原平台启动上下文实体。
+     */
+    private void validateLaunchDataInstance(PlatformLaunchContext launchContext) {
+        TeachingDataInstance instance = teachingDataInstanceMapper.selectById(launchContext.getDataInstanceId());
+        if (instance == null || Boolean.TRUE.equals(instance.getDeleted())) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        if (!equalsText(launchContext.getTenantId(), instance.getTenantId())
+                || !equalsText(launchContext.getConnectorSystemId(), instance.getConnectorSystemId())
+                || !equalsText(launchContext.getSceneType(), instance.getSceneType())
+                || !equalsText(launchContext.getUserId(), instance.getOwnerUserId())) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        if (!DataInstanceStatus.READY.getValue().equals(instance.getInstanceStatus())
+                || !ValidationStatus.PASSED.getValue().equals(instance.getValidationStatus())) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        if (!StringUtils.hasText(launchContext.getExternalBusinessId())) {
+            launchContext.setExternalBusinessId(instance.getExternalBusinessId());
+        }
+        if (!StringUtils.hasText(launchContext.getExternalBusinessNo())) {
+            launchContext.setExternalBusinessNo(instance.getExternalBusinessNo());
+        }
+        if (!StringUtils.hasText(launchContext.getRequiredExternalOrgId())) {
+            launchContext.setRequiredExternalOrgId(instance.getRequiredExternalOrgId());
+        }
+        if (!StringUtils.hasText(launchContext.getRequiredExternalRoleId())) {
+            launchContext.setRequiredExternalRoleId(instance.getRequiredExternalRoleId());
+        }
+        if (!StringUtils.hasText(launchContext.getDataScopeJson())) {
+            launchContext.setDataScopeJson(instance.getRequirementSnapshotJson());
+        }
+        launchContext.setSdkConfigSnapshotJson(buildSdkConfigSnapshot(launchContext));
+        launchContext.setDataInstanceValidationSnapshotJson(buildDataInstanceValidationSnapshot(instance));
+    }
+
+    /**
+     * 比较两个文本字段是否完全一致。
+     *
+     * @param left 左侧文本。
+     * @param right 右侧文本。
+     * @return true 表示两个文本一致。
+     */
+    private boolean equalsText(String left, String right) {
+        return left != null && left.equals(right);
     }
 
     /**
@@ -191,10 +246,10 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
             launchContext.setExpireTime(now.plusMinutes(DEFAULT_EXPIRE_MINUTES));
         }
         if (!StringUtils.hasText(launchContext.getLaunchStatus())) {
-            launchContext.setLaunchStatus(DEFAULT_LAUNCH_STATUS);
+            launchContext.setLaunchStatus(LaunchStatus.CREATED.getValue());
         }
         if (!StringUtils.hasText(launchContext.getStatus())) {
-            launchContext.setStatus(DEFAULT_STATUS);
+            launchContext.setStatus(RecordStatus.ACTIVE.getValue());
         }
         if (launchContext.getDeleted() == null) {
             launchContext.setDeleted(Boolean.FALSE);
@@ -209,12 +264,12 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     private void ensureLaunchContextCanBeVerified(PlatformLaunchContext launchContext) {
         LocalDateTime now = LocalDateTime.now();
         if (launchContext.getExpireTime() == null || !launchContext.getExpireTime().isAfter(now)) {
-            launchContext.setLaunchStatus(EXPIRED_LAUNCH_STATUS);
+            launchContext.setLaunchStatus(LaunchStatus.EXPIRED.getValue());
             launchContext.setUpdateTime(now);
             platformLaunchContextMapper.updateById(launchContext);
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
-        if (!DEFAULT_LAUNCH_STATUS.equals(launchContext.getLaunchStatus())) {
+        if (!LaunchStatus.CREATED.getValue().equals(launchContext.getLaunchStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
     }
@@ -253,6 +308,73 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
      * @param launchToken 明文 launchToken。
      * @return 64 位十六进制 hash。
      */
+    /**
+     * 生成原平台 verify 请求审计 ID。
+     *
+     * @return verify 请求 ID。
+     */
+    private String generateVerifyRequestId() {
+        byte[] randomBytes = new byte[16];
+        secureRandom.nextBytes(randomBytes);
+        return VERIFY_REQUEST_PREFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(randomBytes);
+    }
+
+    /**
+     * 构造下发给遮罩 SDK 的启动配置快照。
+     *
+     * @param launchContext 原平台启动上下文实体。
+     * @return JSON 快照。
+     */
+    private String buildSdkConfigSnapshot(PlatformLaunchContext launchContext) {
+        return "{"
+                + "\"sdkMode\":" + jsonValue(launchContext.getSdkMode()) + ","
+                + "\"sceneType\":" + jsonValue(launchContext.getSceneType()) + ","
+                + "\"taskId\":" + jsonValue(launchContext.getTaskId()) + ","
+                + "\"executionId\":" + jsonValue(launchContext.getExecutionId()) + ","
+                + "\"dataInstanceId\":" + jsonValue(launchContext.getDataInstanceId()) + ","
+                + "\"actorType\":" + jsonValue(launchContext.getActorType()) + ","
+                + "\"requiredExternalOrgId\":" + jsonValue(launchContext.getRequiredExternalOrgId()) + ","
+                + "\"requiredExternalRoleId\":" + jsonValue(launchContext.getRequiredExternalRoleId())
+                + "}";
+    }
+
+    /**
+     * 构造绑定数据实例的校验快照。
+     *
+     * @param instance 教学数据实例。
+     * @return JSON 快照。
+     */
+    private String buildDataInstanceValidationSnapshot(TeachingDataInstance instance) {
+        return "{"
+                + "\"dataInstanceId\":" + jsonValue(instance.getId()) + ","
+                + "\"externalBusinessId\":" + jsonValue(instance.getExternalBusinessId()) + ","
+                + "\"externalBusinessNo\":" + jsonValue(instance.getExternalBusinessNo()) + ","
+                + "\"externalStatus\":" + jsonValue(instance.getExternalStatus()) + ","
+                + "\"instanceStatus\":" + jsonValue(instance.getInstanceStatus()) + ","
+                + "\"validationStatus\":" + jsonValue(instance.getValidationStatus()) + ","
+                + "\"validationTime\":" + jsonValue(instance.getValidationTime() == null
+                ? null : instance.getValidationTime().toString()) + ","
+                + "\"validationResultJson\":" + jsonValue(instance.getValidationResultJson())
+                + "}";
+    }
+
+    /**
+     * 对 JSON 字符串值做最小转义。
+     *
+     * @param value 原始文本。
+     * @return JSON 字符串值或 null。
+     */
+    private String jsonValue(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n") + "\"";
+    }
+
     private String hashToken(String launchToken) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");

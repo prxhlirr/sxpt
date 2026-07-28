@@ -4,6 +4,7 @@ import com.sxpt.common.api.ApiResult;
 import com.sxpt.common.api.ApiResultCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -67,6 +68,19 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ApiResult<Void> handleBusinessException(BusinessException exception) {
         return ApiResult.failure(exception.getCode(), exception.getMessage());
+    }
+
+    /**
+     * 处理数据库约束异常。
+     *
+     * @param exception 数据完整性异常。
+     * @return 统一失败响应。
+     */
+    @ResponseStatus(HttpStatus.BAD_REQUEST)
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ApiResult<Void> handleDataIntegrityViolationException(DataIntegrityViolationException exception) {
+        LOGGER.warn("数据约束异常", exception);
+        return ApiResult.failure(ApiResultCode.PARAM_ERROR.getCode(), "数据保存失败，请检查必填字段、唯一编码或关联数据是否有效");
     }
 
     /**

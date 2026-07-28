@@ -30,6 +30,8 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     private static final String BEARER_PREFIX = "Bearer ";
 
+    private static final String OPTIONS_METHOD = "OPTIONS";
+
     private final SecurityManager securityManager;
 
     public JwtAuthInterceptor(SecurityManager securityManager) {
@@ -38,6 +40,9 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        if (OPTIONS_METHOD.equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String token = resolveToken(request);
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(ApiResultCode.UNAUTHORIZED);

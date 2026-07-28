@@ -29,11 +29,29 @@ public class TeachingDataTemplateVO {
 
     private String sceneType;
 
+    private String moduleCode;
+
+    private String strategyId;
+
     private String initState;
 
     private String supportMode;
 
     private String configJson;
+
+    private String dataSchemaJson;
+
+    private String mockRuleJson;
+
+    private Boolean readonlyFlag;
+
+    private String requestSchemaJson;
+
+    private String requiredOrgRoleJson;
+
+    private String resultCheckSchemaJson;
+
+    private String sensitiveFieldPolicyJson;
 
     private String status;
 
@@ -97,6 +115,22 @@ public class TeachingDataTemplateVO {
         this.sceneType = sceneType;
     }
 
+    public String getModuleCode() {
+        return moduleCode;
+    }
+
+    public void setModuleCode(String moduleCode) {
+        this.moduleCode = moduleCode;
+    }
+
+    public String getStrategyId() {
+        return strategyId;
+    }
+
+    public void setStrategyId(String strategyId) {
+        this.strategyId = strategyId;
+    }
+
     public String getInitState() {
         return initState;
     }
@@ -119,6 +153,62 @@ public class TeachingDataTemplateVO {
 
     public void setConfigJson(String configJson) {
         this.configJson = configJson;
+    }
+
+    public String getDataSchemaJson() {
+        return dataSchemaJson;
+    }
+
+    public void setDataSchemaJson(String dataSchemaJson) {
+        this.dataSchemaJson = dataSchemaJson;
+    }
+
+    public String getMockRuleJson() {
+        return mockRuleJson;
+    }
+
+    public void setMockRuleJson(String mockRuleJson) {
+        this.mockRuleJson = mockRuleJson;
+    }
+
+    public Boolean getReadonlyFlag() {
+        return readonlyFlag;
+    }
+
+    public void setReadonlyFlag(Boolean readonlyFlag) {
+        this.readonlyFlag = readonlyFlag;
+    }
+
+    public String getRequestSchemaJson() {
+        return requestSchemaJson;
+    }
+
+    public void setRequestSchemaJson(String requestSchemaJson) {
+        this.requestSchemaJson = requestSchemaJson;
+    }
+
+    public String getRequiredOrgRoleJson() {
+        return requiredOrgRoleJson;
+    }
+
+    public void setRequiredOrgRoleJson(String requiredOrgRoleJson) {
+        this.requiredOrgRoleJson = requiredOrgRoleJson;
+    }
+
+    public String getResultCheckSchemaJson() {
+        return resultCheckSchemaJson;
+    }
+
+    public void setResultCheckSchemaJson(String resultCheckSchemaJson) {
+        this.resultCheckSchemaJson = resultCheckSchemaJson;
+    }
+
+    public String getSensitiveFieldPolicyJson() {
+        return sensitiveFieldPolicyJson;
+    }
+
+    public void setSensitiveFieldPolicyJson(String sensitiveFieldPolicyJson) {
+        this.sensitiveFieldPolicyJson = sensitiveFieldPolicyJson;
     }
 
     public String getStatus() {
