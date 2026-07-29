@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { PortalRole } from './domain/models';
 import AppShell from './layouts/AppShell.vue';
-import type { PortalRole } from './domain/models';
 import { useTrainingStore } from './stores/trainingStore';
 import { authApi } from './services/trainingApi';
 
@@ -27,10 +26,9 @@ export const router = createRouter({
       path: '/',
       component: AppShell,
       children: [
-        { path: '', redirect: '/platforms' },
         {
           path: '',
-          redirect: () => (authApi.getSession() ? authApi.getHomePath() : '/login')
+          redirect: '/platforms'
         },
         {
           path: 'admin/overview',
@@ -162,27 +160,9 @@ export const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  const store = useTrainingStore();
-  const role = store.state.currentRole;
-  const allowedRoles = Array.isArray(to.meta.roles)
-    ? (to.meta.roles as PortalRole[])
-    : to.meta.role
-      ? [to.meta.role as PortalRole]
-      : [];
-
-  if (allowedRoles.length && !allowedRoles.includes(role)) {
-    return {
-      name: 'platforms',
-      query: { access: 'denied', target: to.fullPath }
-    };
-  }
-  return true;
-});
-
-router.beforeEach((to) => {
   const session = authApi.getSession();
   if (to.meta.public) {
-    return session && to.path === '/login' ? authApi.getHomePath(session) : true;
+    return session && to.path === '/login' ? '/platforms' : true;
   }
   if (!session) {
     return {
@@ -190,12 +170,20 @@ router.beforeEach((to) => {
       query: { redirect: to.fullPath }
     };
   }
+  const store = useTrainingStore();
+  const sessionRole = authApi.getPortalRole(session);
+  if (store.state.currentRole !== sessionRole) {
+    store.setRole(sessionRole);
+  }
   const requiredRole = (to.meta.roles ?? to.meta.role) as
     | PortalRole
     | PortalRole[]
     | undefined;
-  if (!authApi.canAccess(requiredRole)) {
-    return authApi.getHomePath(session);
+  if (!authApi.canAccess(requiredRole, session)) {
+    return {
+      name: 'platforms',
+      query: { access: 'denied', target: to.fullPath }
+    };
   }
   return true;
 });

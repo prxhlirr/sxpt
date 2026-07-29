@@ -35,6 +35,15 @@ public interface DataInstanceAllocationService {
     DataInstanceAllocation acquireReadyInstance(AcquireReadyInstanceRequest request);
 
     /**
+     * 查询指定数据需求批次下的分配记录。
+     *
+     * @param tenantId 租户 ID。
+     * @param requirementId 数据需求批次 ID。
+     * @return 当前批次下所有有效分配记录，按领取时间倒序排列。
+     */
+    List<DataInstanceAllocation> listByRequirement(String tenantId, String requirementId);
+
+    /**
      * 查询指定学生在任务和场景下的数据分配记录。
      *
      * @param tenantId 租户 ID。

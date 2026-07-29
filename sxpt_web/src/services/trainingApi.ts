@@ -1,9 +1,8 @@
-
 import {
   createDefaultBusinessPlatforms,
   createMockTrainingState
 } from '../data/mockSeed';
-import type { StorageLike, TrainingState } from '../domain/models';
+import type { PortalRole, StorageLike, TrainingState } from '../domain/models';
 
 export const TRAINING_STORAGE_KEY = 'sxpt_web.training.demo.v1';
 export const AUTH_SESSION_STORAGE_KEY = 'sxpt_web.auth.session.v1';
@@ -42,6 +41,12 @@ export interface LoginRequest {
   username: string;
   password: string;
   loginType: 'PASSWORD';
+}
+
+interface DevelopmentTokenResponse {
+  token: string;
+  tokenType?: string;
+  expiresIn?: number;
 }
 
 export interface DataRequirement {
@@ -196,6 +201,84 @@ export interface BusinessModuleRequest {
   updateBy?: string;
 }
 
+export interface BusinessModuleProcessStep {
+  id: string;
+  tenantId: string;
+  connectorSystemId: string;
+  businessModuleId: string;
+  moduleCode: string;
+  stepNo: number;
+  stepCode: string;
+  stepName: string;
+  stepType?: string;
+  initExternalStatus?: string;
+  targetExternalStatus?: string;
+  completionRuleJson?: string;
+  remark?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface BusinessModuleProcessStepRequest {
+  tenantId?: string;
+  connectorSystemId?: string;
+  businessModuleId?: string;
+  moduleCode?: string;
+  stepNo?: number;
+  stepCode?: string;
+  stepName?: string;
+  stepType?: string;
+  initExternalStatus?: string;
+  targetExternalStatus?: string;
+  completionRuleJson?: string;
+  remark?: string;
+  createBy?: string;
+  updateBy?: string;
+}
+
+export interface BusinessModuleProcessActor {
+  id: string;
+  tenantId: string;
+  connectorSystemId: string;
+  businessModuleId: string;
+  processStepId: string;
+  moduleCode: string;
+  stepCode: string;
+  actorNo: number;
+  actorRelation: string;
+  actorType: string;
+  requiredOrgType?: string;
+  requiredOrgCode?: string;
+  requiredOrgName?: string;
+  requiredRoleCode?: string;
+  requiredRoleName?: string;
+  isRequired?: boolean;
+  assignmentRule?: string;
+  remark?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface BusinessModuleProcessActorRequest {
+  tenantId?: string;
+  processStepId?: string;
+  actorNo?: number;
+  actorRelation?: string;
+  actorType?: string;
+  requiredOrgType?: string;
+  requiredOrgCode?: string;
+  requiredOrgName?: string;
+  requiredRoleCode?: string;
+  requiredRoleName?: string;
+  isRequired?: boolean;
+  assignmentRule?: string;
+  remark?: string;
+  createBy?: string;
+  updateBy?: string;
+}
+
 export interface ModuleDataStrategy {
   id: string;
   tenantId: string;
@@ -273,7 +356,15 @@ export interface DataRequirementItem {
   itemStatus?: string;
   externalBusinessId?: string;
   externalBusinessNo?: string;
+  externalBusinessName?: string;
   externalStatus?: string;
+  currentStepCode?: string;
+  currentActorNo?: number;
+  currentOrgId?: string;
+  currentOrgName?: string;
+  currentRoleId?: string;
+  currentRoleName?: string;
+  processChainSnapshotJson?: string;
   validationStatus?: string;
   failureReason?: string;
 }
@@ -324,15 +415,54 @@ export interface DataInstanceAllocation {
   poolId: string;
   dataInstanceId: string;
   taskId: string;
+  executionId?: string;
   attemptId?: string;
   questionAttemptId?: string;
   ownerUserId: string;
   allocationScene: string;
   allocationStatus?: string;
   allocateTime?: string;
+  requestBatchId?: string;
+  requestItemId?: string;
+  studentId?: string;
+  studentName?: string;
+  classId?: string;
+  connectorSystemId?: string;
+  businessModuleId?: string;
+  externalBusinessId?: string;
+  externalBusinessName?: string;
+  targetUrl?: string;
+  processStepCode?: string;
+  processStepName?: string;
+  processActorNo?: number;
+  actorRelation?: string;
+  originOrgId?: string;
+  originOrgName?: string;
+  originRoleId?: string;
+  originRoleName?: string;
+  allocationLockStatus?: string;
+  actorSnapshotJson?: string;
   requiredExternalOrgId?: string;
+  requiredExternalOrgName?: string;
   requiredExternalRoleId?: string;
+  requiredExternalRoleName?: string;
   actorType?: string;
+}
+
+export interface CreateStudentDataLaunchRequest {
+  tenantId: string;
+  allocationId: string;
+  studentId: string;
+  executionId?: string;
+}
+
+export interface StudentDataLaunchResult {
+  launchContextId: string;
+  launchToken: string;
+  launchUrl: string;
+  targetUrl: string;
+  expireTime?: string;
+  allocation: DataInstanceAllocation;
 }
 
 export interface DataPrepareParticipant {
@@ -474,11 +604,7 @@ export const authApi = {
   },
 
   logout() {
-    try {
-      resolveBrowserStorage().removeItem(AUTH_SESSION_STORAGE_KEY);
-    } catch {
-      // 浏览器存储不可用时，会话会在当前页面生命周期内自然失效。
-    }
+    clearAuthSession();
   },
 
   getHomePath(session: AuthSession | null = loadAuthSession()): string {
@@ -488,11 +614,65 @@ export const authApi = {
     return '/admin/overview';
   },
 
-  canAccess(requiredRole?: PortalRole | PortalRole[]): boolean {
+  getPortalRole(session: AuthSession | null = loadAuthSession()): PortalRole {
+    return resolvePortalRole(session);
+  },
+
+  canAccess(
+    requiredRole?: PortalRole | PortalRole[],
+    session: AuthSession | null = loadAuthSession()
+  ): boolean {
     if (!requiredRole) return true;
-    const session = loadAuthSession();
     const roles = Array.isArray(requiredRole) ? requiredRole : [requiredRole];
     return roles.some((role) => hasPortalRole(session, role));
+  },
+
+  /**
+   * 开发环境快捷入口需要同步路由守卫读取的会话身份。
+   *
+   * 业务功能：
+   * 1. 仅服务本地联调页面的管理端、教师端、学生端快速切换。
+   * 2. 避免只修改前端 store 后，被基于 session 的路由守卫再次拦截。
+   *
+   * 关键流程：
+   * 1. 根据目标门户角色构造本地开发会话。
+   * 2. 写入与真实登录相同的 session 存储键，让后续守卫和 API 请求读取同一身份源。
+   */
+  async useDevelopmentSession(role: PortalRole): Promise<AuthSession> {
+    if (!import.meta.env.DEV) {
+      throw new Error('生产环境不允许使用开发快捷登录');
+    }
+    const userId = `dev-${role}`;
+    const username = `dev-${role}`;
+    const response = await fetch(
+      `${API_BASE_URL}api/v1/auth/token?${stringifyQuery({ userId, username })}`,
+      { method: 'POST' }
+    );
+    const payload = (await response.json()) as ApiResult<DevelopmentTokenResponse>;
+    if (!response.ok || !payload.success || !payload.result?.token) {
+      throw new Error(payload.message || '开发快捷登录失败，请使用真实账号登录');
+    }
+    const session = normalizeSession(
+      {
+        token: payload.result.token,
+        tokenType: payload.result.tokenType || 'Bearer',
+        expiresIn: Number(payload.result.expiresIn) || 0,
+        issuedAt: Date.now(),
+        user: {
+          userId,
+          tenantId: 'demo-tenant',
+          username,
+          displayName:
+            role === 'admin' ? '本地管理员' : role === 'teacher' ? '本地教师' : '本地学生',
+          userType: role,
+          roles: [role],
+          orgIds: []
+        }
+      },
+      Date.now()
+    );
+    saveAuthSession(session);
+    return session;
   },
 
   cleanupInvalidSession() {
@@ -639,6 +819,106 @@ export const dataPrepareApi = {
   async disableBusinessModule(id: string): Promise<BusinessModule> {
     return requestApi<BusinessModule>(
       `api/v1/connector/business-modules/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' }
+    );
+  },
+
+  async listBusinessModuleProcessSteps(params: {
+    tenantId: string;
+    businessModuleId: string;
+  }): Promise<BusinessModuleProcessStep[]> {
+    const { businessModuleId, tenantId } = params;
+    return requestApi<BusinessModuleProcessStep[]>(
+      `api/v1/connector/business-modules/${encodeURIComponent(businessModuleId)}/process-steps?${stringifyQuery({ tenantId })}`
+    );
+  },
+
+  async createBusinessModuleProcessStep(
+    businessModuleId: string,
+    request: BusinessModuleProcessStepRequest
+  ): Promise<BusinessModuleProcessStep> {
+    return requestApi<BusinessModuleProcessStep>(
+      `api/v1/connector/business-modules/${encodeURIComponent(businessModuleId)}/process-steps/create`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async updateBusinessModuleProcessStep(
+    stepId: string,
+    request: BusinessModuleProcessStepRequest
+  ): Promise<BusinessModuleProcessStep> {
+    return requestApi<BusinessModuleProcessStep>(
+      `api/v1/connector/business-module-process-steps/${encodeURIComponent(stepId)}/update`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async enableBusinessModuleProcessStep(stepId: string): Promise<BusinessModuleProcessStep> {
+    return requestApi<BusinessModuleProcessStep>(
+      `api/v1/connector/business-module-process-steps/${encodeURIComponent(stepId)}/enable`,
+      { method: 'POST' }
+    );
+  },
+
+  async disableBusinessModuleProcessStep(stepId: string): Promise<BusinessModuleProcessStep> {
+    return requestApi<BusinessModuleProcessStep>(
+      `api/v1/connector/business-module-process-steps/${encodeURIComponent(stepId)}/disable`,
+      { method: 'POST' }
+    );
+  },
+
+  async listBusinessModuleProcessActors(params: {
+    tenantId: string;
+    processStepId: string;
+  }): Promise<BusinessModuleProcessActor[]> {
+    const { processStepId, tenantId } = params;
+    return requestApi<BusinessModuleProcessActor[]>(
+      `api/v1/connector/business-module-process-steps/${encodeURIComponent(processStepId)}/actors?${stringifyQuery({ tenantId })}`
+    );
+  },
+
+  async createBusinessModuleProcessActor(
+    processStepId: string,
+    request: BusinessModuleProcessActorRequest
+  ): Promise<BusinessModuleProcessActor> {
+    return requestApi<BusinessModuleProcessActor>(
+      `api/v1/connector/business-module-process-steps/${encodeURIComponent(processStepId)}/actors/create`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async updateBusinessModuleProcessActor(
+    actorId: string,
+    request: BusinessModuleProcessActorRequest
+  ): Promise<BusinessModuleProcessActor> {
+    return requestApi<BusinessModuleProcessActor>(
+      `api/v1/connector/business-module-process-actors/${encodeURIComponent(actorId)}/update`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async enableBusinessModuleProcessActor(actorId: string): Promise<BusinessModuleProcessActor> {
+    return requestApi<BusinessModuleProcessActor>(
+      `api/v1/connector/business-module-process-actors/${encodeURIComponent(actorId)}/enable`,
+      { method: 'POST' }
+    );
+  },
+
+  async disableBusinessModuleProcessActor(actorId: string): Promise<BusinessModuleProcessActor> {
+    return requestApi<BusinessModuleProcessActor>(
+      `api/v1/connector/business-module-process-actors/${encodeURIComponent(actorId)}/disable`,
       { method: 'POST' }
     );
   },
@@ -870,6 +1150,26 @@ export const dataPrepareApi = {
     );
   },
 
+  async listAllocations(params: {
+    tenantId: string;
+    requirementId: string;
+  }): Promise<DataInstanceAllocation[]> {
+    return requestApi<DataInstanceAllocation[]>(
+      `api/v1/teaching-data/allocations?${stringifyQuery(params)}`
+    );
+  },
+
+  async listMyAllocations(params: {
+    tenantId: string;
+    taskId: string;
+    sceneType: string;
+    ownerUserId: string;
+  }): Promise<DataInstanceAllocation[]> {
+    return requestApi<DataInstanceAllocation[]>(
+      `api/v1/teaching-data/allocations/mine?${stringifyQuery(params)}`
+    );
+  },
+
   async acquireDataInstance(params: {
     tenantId: string;
     poolId: string;
@@ -885,6 +1185,18 @@ export const dataPrepareApi = {
       method: 'POST',
       body: JSON.stringify(params)
     });
+  },
+
+  async createStudentDataLaunch(
+    request: CreateStudentDataLaunchRequest
+  ): Promise<StudentDataLaunchResult> {
+    return requestApi<StudentDataLaunchResult>(
+      'api/v1/teaching-data/student-launches/create',
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
   }
 };
 
@@ -903,6 +1215,10 @@ async function requestApi<T>(
     headers
   });
   const payload = (await response.json()) as ApiResult<T>;
+  if (response.status === 401 || payload.code === 401) {
+    handleUnauthorizedSession();
+    throw new Error('登录已失效，请重新登录');
+  }
   if (!response.ok || !payload.success) {
     throw new Error(payload.message || '接口请求失败');
   }
@@ -943,6 +1259,22 @@ function saveAuthSession(session: AuthSession) {
   } catch {
     // 存储失败时不阻断登录结果，路由守卫会在下一次导航重新校验。
   }
+}
+
+function clearAuthSession() {
+  try {
+    resolveBrowserStorage().removeItem(AUTH_SESSION_STORAGE_KEY);
+  } catch {
+    // 浏览器存储不可用时，当前请求已经失败，后续路由守卫会重新校验登录态。
+  }
+}
+
+function handleUnauthorizedSession() {
+  clearAuthSession();
+  if (typeof window === 'undefined') return;
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (window.location.pathname === '/login') return;
+  window.location.assign(`/login?redirect=${encodeURIComponent(currentPath)}`);
 }
 
 function loadAuthSession(): AuthSession | null {

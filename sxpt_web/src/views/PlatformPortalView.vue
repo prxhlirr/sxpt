@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import type { PortalRole } from '../domain/models';
+import { authApi } from '../services/trainingApi';
 import { useTrainingStore } from '../stores/trainingStore';
 
 const route = useRoute();
@@ -37,7 +38,11 @@ const identityProfiles: Record<
   }
 };
 
-const identity = computed(() => identityProfiles[store.state.currentRole]);
+const identity = computed(() => {
+  const fallbackRole = store.state.currentRole;
+  const session = authApi.getSession();
+  return identityProfiles[session ? authApi.getPortalRole(session) : fallbackRole];
+});
 const showDevelopmentEntrances = import.meta.env.DEV;
 const premiumClassroomUrl = String(
   import.meta.env.VITE_PREMIUM_CLASSROOM_URL ?? ''
@@ -52,12 +57,18 @@ function openPremiumClassroom() {
 }
 
 async function openTrainingPlatform() {
-  await router.push(identity.value.destination);
+  await router.push(authApi.getHomePath());
 }
 
 async function enterDevelopmentPortal(role: PortalRole) {
-  store.setRole(role);
-  await router.push(identityProfiles[role].destination);
+  try {
+    await authApi.useDevelopmentSession(role);
+    store.setRole(role);
+    await router.push(authApi.getHomePath());
+  } catch (error) {
+    feedback.value =
+      error instanceof Error ? error.message : '开发快捷入口不可用，请使用真实账号登录';
+  }
 }
 </script>
 

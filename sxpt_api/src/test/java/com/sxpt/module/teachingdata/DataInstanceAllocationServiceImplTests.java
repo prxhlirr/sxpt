@@ -11,6 +11,7 @@ import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataPoolStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.ValidationStatus;
 import com.sxpt.module.teachingdata.mapper.DataInstanceAllocationMapper;
+import com.sxpt.module.teachingdata.mapper.DataRequirementItemMapper;
 import com.sxpt.module.teachingdata.mapper.TeachingDataPoolMapper;
 import com.sxpt.module.teachingdata.service.DataInstanceAllocationService;
 import com.sxpt.module.teachingdata.service.impl.DataInstanceAllocationServiceImpl;
@@ -48,8 +49,10 @@ class DataInstanceAllocationServiceImplTests {
 
     private final TeachingDataInstanceMapper instanceMapper = mock(TeachingDataInstanceMapper.class);
 
+    private final DataRequirementItemMapper dataRequirementItemMapper = mock(DataRequirementItemMapper.class);
+
     private final DataInstanceAllocationService service = new DataInstanceAllocationServiceImpl(
-            mapper, poolMapper, instanceMapper);
+            mapper, poolMapper, instanceMapper, dataRequirementItemMapper);
 
     /**
      * 验证创建数据实例分配记录时写入 Mapper 并补齐默认值。
@@ -110,6 +113,24 @@ class DataInstanceAllocationServiceImplTests {
 
         assertEquals(1, result.size());
         assertSame(allocation, result.get(0));
+        verify(mapper).selectList(any());
+    }
+
+    /**
+     * 验证按数据需求批次查询时先定位数据池，再返回这些数据池下的分配记录。
+     */
+    @Test
+    void listByRequirementShouldReturnAllocationsInRequirementPools() {
+        TeachingDataPool pool = buildReadyPool();
+        DataInstanceAllocation allocation = buildValidAllocation();
+        when(poolMapper.selectList(any())).thenReturn(Collections.singletonList(pool));
+        when(mapper.selectList(any())).thenReturn(Collections.singletonList(allocation));
+
+        List<DataInstanceAllocation> result = service.listByRequirement("tenant_001", "requirement_001");
+
+        assertEquals(1, result.size());
+        assertSame(allocation, result.get(0));
+        verify(poolMapper).selectList(any());
         verify(mapper).selectList(any());
     }
 

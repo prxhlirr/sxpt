@@ -26,6 +26,10 @@ public class LocalOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
 
     private static final String SUCCESS_STATUS = "SUCCESS";
 
+    private static final String DEFAULT_STEP_CODE = "PURCHASE_CREATE";
+
+    private static final int DEFAULT_ACTOR_NO = 1;
+
     /**
      * 批量创建教学用原平台业务数据。
      *
@@ -125,8 +129,11 @@ public class LocalOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         item.setRequestItemId(requestItem.getRequestItemId());
         item.setExternalBusinessId(businessId);
         item.setExternalBusinessNo("NO-" + businessId);
+        item.setExternalBusinessName("本地联调业务数据-" + requestItem.getRequestItemId());
         item.setExternalStatus("DRAFT");
         item.setTargetUrl("/local-origin/" + request.getModuleCode() + "/" + businessId);
+        item.setCurrentStepCode(DEFAULT_STEP_CODE);
+        item.setCurrentActorNo(DEFAULT_ACTOR_NO);
         item.setItemStatus(SUCCESS_STATUS);
         return item;
     }

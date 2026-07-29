@@ -92,7 +92,23 @@ public class DataRequirementItem {
 
     private String externalBusinessNo;
 
+    private String externalBusinessName;
+
     private String externalStatus;
+
+    private String currentStepCode;
+
+    private Integer currentActorNo;
+
+    private String currentOrgId;
+
+    private String currentOrgName;
+
+    private String currentRoleId;
+
+    private String currentRoleName;
+
+    private String processChainSnapshotJson;
 
     private String validationStatus;
 
@@ -394,12 +410,76 @@ public class DataRequirementItem {
         this.externalBusinessNo = externalBusinessNo;
     }
 
+    public String getExternalBusinessName() {
+        return externalBusinessName;
+    }
+
+    public void setExternalBusinessName(String externalBusinessName) {
+        this.externalBusinessName = externalBusinessName;
+    }
+
     public String getExternalStatus() {
         return externalStatus;
     }
 
     public void setExternalStatus(String externalStatus) {
         this.externalStatus = externalStatus;
+    }
+
+    public String getCurrentStepCode() {
+        return currentStepCode;
+    }
+
+    public void setCurrentStepCode(String currentStepCode) {
+        this.currentStepCode = currentStepCode;
+    }
+
+    public Integer getCurrentActorNo() {
+        return currentActorNo;
+    }
+
+    public void setCurrentActorNo(Integer currentActorNo) {
+        this.currentActorNo = currentActorNo;
+    }
+
+    public String getCurrentOrgId() {
+        return currentOrgId;
+    }
+
+    public void setCurrentOrgId(String currentOrgId) {
+        this.currentOrgId = currentOrgId;
+    }
+
+    public String getCurrentOrgName() {
+        return currentOrgName;
+    }
+
+    public void setCurrentOrgName(String currentOrgName) {
+        this.currentOrgName = currentOrgName;
+    }
+
+    public String getCurrentRoleId() {
+        return currentRoleId;
+    }
+
+    public void setCurrentRoleId(String currentRoleId) {
+        this.currentRoleId = currentRoleId;
+    }
+
+    public String getCurrentRoleName() {
+        return currentRoleName;
+    }
+
+    public void setCurrentRoleName(String currentRoleName) {
+        this.currentRoleName = currentRoleName;
+    }
+
+    public String getProcessChainSnapshotJson() {
+        return processChainSnapshotJson;
+    }
+
+    public void setProcessChainSnapshotJson(String processChainSnapshotJson) {
+        this.processChainSnapshotJson = processChainSnapshotJson;
     }
 
     public String getValidationStatus() {

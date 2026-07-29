@@ -44,6 +44,46 @@ public class DataInstanceAllocation {
 
     private String allocationStatus;
 
+    private String requestBatchId;
+
+    private String requestItemId;
+
+    private String studentId;
+
+    private String studentName;
+
+    private String classId;
+
+    private String connectorSystemId;
+
+    private String businessModuleId;
+
+    private String externalBusinessId;
+
+    private String externalBusinessName;
+
+    private String targetUrl;
+
+    private String processStepCode;
+
+    private String processStepName;
+
+    private Integer processActorNo;
+
+    private String actorRelation;
+
+    private String originOrgId;
+
+    private String originOrgName;
+
+    private String originRoleId;
+
+    private String originRoleName;
+
+    private String allocationLockStatus;
+
+    private String actorSnapshotJson;
+
     private LocalDateTime allocateTime;
 
     private LocalDateTime releaseTime;
@@ -166,6 +206,166 @@ public class DataInstanceAllocation {
 
     public void setAllocationStatus(String allocationStatus) {
         this.allocationStatus = allocationStatus;
+    }
+
+    public String getRequestBatchId() {
+        return requestBatchId;
+    }
+
+    public void setRequestBatchId(String requestBatchId) {
+        this.requestBatchId = requestBatchId;
+    }
+
+    public String getRequestItemId() {
+        return requestItemId;
+    }
+
+    public void setRequestItemId(String requestItemId) {
+        this.requestItemId = requestItemId;
+    }
+
+    public String getStudentId() {
+        return studentId;
+    }
+
+    public void setStudentId(String studentId) {
+        this.studentId = studentId;
+    }
+
+    public String getStudentName() {
+        return studentName;
+    }
+
+    public void setStudentName(String studentName) {
+        this.studentName = studentName;
+    }
+
+    public String getClassId() {
+        return classId;
+    }
+
+    public void setClassId(String classId) {
+        this.classId = classId;
+    }
+
+    public String getConnectorSystemId() {
+        return connectorSystemId;
+    }
+
+    public void setConnectorSystemId(String connectorSystemId) {
+        this.connectorSystemId = connectorSystemId;
+    }
+
+    public String getBusinessModuleId() {
+        return businessModuleId;
+    }
+
+    public void setBusinessModuleId(String businessModuleId) {
+        this.businessModuleId = businessModuleId;
+    }
+
+    public String getExternalBusinessId() {
+        return externalBusinessId;
+    }
+
+    public void setExternalBusinessId(String externalBusinessId) {
+        this.externalBusinessId = externalBusinessId;
+    }
+
+    public String getExternalBusinessName() {
+        return externalBusinessName;
+    }
+
+    public void setExternalBusinessName(String externalBusinessName) {
+        this.externalBusinessName = externalBusinessName;
+    }
+
+    public String getTargetUrl() {
+        return targetUrl;
+    }
+
+    public void setTargetUrl(String targetUrl) {
+        this.targetUrl = targetUrl;
+    }
+
+    public String getProcessStepCode() {
+        return processStepCode;
+    }
+
+    public void setProcessStepCode(String processStepCode) {
+        this.processStepCode = processStepCode;
+    }
+
+    public String getProcessStepName() {
+        return processStepName;
+    }
+
+    public void setProcessStepName(String processStepName) {
+        this.processStepName = processStepName;
+    }
+
+    public Integer getProcessActorNo() {
+        return processActorNo;
+    }
+
+    public void setProcessActorNo(Integer processActorNo) {
+        this.processActorNo = processActorNo;
+    }
+
+    public String getActorRelation() {
+        return actorRelation;
+    }
+
+    public void setActorRelation(String actorRelation) {
+        this.actorRelation = actorRelation;
+    }
+
+    public String getOriginOrgId() {
+        return originOrgId;
+    }
+
+    public void setOriginOrgId(String originOrgId) {
+        this.originOrgId = originOrgId;
+    }
+
+    public String getOriginOrgName() {
+        return originOrgName;
+    }
+
+    public void setOriginOrgName(String originOrgName) {
+        this.originOrgName = originOrgName;
+    }
+
+    public String getOriginRoleId() {
+        return originRoleId;
+    }
+
+    public void setOriginRoleId(String originRoleId) {
+        this.originRoleId = originRoleId;
+    }
+
+    public String getOriginRoleName() {
+        return originRoleName;
+    }
+
+    public void setOriginRoleName(String originRoleName) {
+        this.originRoleName = originRoleName;
+    }
+
+    public String getAllocationLockStatus() {
+        return allocationLockStatus;
+    }
+
+    public void setAllocationLockStatus(String allocationLockStatus) {
+        this.allocationLockStatus = allocationLockStatus;
+    }
+
+    public String getActorSnapshotJson() {
+        return actorSnapshotJson;
+    }
+
+    public void setActorSnapshotJson(String actorSnapshotJson) {
+        this.actorSnapshotJson = actorSnapshotJson;
     }
 
     public LocalDateTime getAllocateTime() {

@@ -2,6 +2,12 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import StatusPill from '../../components/ui/StatusPill.vue';
+import {
+  authApi,
+  dataPrepareApi,
+  type DataInstanceAllocation,
+  type StudentDataLaunchResult
+} from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 
 const store = useTrainingStore();
@@ -10,6 +16,12 @@ const route = useRoute();
 const message = ref('');
 const errorMessage = ref('');
 const attemptMessage = ref('');
+const launchMessage = ref('');
+const launchErrorMessage = ref('');
+const launchLoading = ref(false);
+const allocationLoading = ref(false);
+const launchResult = ref<StudentDataLaunchResult | null>(null);
+const launchAllocation = ref<DataInstanceAllocation | null>(null);
 const showHelp = ref(true);
 const checks = reactive({
   entered: false,
@@ -118,6 +130,13 @@ const requiredSubmissionComplete = computed(() =>
     (field) => !field.required || submissionValues[field.key]?.trim()
   )
 );
+const queryAllocationId = computed(() => {
+  const value = route.query.allocationId;
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+});
+const activeAllocationId = computed(
+  () => queryAllocationId.value || launchAllocation.value?.id || ''
+);
 
 function syncSubmissionValues() {
   Object.keys(submissionValues).forEach((key) => {
@@ -143,6 +162,45 @@ watch(
   { immediate: true }
 );
 
+watch(
+  () => [task.value?.id, queryAllocationId.value],
+  () => {
+    void loadStudentAllocation();
+  },
+  { immediate: true }
+);
+
+function resolveStudentIdentity() {
+  const session = authApi.getSession();
+  return {
+    tenantId: session?.user.tenantId || 'demo-tenant',
+    studentId: task.value?.studentId || session?.user.userId || ''
+  };
+}
+
+async function loadStudentAllocation() {
+  if (!task.value || queryAllocationId.value) return;
+  const { tenantId, studentId } = resolveStudentIdentity();
+  if (!studentId) return;
+  allocationLoading.value = true;
+  launchErrorMessage.value = '';
+  try {
+    const allocations = await dataPrepareApi.listMyAllocations({
+      tenantId,
+      taskId: task.value.publishedTaskId || task.value.id,
+      sceneType: task.value.mode,
+      ownerUserId: studentId
+    });
+    launchAllocation.value = allocations[0] ?? null;
+  } catch (error) {
+    launchAllocation.value = null;
+    launchErrorMessage.value =
+      error instanceof Error ? error.message : '查询学生数据分配记录失败。';
+  } finally {
+    allocationLoading.value = false;
+  }
+}
+
 function startTask() {
   if (!task.value) return;
   try {
@@ -151,6 +209,31 @@ function startTask() {
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '任务启动失败。';
+  }
+}
+
+async function launchOriginPlatform() {
+  if (!task.value || !activeAllocationId.value) return;
+  const { tenantId, studentId } = resolveStudentIdentity();
+  launchLoading.value = true;
+  launchMessage.value = '';
+  launchErrorMessage.value = '';
+  try {
+    const result = await dataPrepareApi.createStudentDataLaunch({
+      tenantId,
+      allocationId: activeAllocationId.value,
+      studentId,
+      executionId: task.value.publishedTaskId
+    });
+    launchResult.value = result;
+    launchAllocation.value = result.allocation;
+    launchMessage.value = '已生成原平台启动凭证，请在新窗口中继续办理。';
+    window.open(result.launchUrl, '_blank', 'noopener,noreferrer');
+  } catch (error) {
+    launchErrorMessage.value =
+      error instanceof Error ? error.message : '生成原平台启动凭证失败。';
+  } finally {
+    launchLoading.value = false;
   }
 }
 
@@ -326,6 +409,45 @@ function restartAttempt() {
                 </div>
                 <em>演示模式 · 操作不会写入真实业务系统</em>
               </header>
+
+              <div class="origin-launch-card">
+                <div>
+                  <strong>
+                    {{
+                      allocationLoading
+                        ? '正在识别原平台数据'
+                        : activeAllocationId
+                          ? '原平台数据已分配'
+                          : '暂无可进入的原平台数据'
+                    }}
+                  </strong>
+                  <small>
+                    {{
+                      activeAllocationId
+                        ? `分配记录 ${activeAllocationId}，系统将按该记录中的单位和角色进入原平台。`
+                        : '系统会按当前学生、任务和场景查询数据分配记录；未查到时请确认老师是否已完成批次准备并下发。'
+                    }}
+                  </small>
+                </div>
+                <div class="origin-launch-card__actions">
+                  <button
+                    class="secondary"
+                    type="button"
+                    :disabled="allocationLoading"
+                    @click="loadStudentAllocation"
+                  >
+                    重新查询
+                  </button>
+                  <button
+                    class="primary"
+                    type="button"
+                    :disabled="launchLoading || allocationLoading || !activeAllocationId"
+                    @click="launchOriginPlatform"
+                  >
+                    {{ launchLoading ? '正在生成凭证' : '进入原平台办理' }}
+                  </button>
+                </div>
+              </div>
 
               <div v-if="task.status === 'TODO'" class="business-start">
                 <span>01</span>
@@ -548,8 +670,14 @@ function restartAttempt() {
         </div>
 
         <p v-if="message" class="notice success">{{ message }}</p>
+        <p v-if="launchMessage" class="notice success">
+          {{ launchMessage }}
+        </p>
         <p v-if="attemptMessage" class="notice success">
           {{ attemptMessage }}
+        </p>
+        <p v-if="launchErrorMessage" class="notice danger">
+          {{ launchErrorMessage }}
         </p>
         <p v-if="errorMessage" class="notice danger">{{ errorMessage }}</p>
 
@@ -961,6 +1089,47 @@ function restartAttempt() {
   line-height: 1.6;
 }
 
+.origin-launch-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  border: 1px solid #dfe5f3;
+  border-radius: 8px;
+  padding: 12px;
+  background: #fbfcff;
+  text-align: left;
+}
+
+.origin-launch-card > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+}
+
+.origin-launch-card strong {
+  color: #344056;
+  font-size: 10px;
+}
+
+.origin-launch-card small {
+  color: #7f8998;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.origin-launch-card__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+.origin-launch-card__actions button {
+  min-height: 30px;
+  font-size: 8px;
+}
+
 .submission-fields {
   display: grid;
   width: min(440px, 100%);
@@ -1265,6 +1434,12 @@ function restartAttempt() {
   .guide-checks,
   .submission-fields {
     grid-template-columns: 1fr;
+  }
+
+  .origin-launch-card,
+  .origin-launch-card__actions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .browser-bar {

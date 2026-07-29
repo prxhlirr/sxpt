@@ -357,6 +357,7 @@ watch(
     selectedRequirementId.value = '';
     items.value = [];
     pools.value = [];
+    allocations.value = [];
     loadBusinessModules();
   }
 );
@@ -410,6 +411,7 @@ async function refreshAll() {
     } else if (selectedRequirementId.value) {
       await loadItems(selectedRequirementId.value);
       await loadPools(selectedRequirementId.value);
+      await loadAllocations(selectedRequirementId.value);
     }
   }, '数据准备状态已刷新');
 }
@@ -556,6 +558,7 @@ function selectRequirement(requirementId: string) {
   activeTab.value = 'overview';
   loadItems(requirementId);
   loadPools(requirementId);
+  loadAllocations(requirementId);
 }
 
 async function loadItems(requirementId: string) {
@@ -567,6 +570,13 @@ async function loadItems(requirementId: string) {
 
 async function loadPools(requirementId: string) {
   pools.value = await dataPrepareApi.listPools({
+    tenantId: filters.tenantId,
+    requirementId
+  });
+}
+
+async function loadAllocations(requirementId: string) {
+  allocations.value = await dataPrepareApi.listAllocations({
     tenantId: filters.tenantId,
     requirementId
   });
@@ -591,6 +601,7 @@ async function acquirePool(pool: TeachingDataPool) {
     });
     allocations.value = [allocation, ...allocations.value];
     await loadPools(pool.requirementId);
+    await loadAllocations(pool.requirementId);
   }, '已领取数据实例');
 }
 
@@ -706,6 +717,18 @@ function sceneText(value?: string) {
     LEARN: '学习',
     PRACTICE: '练习',
     EXAM: '考试'
+  };
+  return value ? map[value] || value : '-';
+}
+
+function actorRelationText(value?: string) {
+  const map: Record<string, string> = {
+    PRIMARY: '主办',
+    COOPERATE: '协办',
+    APPROVER: '审核',
+    REVIEWER: '复核',
+    COUNTERSIGN: '会签',
+    CC: '抄送'
   };
   return value ? map[value] || value : '-';
 }
@@ -1016,10 +1039,12 @@ function formatTime(value?: string) {
                 <th>学生</th>
                 <th>题目</th>
                 <th>requestItemId</th>
-                <th>单位</th>
-                <th>角色</th>
-                <th>状态</th>
                 <th>原平台数据</th>
+                <th>当前步骤</th>
+                <th>当前参与方</th>
+                <th>当前单位</th>
+                <th>当前角色</th>
+                <th>状态</th>
               </tr>
             </thead>
             <tbody>
@@ -1027,8 +1052,20 @@ function formatTime(value?: string) {
                 <td>{{ item.studentId }}</td>
                 <td>{{ item.questionId || '-' }}</td>
                 <td>{{ shortId(item.requestItemId) }}</td>
-                <td>{{ item.requiredExternalOrgId }}</td>
-                <td>{{ item.requiredExternalRoleId }}</td>
+                <td>
+                  <strong class="cell-title">{{ item.externalBusinessName || item.externalBusinessNo || '-' }}</strong>
+                  <small>{{ shortId(item.externalBusinessId) }}</small>
+                </td>
+                <td>{{ item.currentStepCode || '-' }}</td>
+                <td>{{ item.currentActorNo ? `第 ${item.currentActorNo} 参与方` : '-' }}</td>
+                <td>
+                  <strong class="cell-title">{{ item.currentOrgName || item.requiredExternalOrgId || '-' }}</strong>
+                  <small>{{ item.currentOrgId || item.requiredExternalOrgId || '-' }}</small>
+                </td>
+                <td>
+                  <strong class="cell-title">{{ item.currentRoleName || item.requiredExternalRoleId || '-' }}</strong>
+                  <small>{{ item.currentRoleId || item.requiredExternalRoleId || '-' }}</small>
+                </td>
                 <td>
                   <span class="badge" :class="statusTone(item.itemStatus)">
                     {{ statusText(item.itemStatus) }}
@@ -1037,7 +1074,6 @@ function formatTime(value?: string) {
                     {{ statusText(item.validationStatus) }}
                   </span>
                 </td>
-                <td>{{ item.externalBusinessId || item.failureReason || '-' }}</td>
               </tr>
             </tbody>
           </table>
@@ -1132,6 +1168,9 @@ function formatTime(value?: string) {
               <tr>
                 <th>学生</th>
                 <th>实例</th>
+                <th>原平台数据</th>
+                <th>步骤参与方</th>
+                <th>原平台身份</th>
                 <th>场景</th>
                 <th>状态</th>
                 <th>领取时间</th>
@@ -1139,8 +1178,28 @@ function formatTime(value?: string) {
             </thead>
             <tbody>
               <tr v-for="allocation in allocations" :key="allocation.id">
-                <td>{{ allocation.ownerUserId }}</td>
+                <td>{{ allocation.studentName || allocation.studentId || allocation.ownerUserId }}</td>
                 <td>{{ shortId(allocation.dataInstanceId) }}</td>
+                <td>
+                  <strong class="cell-title">{{ allocation.externalBusinessName || '-' }}</strong>
+                  <small>{{ shortId(allocation.externalBusinessId) }}</small>
+                </td>
+                <td>
+                  <strong class="cell-title">{{ allocation.processStepName || allocation.processStepCode || '-' }}</strong>
+                  <small>
+                    {{
+                      allocation.processActorNo
+                        ? `${actorRelationText(allocation.actorRelation)} / 第 ${allocation.processActorNo} 参与方`
+                        : actorRelationText(allocation.actorRelation)
+                    }}
+                  </small>
+                </td>
+                <td>
+                  <strong class="cell-title">{{ allocation.originOrgName || allocation.requiredExternalOrgName || '-' }}</strong>
+                  <small>
+                    {{ allocation.originRoleName || allocation.requiredExternalRoleName || allocation.requiredExternalRoleId || '-' }}
+                  </small>
+                </td>
                 <td>{{ sceneText(allocation.allocationScene) }}</td>
                 <td>
                   <span class="badge" :class="statusTone(allocation.allocationStatus)">
@@ -1315,12 +1374,19 @@ label {
 
 input,
 select {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 40px;
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   background: #fff;
   color: var(--text);
   padding: 0 11px;
+}
+
+select {
+  max-width: 360px;
 }
 
 .chain-section {
@@ -1586,7 +1652,7 @@ select {
 
 table {
   width: 100%;
-  min-width: 800px;
+  min-width: 1080px;
   border-collapse: collapse;
 }
 
@@ -1613,6 +1679,23 @@ td {
 
 tbody tr:hover {
   background: #f9fbff;
+}
+
+.cell-title {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 850;
+  line-height: 1.45;
+}
+
+td small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .badge {

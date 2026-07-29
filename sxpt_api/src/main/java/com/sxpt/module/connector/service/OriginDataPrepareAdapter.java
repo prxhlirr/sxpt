@@ -12,7 +12,7 @@ import java.util.List;
  *
  * 关键流程：
  * 1. DataPrepareJobService 后续编排时按 requestBatchId 调用 createTeachingData。
- * 2. 原平台按 requestItemId 逐条返回 externalBusinessId、externalBusinessNo、externalStatus 和 targetUrl。
+ * 2. 原平台按 requestItemId 逐条返回外部业务标识、业务名称、当前状态、当前步骤、当前参与方和 targetUrl。
  * 3. 教学平台调用 validateTeachingData 确认可见性、操作单位、角色、状态和动作是否满足需求。
  * 4. 考试或强约束场景调用 lockTeachingData，完成后按策略调用 archiveTeachingData。
  */
@@ -303,7 +303,8 @@ public interface OriginDataPrepareAdapter {
      *
      * 业务功能：
      * 1. 返回原平台已经落库的数据引用。
-     * 2. 返回 targetUrl 供 launchToken 后续进入原平台具体页面。
+     * 2. 返回当前步骤和当前参与方身份，供教学平台优先保存真实办理上下文。
+     * 3. 返回 targetUrl 供 launchToken 后续进入原平台具体页面。
      */
     class ResponseItem {
 
@@ -313,9 +314,25 @@ public interface OriginDataPrepareAdapter {
 
         private String externalBusinessNo;
 
+        private String externalBusinessName;
+
         private String externalStatus;
 
         private String targetUrl;
+
+        private String currentStepCode;
+
+        private Integer currentActorNo;
+
+        private String currentOrgId;
+
+        private String currentOrgName;
+
+        private String currentRoleId;
+
+        private String currentRoleName;
+
+        private String processChainJson;
 
         private String itemStatus;
 
@@ -345,6 +362,14 @@ public interface OriginDataPrepareAdapter {
             this.externalBusinessNo = externalBusinessNo;
         }
 
+        public String getExternalBusinessName() {
+            return externalBusinessName;
+        }
+
+        public void setExternalBusinessName(String externalBusinessName) {
+            this.externalBusinessName = externalBusinessName;
+        }
+
         public String getExternalStatus() {
             return externalStatus;
         }
@@ -359,6 +384,62 @@ public interface OriginDataPrepareAdapter {
 
         public void setTargetUrl(String targetUrl) {
             this.targetUrl = targetUrl;
+        }
+
+        public String getCurrentStepCode() {
+            return currentStepCode;
+        }
+
+        public void setCurrentStepCode(String currentStepCode) {
+            this.currentStepCode = currentStepCode;
+        }
+
+        public Integer getCurrentActorNo() {
+            return currentActorNo;
+        }
+
+        public void setCurrentActorNo(Integer currentActorNo) {
+            this.currentActorNo = currentActorNo;
+        }
+
+        public String getCurrentOrgId() {
+            return currentOrgId;
+        }
+
+        public void setCurrentOrgId(String currentOrgId) {
+            this.currentOrgId = currentOrgId;
+        }
+
+        public String getCurrentOrgName() {
+            return currentOrgName;
+        }
+
+        public void setCurrentOrgName(String currentOrgName) {
+            this.currentOrgName = currentOrgName;
+        }
+
+        public String getCurrentRoleId() {
+            return currentRoleId;
+        }
+
+        public void setCurrentRoleId(String currentRoleId) {
+            this.currentRoleId = currentRoleId;
+        }
+
+        public String getCurrentRoleName() {
+            return currentRoleName;
+        }
+
+        public void setCurrentRoleName(String currentRoleName) {
+            this.currentRoleName = currentRoleName;
+        }
+
+        public String getProcessChainJson() {
+            return processChainJson;
+        }
+
+        public void setProcessChainJson(String processChainJson) {
+            this.processChainJson = processChainJson;
         }
 
         public String getItemStatus() {

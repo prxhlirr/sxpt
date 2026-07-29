@@ -27,31 +27,46 @@ describe('登录后的平台入口与身份导航', () => {
 
   it('仅在开发环境提供管理员、教师和学生身份快捷入口', () => {
     const portal = source('src/views/PlatformPortalView.vue');
+    const api = source('src/services/trainingApi.ts');
 
     expect(portal).toContain('import.meta.env.DEV');
     expect(portal).toContain('store.setRole(role)');
+    expect(portal).toContain('authApi.useDevelopmentSession(role)');
+    expect(api).toContain('api/v1/auth/token');
+    expect(api).not.toContain('token: `dev-${role}-token`');
     expect(portal).toContain("enterDevelopmentPortal('admin')");
     expect(portal).toContain("enterDevelopmentPortal('teacher')");
     expect(portal).toContain("enterDevelopmentPortal('student')");
     expect(portal).toContain('开发环境快捷入口');
   });
 
+  it('业务接口遇到未授权时清理会话并回到登录页', () => {
+    const api = source('src/services/trainingApi.ts');
+
+    expect(api).toContain('response.status === 401');
+    expect(api).toContain('handleUnauthorizedSession()');
+    expect(api).toContain('登录已失效，请重新登录');
+    expect(api).toContain('window.location.assign(`/login?redirect=');
+  });
+
   it('路由按身份拦截后台和各端页面', () => {
     const router = source('src/router.ts');
 
     expect(router).toContain('router.beforeEach');
-    expect(router).toContain('allowedRoles.includes(role)');
+    expect(router).toContain('authApi.canAccess(requiredRole, session)');
+    expect(router).toContain('authApi.getPortalRole(session)');
     expect(router).toContain("roles: ['admin', 'teacher']");
   });
 
-  it('教师侧栏提供录制教案，管理员侧栏不再展开五步配置菜单', () => {
+  it('教师侧栏提供教学工作台和批次准备，管理员侧栏保留数据准备二级入口', () => {
     const shell = source('src/layouts/AppShell.vue');
 
-    expect(shell).toContain("{ label: '录制教案'");
-    expect(shell).not.toContain("{ label: '考试设置'");
-    expect(shell).not.toContain("{ label: '分组设置'");
-    expect(shell).not.toContain("{ label: '考试数据'");
-    expect(shell).not.toContain("{ label: '发布中心'");
+    expect(shell).toContain("{ label: '教学工作台'");
+    expect(shell).toContain("{ label: '批次准备'");
+    expect(shell).toContain("{ label: '平台接入'");
+    expect(shell).toContain("{ label: '业务模块'");
+    expect(shell).toContain("{ label: '模板管理'");
+    expect(shell).toContain("{ label: '策略管理'");
     expect(shell).not.toContain('switchRole');
   });
 

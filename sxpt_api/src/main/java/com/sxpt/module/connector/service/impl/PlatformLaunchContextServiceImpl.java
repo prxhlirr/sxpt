@@ -184,7 +184,7 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
                 || !equalsText(launchContext.getUserId(), instance.getOwnerUserId())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
-        if (!DataInstanceStatus.READY.getValue().equals(instance.getInstanceStatus())
+        if (!isLaunchableInstanceStatus(instance.getInstanceStatus())
                 || !ValidationStatus.PASSED.getValue().equals(instance.getValidationStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
@@ -216,6 +216,21 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
      */
     private boolean equalsText(String left, String right) {
         return left != null && left.equals(right);
+    }
+
+    /**
+     * 判断数据实例是否允许生成进入原平台的启动上下文。
+     * <p>
+     * 数据准备完成后实例处于 READY；学生领取后实例会推进为 ALLOCATED。
+     * 学生真正进入原平台发生在领取之后，因此这里必须允许已分配给当前学生的 ALLOCATED 实例，
+     * 上方 ownerUserId 校验会继续保证学生只能启动自己的那条数据。
+     *
+     * @param instanceStatus 数据实例当前状态。
+     * @return true 表示该状态允许创建或校验启动上下文。
+     */
+    private boolean isLaunchableInstanceStatus(String instanceStatus) {
+        return DataInstanceStatus.READY.getValue().equals(instanceStatus)
+                || DataInstanceStatus.ALLOCATED.getValue().equals(instanceStatus);
     }
 
     /**

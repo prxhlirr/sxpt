@@ -1,5 +1,6 @@
 # Java / Maven
 /sxpt_api/target/
+/sxpt_api/src/test/
 target/
 *.class
 *.jar
@@ -64,3 +65,4 @@ sxpt_api/src/main/resources/*.properties
 /sxpt_web/.chrome-role-flow-qa2/*
 /sxpt_web/.chrome-role-flow-qa/*
 /sxpt_web/.chrome-platform-flow-qa/*
+/sxpt_web/node_modules/*

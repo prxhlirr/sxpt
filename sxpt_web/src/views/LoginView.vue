@@ -39,7 +39,7 @@ async function submitLogin() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const session = await authApi.login({
+    await authApi.login({
       loginType: 'PASSWORD',
       tenantId: form.tenantId.trim(),
       username: form.username.trim(),
@@ -47,7 +47,7 @@ async function submitLogin() {
     });
     const redirect = typeof route.query.redirect === 'string'
       ? route.query.redirect
-      : authApi.getHomePath(session);
+      : '/platforms';
     await router.replace(redirect);
   } catch (error) {
     errorMessage.value =

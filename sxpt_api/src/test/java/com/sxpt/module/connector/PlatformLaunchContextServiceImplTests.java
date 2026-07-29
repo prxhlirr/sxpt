@@ -104,6 +104,24 @@ class PlatformLaunchContextServiceImplTests {
     }
 
     /**
+     * 验证学生领取数据后，已分配给当前学生的 ALLOCATED 实例仍允许生成启动上下文。
+     */
+    @Test
+    void createLaunchContextShouldAllowAllocatedDataInstanceForOwner() {
+        PlatformLaunchContext launchContext = buildValidLaunchContext();
+        TeachingDataInstance instance = buildReadyPassedInstance();
+        instance.setInstanceStatus(DataInstanceStatus.ALLOCATED.getValue());
+        when(teachingDataInstanceMapper.selectById("instance_001")).thenReturn(instance);
+
+        PlatformLaunchContextService.CreatedLaunchContext created = service.createLaunchContext(launchContext);
+
+        assertSame(launchContext, created.getLaunchContext());
+        assertNotNull(created.getLaunchToken());
+        assertEquals(LaunchStatus.CREATED.getValue(), launchContext.getLaunchStatus());
+        verify(mapper).insert(launchContext);
+    }
+
+    /**
      * 校验缺少目标地址时拒绝创建启动上下文。
      */
     @Test

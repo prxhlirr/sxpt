@@ -814,14 +814,31 @@ function statusClass(status?: string) {
 }
 
 .icon-button {
+  display: inline-grid;
   width: 36px;
+  min-width: 36px;
   min-height: 36px;
-  border-color: #d7e0ec;
-  background: #fff;
-  color: #334155;
-  font-size: 22px;
+  place-items: center;
+  border-color: #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 18px;
+  font-weight: 800;
   line-height: 1;
   padding: 0;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.icon-button:hover {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.icon-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
 }
 
 .detail-grid {
@@ -838,6 +855,22 @@ function statusClass(status?: string) {
   padding: 20px;
 }
 
+.edit-form label {
+  min-width: 0;
+}
+
+.edit-form input,
+.edit-form select {
+  width: 100%;
+  max-width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+
+.edit-form select {
+  max-width: 360px;
+}
+
 .detail-grid strong {
   color: #172033;
   font-size: 13px;
@@ -850,6 +883,8 @@ function statusClass(status?: string) {
 
 .edit-form textarea {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   min-height: 84px;
   resize: vertical;
   border: 1px solid #cbd5e1;

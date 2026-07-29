@@ -7,6 +7,7 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.teachingdata.entity.DataInstanceAllocation;
+import com.sxpt.module.teachingdata.entity.DataRequirementItem;
 import com.sxpt.module.teachingdata.entity.TeachingDataPool;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.AllocationStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
@@ -14,6 +15,7 @@ import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataPoolStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.ValidationStatus;
 import com.sxpt.module.teachingdata.mapper.DataInstanceAllocationMapper;
+import com.sxpt.module.teachingdata.mapper.DataRequirementItemMapper;
 import com.sxpt.module.teachingdata.mapper.TeachingDataPoolMapper;
 import com.sxpt.module.teachingdata.service.DataInstanceAllocationService;
 import org.springframework.context.annotation.Profile;
@@ -22,7 +24,9 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * 数据实例分配服务实现。
@@ -46,12 +50,16 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
 
     private final TeachingDataInstanceMapper teachingDataInstanceMapper;
 
+    private final DataRequirementItemMapper dataRequirementItemMapper;
+
     public DataInstanceAllocationServiceImpl(DataInstanceAllocationMapper dataInstanceAllocationMapper,
                                              TeachingDataPoolMapper teachingDataPoolMapper,
-                                             TeachingDataInstanceMapper teachingDataInstanceMapper) {
+                                             TeachingDataInstanceMapper teachingDataInstanceMapper,
+                                             DataRequirementItemMapper dataRequirementItemMapper) {
         this.dataInstanceAllocationMapper = dataInstanceAllocationMapper;
         this.teachingDataPoolMapper = teachingDataPoolMapper;
         this.teachingDataInstanceMapper = teachingDataInstanceMapper;
+        this.dataRequirementItemMapper = dataRequirementItemMapper;
     }
 
     /**
@@ -90,6 +98,35 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
             releaseInstanceAfterAllocationFailure(instance, request);
             throw ex;
         }
+    }
+
+    /**
+     * 查询指定数据需求批次下的分配记录。
+     *
+     * @param tenantId 租户 ID。
+     * @param requirementId 数据需求批次 ID。
+     * @return 当前批次下所有有效分配记录，按领取时间倒序排列。
+     */
+    @Override
+    public List<DataInstanceAllocation> listByRequirement(String tenantId, String requirementId) {
+        requireText(tenantId);
+        requireText(requirementId);
+        List<TeachingDataPool> pools = teachingDataPoolMapper.selectList(new QueryWrapper<TeachingDataPool>()
+                .select("id")
+                .eq("tenant_id", tenantId)
+                .eq("requirement_id", requirementId)
+                .eq("deleted", Boolean.FALSE));
+        if (pools.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> poolIds = pools.stream()
+                .map(TeachingDataPool::getId)
+                .collect(Collectors.toList());
+        return dataInstanceAllocationMapper.selectList(new QueryWrapper<DataInstanceAllocation>()
+                .eq("tenant_id", tenantId)
+                .in("pool_id", poolIds)
+                .eq("deleted", Boolean.FALSE)
+                .orderByDesc("allocate_time"));
     }
 
     /**
@@ -247,16 +284,60 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
         allocation.setAttemptId(request.getAttemptId());
         allocation.setQuestionAttemptId(request.getQuestionAttemptId());
         allocation.setOwnerUserId(request.getOwnerUserId());
+        allocation.setStudentId(request.getOwnerUserId());
         allocation.setAllocationScene(request.getAllocationScene());
+        allocation.setRequestBatchId(instance.getRequestBatchId());
+        allocation.setRequestItemId(instance.getRequestItemId());
+        allocation.setConnectorSystemId(instance.getConnectorSystemId());
+        allocation.setExternalBusinessId(instance.getExternalBusinessId());
+        allocation.setExternalBusinessName(instance.getExternalBusinessNo());
+        allocation.setTargetUrl(instance.getTargetUrl());
         allocation.setRequiredExternalOrgId(instance.getRequiredExternalOrgId());
         allocation.setRequiredExternalOrgName(instance.getRequiredExternalOrgName());
         allocation.setRequiredExternalRoleId(instance.getRequiredExternalRoleId());
         allocation.setRequiredExternalRoleName(instance.getRequiredExternalRoleName());
         allocation.setActorType(instance.getActorType());
         allocation.setRequirementSnapshotJson(instance.getRequirementSnapshotJson());
+        applyProcessSnapshot(allocation, instance);
         allocation.setCreateBy(request.getCreateBy());
         allocation.setUpdateBy(request.getUpdateBy());
         return allocation;
+    }
+
+    /**
+     * 将数据准备明细中的步骤参与方快照写入分配记录。
+     * <p>
+     * 分配表需要固化“学生本次用哪条数据、从哪个步骤、以哪个参与方身份进入”，因此不能只保存数据实例 ID。
+     * 这里通过实例绑定的 requirementItemId 回查造数明细，把数据准备阶段已经生成的链路快照沉淀到领取记录中。
+     *
+     * @param allocation 分配记录。
+     * @param instance 教学数据实例。
+     */
+    private void applyProcessSnapshot(DataInstanceAllocation allocation, TeachingDataInstance instance) {
+        if (!StringUtils.hasText(instance.getRequirementItemId())) {
+            return;
+        }
+        DataRequirementItem item = dataRequirementItemMapper.selectById(instance.getRequirementItemId());
+        if (item == null || Boolean.TRUE.equals(item.getDeleted())) {
+            return;
+        }
+        allocation.setBusinessModuleId(item.getBusinessModuleId());
+        allocation.setExternalBusinessName(firstText(item.getExternalBusinessName(), instance.getExternalBusinessNo()));
+        allocation.setProcessStepCode(item.getCurrentStepCode());
+        allocation.setProcessActorNo(item.getCurrentActorNo());
+        allocation.setOriginOrgId(item.getCurrentOrgId());
+        allocation.setOriginOrgName(item.getCurrentOrgName());
+        allocation.setOriginRoleId(item.getCurrentRoleId());
+        allocation.setOriginRoleName(item.getCurrentRoleName());
+        allocation.setActorSnapshotJson(item.getProcessChainSnapshotJson());
+        if (StringUtils.hasText(item.getCurrentOrgId())) {
+            allocation.setRequiredExternalOrgId(item.getCurrentOrgId());
+            allocation.setRequiredExternalOrgName(item.getCurrentOrgName());
+        }
+        if (StringUtils.hasText(item.getCurrentRoleId())) {
+            allocation.setRequiredExternalRoleId(item.getCurrentRoleId());
+            allocation.setRequiredExternalRoleName(item.getCurrentRoleName());
+        }
     }
 
     /**
@@ -346,6 +427,17 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
      */
     private String generateId() {
         return java.util.UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * 取第一个有内容的文本。
+     *
+     * @param first 首选文本。
+     * @param second 兜底文本。
+     * @return 第一个非空文本。
+     */
+    private String firstText(String first, String second) {
+        return StringUtils.hasText(first) ? first : second;
     }
 
     /**

@@ -6,6 +6,8 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
+import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService;
+import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService.SnapshotResult;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataRequirement;
 import com.sxpt.module.teachingdata.entity.DataRequirementItem;
@@ -71,18 +73,22 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
 
     private final OriginDataPrepareAdapter originDataPrepareAdapter;
 
+    private final BusinessModuleProcessSnapshotService processSnapshotService;
+
     public DataPrepareOrchestrationServiceImpl(DataPrepareJobMapper dataPrepareJobMapper,
                                                DataRequirementItemMapper dataRequirementItemMapper,
                                                DataRequirementMapper dataRequirementMapper,
                                                TeachingDataPoolMapper teachingDataPoolMapper,
                                                TeachingDataInstanceMapper teachingDataInstanceMapper,
-                                               OriginDataPrepareAdapter originDataPrepareAdapter) {
+                                               OriginDataPrepareAdapter originDataPrepareAdapter,
+                                               BusinessModuleProcessSnapshotService processSnapshotService) {
         this.dataPrepareJobMapper = dataPrepareJobMapper;
         this.dataRequirementItemMapper = dataRequirementItemMapper;
         this.dataRequirementMapper = dataRequirementMapper;
         this.teachingDataPoolMapper = teachingDataPoolMapper;
         this.teachingDataInstanceMapper = teachingDataInstanceMapper;
         this.originDataPrepareAdapter = originDataPrepareAdapter;
+        this.processSnapshotService = processSnapshotService;
     }
 
     /**
@@ -313,8 +319,10 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         LocalDateTime now = LocalDateTime.now();
         item.setExternalBusinessId(responseItem.getExternalBusinessId());
         item.setExternalBusinessNo(responseItem.getExternalBusinessNo());
+        item.setExternalBusinessName(firstText(responseItem.getExternalBusinessName(), responseItem.getExternalBusinessNo()));
         item.setExternalStatus(responseItem.getExternalStatus());
         item.setTargetUrl(responseItem.getTargetUrl());
+        applyResponseProcessContext(item, responseItem);
         item.setItemStatus(RequirementItemStatus.READY.getValue());
         item.setValidationStatus(ValidationStatus.NOT_CHECKED.getValue());
         item.setFailureReason(null);
@@ -323,6 +331,67 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         TeachingDataInstance instance = buildTeachingDataInstance(job, item, responseItem, pool, now);
         teachingDataInstanceMapper.insert(instance);
         validatePreparedInstance(instance.getId());
+    }
+
+    /**
+     * 使用原平台返回的当前办理上下文或业务模块标准办理链补齐实例链路快照。
+     * <p>
+     * 原平台返回完整办理链时直接保存真实链路；只返回当前步骤或当前参与方时，先保存原平台返回值，再使用
+     * 标准办理链生成完整快照。这样真实原平台可以逐步接入，不必一次实现完整链路协议。
+     *
+     * @param item 数据需求明细。
+     * @param responseItem 原平台逐条响应。
+     */
+    private void applyResponseProcessContext(DataRequirementItem item, OriginDataPrepareAdapter.ResponseItem responseItem) {
+        item.setCurrentStepCode(responseItem.getCurrentStepCode());
+        item.setCurrentActorNo(responseItem.getCurrentActorNo());
+        item.setCurrentOrgId(responseItem.getCurrentOrgId());
+        item.setCurrentOrgName(responseItem.getCurrentOrgName());
+        item.setCurrentRoleId(responseItem.getCurrentRoleId());
+        item.setCurrentRoleName(responseItem.getCurrentRoleName());
+        if (StringUtils.hasText(responseItem.getProcessChainJson())) {
+            item.setProcessChainSnapshotJson(responseItem.getProcessChainJson());
+            applyCurrentIdentityFromResponse(item);
+            return;
+        }
+        if (!StringUtils.hasText(item.getBusinessModuleId())) {
+            applyCurrentIdentityFromResponse(item);
+            return;
+        }
+        SnapshotResult snapshot = processSnapshotService.generateStandardSnapshot(
+                item.getTenantId(),
+                item.getBusinessModuleId(),
+                item.getCurrentStepCode(),
+                item.getCurrentActorNo());
+        item.setProcessChainSnapshotJson(snapshot.getSnapshotJson());
+        item.setCurrentStepCode(snapshot.getCurrentStepCode());
+        item.setCurrentActorNo(snapshot.getCurrentActorNo());
+        item.setCurrentOrgId(snapshot.getCurrentOrgId());
+        item.setCurrentOrgName(snapshot.getCurrentOrgName());
+        item.setCurrentRoleId(snapshot.getCurrentRoleId());
+        item.setCurrentRoleName(snapshot.getCurrentRoleName());
+        item.setRequiredExternalOrgId(snapshot.getCurrentOrgId());
+        item.setRequiredExternalOrgName(snapshot.getCurrentOrgName());
+        item.setRequiredExternalRoleId(snapshot.getCurrentRoleId());
+        item.setRequiredExternalRoleName(snapshot.getCurrentRoleName());
+    }
+
+    /**
+     * 原平台已经返回当前单位和角色时，直接同步到校验字段。
+     * <p>
+     * 该方法只在完整真实链路或无标准链兜底时使用，避免覆盖后续标准链推导出的默认身份。
+     *
+     * @param item 数据需求明细。
+     */
+    private void applyCurrentIdentityFromResponse(DataRequirementItem item) {
+        if (StringUtils.hasText(item.getCurrentOrgId())) {
+            item.setRequiredExternalOrgId(item.getCurrentOrgId());
+            item.setRequiredExternalOrgName(item.getCurrentOrgName());
+        }
+        if (StringUtils.hasText(item.getCurrentRoleId())) {
+            item.setRequiredExternalRoleId(item.getCurrentRoleId());
+            item.setRequiredExternalRoleName(item.getCurrentRoleName());
+        }
     }
 
     /**
@@ -540,6 +609,17 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      */
     private String poolKey(DataRequirementItem item) {
         return StringUtils.hasText(item.getQuestionId()) ? item.getQuestionId() : "_all";
+    }
+
+    /**
+     * 取第一个有内容的文本。
+     *
+     * @param first 首选文本。
+     * @param second 兜底文本。
+     * @return 第一个非空文本。
+     */
+    private String firstText(String first, String second) {
+        return StringUtils.hasText(first) ? first : second;
     }
 
     /**

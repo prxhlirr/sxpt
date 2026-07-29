@@ -97,7 +97,7 @@ const navigation = computed<NavigationItem[]>(() => {
 });
 
 const currentRole = computed(
-  () => identityProfiles[store.state.currentRole]
+  () => roleOptions.find((role) => role.key === store.state.currentRole) ?? roleOptions[0]
 );
 </script>
 
@@ -154,6 +154,7 @@ const currentRole = computed(
     </aside>
 
     <section class="app-workspace">
+      <header>
         <div>
           <span class="breadcrumb">业务实训平台 / {{ currentRole.label }}</span>
           <strong>{{ String(route.meta.title ?? '工作台') }}</strong>

@@ -670,15 +670,37 @@ function statusClass(status?: string) {
 }
 
 .icon-close {
-  width: 40px;
-  height: 40px;
+  display: inline-grid;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
   border: 1px solid #dbe3ef;
-  border-radius: 6px;
-  background: #ffffff;
+  border-radius: 8px;
+  place-items: center;
+  background: #f8fafc;
   color: #64748b;
-  font-size: 24px;
+  font-size: 18px;
+  font-weight: 800;
   line-height: 1;
+  padding: 0;
   cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
+}
+
+.icon-close:hover {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.icon-close:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.icon-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .dialog-helper {
@@ -714,6 +736,8 @@ function statusClass(status?: string) {
 .create-form select,
 .create-form textarea {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   border: 1px solid #d7e0ec;
   border-radius: 6px;
   background: #ffffff;
@@ -727,6 +751,14 @@ function statusClass(status?: string) {
 .create-form select {
   min-height: 44px;
   padding: 0 11px;
+}
+
+.create-form select {
+  max-width: 360px;
+}
+
+.create-form .field-wide select {
+  max-width: 480px;
 }
 
 .create-form input[readonly] {

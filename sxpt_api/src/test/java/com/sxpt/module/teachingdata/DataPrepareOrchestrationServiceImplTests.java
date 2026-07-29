@@ -3,6 +3,7 @@ package com.sxpt.module.teachingdata;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
+import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataRequirementItem;
@@ -55,13 +56,17 @@ class DataPrepareOrchestrationServiceImplTests {
 
     private final OriginDataPrepareAdapter originDataPrepareAdapter = mock(OriginDataPrepareAdapter.class);
 
+    private final BusinessModuleProcessSnapshotService processSnapshotService =
+            mock(BusinessModuleProcessSnapshotService.class);
+
     private final DataPrepareOrchestrationService service = new DataPrepareOrchestrationServiceImpl(
             dataPrepareJobMapper,
             dataRequirementItemMapper,
             dataRequirementMapper,
             teachingDataPoolMapper,
             teachingDataInstanceMapper,
-            originDataPrepareAdapter);
+            originDataPrepareAdapter,
+            processSnapshotService);
 
     /**
      * 验证所有需求项成功时，任务进入 SUCCESS，明细 READY，并创建实例引用。

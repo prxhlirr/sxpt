@@ -154,6 +154,37 @@ public class DataPrepareAdminController {
     }
 
     /**
+     * 查询指定批次下的数据实例分配记录。
+     *
+     * @param tenantId 租户 ID。
+     * @param requirementId 数据需求批次 ID。
+     * @return 当前批次下所有有效领取记录。
+     */
+    @GetMapping("/allocations")
+    public ApiResult<List<DataInstanceAllocation>> listAllocations(@RequestParam String tenantId,
+                                                                   @RequestParam String requirementId) {
+        return ApiResult.success(dataInstanceAllocationService.listByRequirement(tenantId, requirementId));
+    }
+
+    /**
+     * 查询指定学生在任务和场景下已经领取的数据分配记录。
+     *
+     * @param tenantId 租户 ID。
+     * @param taskId 教学任务 ID。
+     * @param sceneType 教学场景。
+     * @param ownerUserId 学生用户 ID。
+     * @return 当前学生在该任务和场景下的有效分配记录。
+     */
+    @GetMapping("/allocations/mine")
+    public ApiResult<List<DataInstanceAllocation>> listMyAllocations(@RequestParam String tenantId,
+                                                                     @RequestParam String taskId,
+                                                                     @RequestParam String sceneType,
+                                                                     @RequestParam String ownerUserId) {
+        return ApiResult.success(dataInstanceAllocationService.listByOwnerAndScene(
+                tenantId, taskId, sceneType, ownerUserId));
+    }
+
+    /**
      * 从数据池领取一条可用实例。
      *
      * @param request 数据领取请求。
