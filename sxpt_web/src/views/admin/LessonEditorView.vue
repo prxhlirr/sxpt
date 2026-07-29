@@ -16,6 +16,10 @@ import type {
   RunMode
 } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
+import {
+  captureBusinessPageSnapshot,
+  normalizeBusinessPageSnapshot
+} from '../../utils/businessSnapshot';
 
 type PanelTab = 'stage' | 'step' | 'lesson' | 'publish';
 type TargetKey =
@@ -473,7 +477,8 @@ function resolvePreviewTargetSelector(selector: string) {
 
 function handleBusinessPlatformMessage(event: MessageEvent) {
   const platform = businessPlatform.value;
-  const payload = event.data as Record<string, unknown> | null;
+  const message = event.data as Record<string, unknown> | null;
+  const messageType = String(message?.type ?? '');
   if (
     useEmbeddedBusinessSimulation.value ||
     !platform ||
@@ -481,8 +486,8 @@ function handleBusinessPlatformMessage(event: MessageEvent) {
     configurationLocked.value ||
     !lesson.value ||
     !selectedStage.value ||
-    !payload ||
-    payload.type !== 'BUSINESS_ACTION'
+    !message ||
+    !['BUSINESS_ACTION', 'SXPT_BUSINESS_ACTION'].includes(messageType)
   ) {
     return;
   }
@@ -497,19 +502,46 @@ function handleBusinessPlatformMessage(event: MessageEvent) {
     return;
   }
 
+  const payload =
+    messageType === 'SXPT_BUSINESS_ACTION' &&
+    message.payload &&
+    typeof message.payload === 'object'
+      ? (message.payload as Record<string, unknown>)
+      : message;
   const title = String(payload.title ?? payload.text ?? payload.actionLabel ?? '业务操作');
   const actionLabel = String(payload.actionLabel ?? payload.text ?? title);
+  const pageUrl = String(payload.url ?? effectiveBusinessPlatformUrl.value);
+  const pageTitle = String(payload.pageTitle ?? platform.name);
+  const recordedViewport =
+    payload.recordedViewport &&
+    typeof payload.recordedViewport === 'object'
+      ? {
+          width: Number(
+            (payload.recordedViewport as Record<string, unknown>).width
+          ),
+          height: Number(
+            (payload.recordedViewport as Record<string, unknown>).height
+          )
+        }
+      : undefined;
+  const pageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
+    pageUrl,
+    pageTitle,
+    viewport: recordedViewport
+  });
   const step: RecordedStep = {
     id: `record-${selectedStage.value.id}-${Date.now()}`,
     title,
-    pageTitle: String(payload.pageTitle ?? platform.name),
+    pageTitle,
     actionLabel,
     selector: String(payload.selector ?? ''),
     durationSeconds: Number(payload.durationSeconds ?? 8),
     note: String(payload.note ?? `在${platform.name}中完成“${actionLabel}”。`),
     kind: 'action',
     actionType: String(payload.actionType ?? 'click') as RecordedStep['actionType'],
-    url: String(payload.url ?? effectiveBusinessPlatformUrl.value),
+    url: pageUrl,
+    pageSnapshot,
+    recordedViewport,
     teachingText: String(payload.teachingText ?? ''),
     practiceHint: String(payload.practiceHint ?? ''),
     examGoal: String(payload.examGoal ?? ''),
@@ -521,6 +553,7 @@ function handleBusinessPlatformMessage(event: MessageEvent) {
   });
   selectedStepId.value = step.id;
   showFeedback(`已从“${platform.name}”采集节点：${title}`);
+  queueStepSync(selectedStage.value.id, step.id);
 }
 
 function showFeedback(message: string, tone: 'success' | 'danger' = 'success') {
@@ -635,14 +668,26 @@ function moveSelectedStage(direction: 'up' | 'down') {
   }
 }
 
-function startRecording() {
+async function startRecording() {
   if (!selectedStage.value) {
     showFeedback('请先选择或添加一个业务阶段。', 'danger');
     return;
   }
   if (configurationLocked.value) return;
-  recording.value = true;
-  activityText.value = `正在录制“${selectedStage.value.name}”，请直接操作下层业务系统。`;
+  try {
+    if (!lesson.value) return;
+    await store.startCaptureSessionRemote(
+      lesson.value.id,
+      effectiveBusinessPlatformUrl.value
+    );
+    recording.value = true;
+    activityText.value = `正在录制“${selectedStage.value.name}”，请直接操作下层业务系统。`;
+  } catch (error) {
+    showFeedback(
+      error instanceof Error ? error.message : '后端采集会话创建失败',
+      'danger'
+    );
+  }
 }
 
 function pauseRecording() {
@@ -650,12 +695,19 @@ function pauseRecording() {
   activityText.value = '录制已暂停，可编辑节点、调整顺序或保存当前阶段。';
 }
 
-function captureBusinessAction(targetKey: TargetKey) {
+async function captureBusinessAction(targetKey: TargetKey) {
   const target = captureTargets.value[targetKey];
   if (!recording.value || !lesson.value || !selectedStage.value || configurationLocked.value) {
     activityText.value = `已执行业务操作“${target.actionLabel}”；开始录制后该操作会生成教案节点。`;
     return;
   }
+  await nextTick();
+  const pageSnapshot = businessLayerRef.value
+    ? captureBusinessPageSnapshot(businessLayerRef.value, {
+        pageUrl: effectiveBusinessPlatformUrl.value,
+        pageTitle: target.pageTitle
+      })
+    : undefined;
   const step: RecordedStep = {
     id: `record-${selectedStage.value.id}-${Date.now()}`,
     title: target.title,
@@ -667,6 +719,11 @@ function captureBusinessAction(targetKey: TargetKey) {
     kind: 'action',
     actionType: targetKey === 'submit' ? 'submit' : targetKey === 'category' ? 'select' : 'click',
     url: effectiveBusinessPlatformUrl.value,
+    pageSnapshot,
+    recordedViewport: {
+      width: window.innerWidth,
+      height: window.innerHeight
+    },
     teachingText: target.note,
     practiceHint: `请完成“${target.actionLabel}”操作。`,
     examGoal: `正确完成${target.title}`,
@@ -679,6 +736,7 @@ function captureBusinessAction(targetKey: TargetKey) {
   selectedStepId.value = step.id;
   previewEnabled.value = true;
   showFeedback(`已采集节点：${step.title}`);
+  queueStepSync(selectedStage.value.id, step.id);
 }
 
 function addRecordedStep() {
@@ -707,6 +765,24 @@ function addRecordedStep() {
   selectedStepId.value = step.id;
   openPanel('step');
   showFeedback('已在当前页面插入说明节点。');
+  queueStepSync(selectedStage.value.id, step.id);
+}
+
+function queueStepSync(stageId: string, stepId: string) {
+  if (!lesson.value || !store.remote.enabled) return;
+  void store
+    .syncRecordedStep(lesson.value.id, stageId, stepId)
+    .then(() => {
+      showFeedback('录制节点已同步到后端并生成动作草稿。');
+    })
+    .catch((error) => {
+      showFeedback(
+        `节点已保存在本地，但后端同步失败：${
+          error instanceof Error ? error.message : '未知错误'
+        }`,
+        'danger'
+      );
+    });
 }
 
 function updateRecordedStep(stepId: string, patch: Partial<RecordedStep>) {
@@ -756,11 +832,15 @@ function saveCurrentStage() {
   pauseRecording();
 }
 
-function publishLesson() {
+async function publishLesson() {
   if (!lesson.value) return;
   try {
-    store.publishLesson(lesson.value.id);
-    showFeedback('教案发布成功，现在可以进入考试设置。');
+    await store.publishLessonRemote(lesson.value.id);
+    showFeedback(
+      store.remote.enabled
+        ? '教案已发布到后端，正式资源、动作草稿和教学点均已完成关联。'
+        : '教案发布成功，现在可以进入考试设置。'
+    );
   } catch (error) {
     showFeedback(error instanceof Error ? error.message : '发布校验未通过', 'danger');
     openPanel('publish');
@@ -877,7 +957,7 @@ function numberValue(event: Event) {
                     v-model="businessForm.subject"
                     data-business-field="subject"
                     :placeholder="businessScenario.subjectPlaceholder"
-                    @focus="captureBusinessAction('subject')"
+                    @change="captureBusinessAction('subject')"
                   />
                 </label>
                 <label class="target-category">
@@ -903,7 +983,7 @@ function numberValue(event: Event) {
                     v-model="businessForm.counterparty"
                     data-business-field="counterparty"
                     :placeholder="businessScenario.counterpartyPlaceholder"
-                    @focus="captureBusinessAction('counterparty')"
+                    @change="captureBusinessAction('counterparty')"
                   />
                 </label>
                 <label class="target-amount">
@@ -915,7 +995,7 @@ function numberValue(event: Event) {
                       data-business-field="amount"
                       type="number"
                       placeholder="0.00"
-                      @focus="captureBusinessAction('amount')"
+                      @change="captureBusinessAction('amount')"
                     />
                   </div>
                 </label>
@@ -935,7 +1015,7 @@ function numberValue(event: Event) {
                     data-business-field="reason"
                     rows="5"
                     placeholder="请输入详细说明"
-                    @focus="captureBusinessAction('reason')"
+                    @change="captureBusinessAction('reason')"
                   />
                 </label>
               </div>
@@ -1299,6 +1379,18 @@ function numberValue(event: Event) {
             必做节点
           </label>
           <div class="node-actions">
+            <button
+              v-if="
+                store.remote.enabled &&
+                lesson.captureSessionId &&
+                selectedStep.syncStatus !== 'SYNCED'
+              "
+              type="button"
+              :disabled="selectedStep.syncStatus === 'SYNCING'"
+              @click="queueStepSync(selectedStage?.id ?? '', selectedStep.id)"
+            >
+              {{ selectedStep.syncStatus === 'SYNCING' ? '正在同步…' : '重试后端同步' }}
+            </button>
             <button type="button" @click="moveRecordedStep('up')">↑ 上移</button>
             <button type="button" @click="moveRecordedStep('down')">↓ 下移</button>
             <button class="danger-text" type="button" @click="removeRecordedStep(selectedStep.id)">删除节点</button>

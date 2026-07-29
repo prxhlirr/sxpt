@@ -621,6 +621,7 @@
       const TARGET_PAGE = {
         '[data-action="create"]': "applications",
         '[data-action="submit"]': "create",
+        '[data-action="save"]': "create",
         '[data-action="handle"]': "todos",
         '[data-action="approve"]': "approval",
         '[data-action="archive"]': "archive",
@@ -629,13 +630,27 @@
         '[data-training-id="amount"]': "create",
         '[data-training-id="arrival-date"]': "create",
         '[data-training-id="reason"]': "create",
+        '[data-business-field="subject"]': "create",
+        '[data-business-field="counterparty"]': "create",
+        '[data-business-field="category"]': "create",
+        '[data-business-field="amount"]': "create",
+        '[data-business-field="date"]': "create",
+        '[data-business-field="reason"]': "create",
         '[data-training-id="approval-comment"]': "approval"
       };
 
       let currentPage = "applications";
       let picking = false;
       let recording = false;
+      let studentMode = "RECORDING";
+      let composingStudentInput = false;
       let highlightedElement;
+      let parentOrigin = window.location.origin;
+      try {
+        if (document.referrer) parentOrigin = new URL(document.referrer).origin;
+      } catch {
+        parentOrigin = window.location.origin;
+      }
 
       function pageTemplate(page) {
         if (page === "applications") {
@@ -676,11 +691,12 @@
                 <div class="form-grid">
                   <label>申请单位<input value="东部事业部" disabled /></label>
                   <label>申请人<input value="张敏" disabled /></label>
-                  <label>供应商<input data-training-id="supplier" value="上海示例供应商有限公司" /></label>
-                  <label>采购品类<select data-training-id="category"><option>办公设备</option><option>低值易耗品</option><option>软件服务</option></select></label>
-                  <label>申请金额<input data-training-id="amount" value="68500" /></label>
-                  <label>期望到货日期<input data-training-id="arrival-date" type="date" value="2026-08-15" /></label>
-                  <label class="wide">申请原因<textarea data-training-id="reason">用于新员工入职设备补充及旧设备更新。</textarea></label>
+                  <label class="wide">申请主题<input data-training-id="subject" data-business-field="subject" value="办公设备集中采购" /></label>
+                  <label>供应商<input data-training-id="supplier" data-business-field="counterparty" value="上海示例供应商有限公司" /></label>
+                  <label>采购品类<select data-training-id="category" data-business-field="category"><option>办公设备</option><option>低值易耗品</option><option>软件服务</option></select></label>
+                  <label>申请金额<input data-training-id="amount" data-business-field="amount" value="68500" /></label>
+                  <label>期望到货日期<input data-training-id="arrival-date" data-business-field="date" type="date" value="2026-08-15" /></label>
+                  <label class="wide">申请原因<textarea data-training-id="reason" data-business-field="reason">用于新员工入职设备补充及旧设备更新。</textarea></label>
                 </div>
               </div>
               <div class="form-section">
@@ -691,7 +707,7 @@
                 </table>
               </div>
               <div class="form-actions">
-                <button data-training-id="save-draft">保存草稿</button>
+                <button data-action="save" data-training-id="save-draft">保存草稿</button>
                 <button class="primary" data-action="submit" data-training-id="submit" data-navigate="detail">提交申请</button>
               </div>
             </section>`;
@@ -815,16 +831,46 @@
         currentPage = PAGE_META[page] ? page : "applications";
         const meta = PAGE_META[currentPage];
         document.getElementById("pageRoot").innerHTML = pageTemplate(currentPage);
+        applyStudentMode();
         document.getElementById("topbarTitle").textContent = meta.title;
         document.querySelectorAll(".business-menu button").forEach((button) => {
           button.classList.toggle("active", button.dataset.trainingId === meta.menu);
         });
         highlightedElement = undefined;
-        if (notify) requestAnimationFrame(postReady);
+        if (notify) window.setTimeout(postReady, 0);
+      }
+
+      function applyStudentMode() {
+        if (studentMode !== "PRACTICE") return;
+        document
+          .querySelectorAll(
+            "input[data-training-id], input[data-business-field], textarea[data-training-id], textarea[data-business-field], select[data-training-id], select[data-business-field]"
+          )
+          .forEach((control) => {
+            if (control.disabled || control.readOnly) return;
+            if (control.matches("select")) {
+              Array.from(control.options).forEach((option) => {
+                option.selected = false;
+                option.removeAttribute("selected");
+              });
+              const placeholder = document.createElement("option");
+              placeholder.value = "";
+              placeholder.textContent = "请选择";
+              placeholder.selected = true;
+              control.prepend(placeholder);
+              control.selectedIndex = 0;
+              return;
+            }
+            if (control.type === "checkbox" || control.type === "radio") {
+              control.checked = false;
+              return;
+            }
+            control.value = "";
+          });
       }
 
       function post(type, payload) {
-        window.parent.postMessage({ type, payload }, window.location.origin);
+        window.parent.postMessage({ type, payload }, parentOrigin);
       }
 
       function currentMeta() {
@@ -847,6 +893,9 @@
       function getSelector(element) {
         if (element.dataset.action) {
           return `[data-action="${element.dataset.action}"]`;
+        }
+        if (element.dataset.businessField) {
+          return `[data-business-field="${element.dataset.businessField}"]`;
         }
         return `[data-training-id="${element.dataset.trainingId}"]`;
       }
@@ -903,11 +952,101 @@
         };
       }
 
-      function navigateFrom(element) {
+      function copyFormState(source, clone) {
+        const sourceControls = source.querySelectorAll("input, textarea, select");
+        const clonedControls = clone.querySelectorAll("input, textarea, select");
+        sourceControls.forEach((control, index) => {
+          const clonedControl = clonedControls[index];
+          if (!clonedControl) return;
+          if (control.matches("input")) {
+            clonedControl.value =
+              control.type === "password" && control.value ? "••••••••" : control.value;
+            clonedControl.setAttribute("value", clonedControl.value);
+            clonedControl.toggleAttribute("checked", control.checked);
+          } else if (control.matches("textarea")) {
+            clonedControl.value = control.value;
+            clonedControl.textContent = control.value;
+          } else {
+            Array.from(clonedControl.options).forEach((option, optionIndex) => {
+              option.toggleAttribute("selected", optionIndex === control.selectedIndex);
+            });
+          }
+        });
+      }
+
+      function collectCssText() {
+        return Array.from(document.styleSheets)
+          .flatMap((styleSheet) => {
+            try {
+              return Array.from(styleSheet.cssRules).map((rule) => rule.cssText);
+            } catch {
+              return [];
+            }
+          })
+          .join("\n")
+          .slice(0, 400000);
+      }
+
+      function createPageSnapshot() {
+        const clone = document.body.cloneNode(true);
+        copyFormState(document.body, clone);
+        clone
+          .querySelectorAll("script, noscript, iframe, object, embed")
+          .forEach((element) => element.remove());
+        clone.querySelectorAll("*").forEach((element) => {
+          Array.from(element.attributes).forEach((attribute) => {
+            if (attribute.name.toLowerCase().startsWith("on")) {
+              element.removeAttribute(attribute.name);
+            }
+          });
+          if (element.matches("input, textarea, select, button")) {
+            element.setAttribute(
+              "data-sxpt-original-disabled",
+              String(element.disabled)
+            );
+            element.setAttribute("disabled", "");
+          }
+          element.classList.remove("runtime-target");
+        });
+        return {
+          version: 1,
+          format: "DOM",
+          pageUrl: currentMeta().path,
+          pageTitle: currentMeta().title,
+          capturedAt: new Date().toISOString(),
+          html: clone.outerHTML.slice(0, 700000),
+          cssText: collectCssText(),
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          }
+        };
+      }
+
+      function postActionAfterRender(payload, nextPage) {
+        if (nextPage) render(nextPage, false);
+        window.setTimeout(() => {
+          post("SXPT_BUSINESS_ACTION", {
+            ...payload,
+            pageSnapshot: createPageSnapshot()
+          });
+          postReady();
+        }, 0);
+      }
+
+      function reportBusinessAction(element, eventType) {
+        const payload = payloadFor(element, eventType);
         const nextPage = element.dataset.navigate;
+        // Student learning/practice needs an immediate operation event so the
+        // recorded step can advance even when a background tab throttles
+        // snapshot generation. Teacher recording still consumes the later
+        // SXPT_BUSINESS_ACTION carrying the complete page snapshot.
+        post("SXPT_BUSINESS_INTERACTION", payload);
         if (nextPage) {
-          window.setTimeout(() => render(nextPage), 40);
+          window.setTimeout(() => postActionAfterRender(payload, nextPage), 40);
+          return;
         }
+        postActionAfterRender(payload);
       }
 
       document.addEventListener("click", (event) => {
@@ -923,14 +1062,51 @@
           return;
         }
 
-        post("SXPT_BUSINESS_ACTION", payloadFor(element, "click"));
-        navigateFrom(element);
+        reportBusinessAction(element, "click");
       });
 
       document.addEventListener("change", (event) => {
         const element = getActionElement(event.target);
         if (!element) return;
-        post("SXPT_BUSINESS_ACTION", payloadFor(element, "change"));
+        if (
+          element.matches("input, textarea") &&
+          !String(element.value || "").trim()
+        ) {
+          return;
+        }
+        reportBusinessAction(element, "change");
+      });
+
+      document.addEventListener("compositionstart", () => {
+        composingStudentInput = true;
+      });
+
+      document.addEventListener("compositionend", (event) => {
+        composingStudentInput = false;
+        if (studentMode !== "PRACTICE") return;
+        const element = getActionElement(event.target);
+        if (
+          element &&
+          element.matches("input, textarea") &&
+          String(element.value || "").trim()
+        ) {
+          reportBusinessAction(element, "input");
+        }
+      });
+
+      document.addEventListener("input", (event) => {
+        if (studentMode !== "PRACTICE") return;
+        const element = getActionElement(event.target);
+        if (
+          composingStudentInput ||
+          event.isComposing ||
+          !element ||
+          !element.matches("input, textarea") ||
+          !String(element.value || "").trim()
+        ) {
+          return;
+        }
+        reportBusinessAction(element, "input");
       });
 
       function targetPageFor(selector, requestedUrl) {
@@ -951,46 +1127,50 @@
         const expectedPage = targetPageFor(selector, requestedUrl);
         if (expectedPage !== currentPage) render(expectedPage, false);
 
-        requestAnimationFrame(() => {
-          requestAnimationFrame(() => {
-            if (highlightedElement) highlightedElement.classList.remove("runtime-target");
-            const element = document.querySelector(selector);
-            if (element && preview) {
-              highlightedElement = element;
-              element.classList.add("runtime-target");
-            }
-            if (!element) {
-              post("SXPT_TARGET_RECT", {
-                selector,
-                url: currentMeta().path,
-                pageTitle: currentMeta().title
-              });
-              postReady();
-              return;
-            }
-            const rect = element.getBoundingClientRect();
+        window.setTimeout(() => {
+          if (highlightedElement) highlightedElement.classList.remove("runtime-target");
+          const element = document.querySelector(selector);
+          if (element && preview) {
+            highlightedElement = element;
+            element.classList.add("runtime-target");
+          }
+          if (!element) {
             post("SXPT_TARGET_RECT", {
               selector,
               url: currentMeta().path,
-              pageTitle: currentMeta().title,
-              rect: {
-                x: Math.round(rect.x),
-                y: Math.round(rect.y),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height)
-              }
+              pageTitle: currentMeta().title
             });
             postReady();
+            return;
+          }
+          const rect = element.getBoundingClientRect();
+          post("SXPT_TARGET_RECT", {
+            selector,
+            url: currentMeta().path,
+            pageTitle: currentMeta().title,
+            rect: {
+              x: Math.round(rect.x),
+              y: Math.round(rect.y),
+              width: Math.round(rect.width),
+              height: Math.round(rect.height)
+            }
           });
-        });
+          postReady();
+        }, 0);
       }
 
       window.addEventListener("message", (event) => {
-        if (event.source !== window.parent || event.origin !== window.location.origin) return;
+        if (event.source !== window.parent || event.origin !== parentOrigin) return;
         const message = event.data || {};
         if (message.type === "SXPT_SET_RECORDING") {
           recording = Boolean(message.enabled);
           document.body.classList.toggle("recording", recording);
+          return;
+        }
+        if (message.type === "SXPT_SET_STUDENT_MODE") {
+          studentMode =
+            message.mode === "PRACTICE" ? "PRACTICE" : "LEARNING";
+          applyStudentMode();
           return;
         }
         if (message.type === "SXPT_START_ELEMENT_PICK") {

@@ -767,6 +767,74 @@ describe('published exam business chain', () => {
     expect(published.completedCount).toBe(0);
   });
 
+  it('restarts a completed learning task from the first recorded stage', () => {
+    const store = deterministicStore();
+    const lesson = store.state.lessons[0];
+    const publishedTaskId = 'published-learning-restart';
+    const studentTaskId = 'student-learning-restart';
+    store.state.publishedTasks.push({
+      id: publishedTaskId,
+      lessonId: lesson.id,
+      title: '采购流程学习',
+      mode: 'LEARNING',
+      status: 'RUNNING',
+      startAt: '2026-07-25T07:00:00.000Z',
+      endAt: '2026-07-25T09:00:00.000Z',
+      assignedCount: 1,
+      groupCount: 3,
+      dataCount: 0,
+      completedCount: 1
+    });
+    store.state.studentTasks.push({
+      id: studentTaskId,
+      publishedTaskId,
+      lessonId: lesson.id,
+      studentId: 'student-learning',
+      studentName: '学习学员',
+      title: '采购流程学习',
+      mode: 'LEARNING',
+      groupKey: lesson.stages[0].groupKey,
+      groupKeys: [...new Set(lesson.stages.map((stage) => stage.groupKey))],
+      unitId: 'unit-learning',
+      unitName: '学习班级',
+      dataItemId: 'simulated-learning',
+      attemptNumber: 1,
+      submissionValues: {},
+      status: 'SUBMITTED',
+      currentStageIndex: lesson.stages.length,
+      completedStageIds: lesson.stages.map((stage) => stage.id),
+      objectiveScore: 80,
+      startedAt: '2026-07-25T07:10:00.000Z',
+      submittedAt: '2026-07-25T07:30:00.000Z',
+      remoteExecutionId: 'execution-learning-old',
+      remoteExecutionStatus: 'COMPLETED',
+      remoteContextLoaded: true,
+      syncStatus: 'SYNCED'
+    });
+
+    const restarted = store.restartLearningOrPractice(studentTaskId);
+
+    expect(restarted).toMatchObject({
+      status: 'TODO',
+      attemptNumber: 2,
+      currentStageIndex: 0,
+      completedStageIds: [],
+      submissionValues: {}
+    });
+    expect(restarted.objectiveScore).toBeUndefined();
+    expect(restarted.startedAt).toBeUndefined();
+    expect(restarted.submittedAt).toBeUndefined();
+    expect(restarted.remoteExecutionId).toBeUndefined();
+    expect(restarted.remoteExecutionStatus).toBeUndefined();
+    expect(
+      store.state.publishedTasks.find((task) => task.id === publishedTaskId)
+        ?.completedCount
+    ).toBe(0);
+    expect(store.state.activities[0]).toMatchObject({
+      type: 'TRAINING_TASK_RESTARTED'
+    });
+  });
+
   it('blocks restarting when the configured maximum attempt count is reached', () => {
     const store = deterministicStore();
     const { lesson } = configurePublishableExam(store, {

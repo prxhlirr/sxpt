@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import type { LessonStage, RecordedStep } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
 
@@ -16,6 +17,10 @@ const store = useTrainingStore();
 const lessonId = computed(() => String(route.params.lessonId ?? ''));
 const lesson = computed(() => store.getLesson(lessonId.value));
 const currentIndex = ref(0);
+const lectureFeedback = ref('');
+const lectureFeedbackSuccess = ref(false);
+const showLectureOverlay = ref(true);
+const showStageIntroduction = ref(true);
 
 const previewSteps = computed<PreviewStep[]>(() =>
   (lesson.value?.stages ?? []).flatMap((stage, stageIndex) =>
@@ -29,6 +34,16 @@ const previewSteps = computed<PreviewStep[]>(() =>
 );
 const current = computed(() => previewSteps.value[currentIndex.value]);
 const currentStep = computed(() => current.value?.step);
+const canMovePrevious = computed(
+  () =>
+    currentIndex.value > 0 ||
+    (!showStageIntroduction.value && current.value?.stepIndex === 0)
+);
+const canMoveNext = computed(
+  () =>
+    showStageIntroduction.value ||
+    currentIndex.value < previewSteps.value.length - 1
+);
 const totalDuration = computed(() =>
   previewSteps.value.reduce((total, item) => total + item.step.durationSeconds, 0)
 );
@@ -54,21 +69,68 @@ function formatDuration(seconds: number) {
 }
 
 function selectStep(index: number) {
+  const previousStageId = current.value?.stage.id;
   currentIndex.value = Math.max(0, Math.min(index, previewSteps.value.length - 1));
+  showStageIntroduction.value =
+    Boolean(previousStageId) && current.value?.stage.id !== previousStageId;
 }
 
 function move(direction: -1 | 1) {
-  selectStep(currentIndex.value + direction);
+  if (direction === 1) {
+    if (showStageIntroduction.value) {
+      showStageIntroduction.value = false;
+      return;
+    }
+    const following = previewSteps.value[currentIndex.value + 1];
+    if (!following) return;
+    const stageChanged = following.stage.id !== current.value?.stage.id;
+    currentIndex.value += 1;
+    showStageIntroduction.value = stageChanged;
+    return;
+  }
+
+  if (!showStageIntroduction.value && current.value?.stepIndex === 0) {
+    showStageIntroduction.value = true;
+    return;
+  }
+  if (currentIndex.value <= 0) return;
+  currentIndex.value -= 1;
+  showStageIntroduction.value = false;
+}
+
+function finishLecture() {
+  if (!lesson.value) return;
+  try {
+    store.markLessonLectureCompleted(lesson.value.id);
+    lectureFeedbackSuccess.value = true;
+    lectureFeedback.value = '教师讲解已完成，现在可以发布流程学习与练习任务。';
+  } catch (error) {
+    lectureFeedbackSuccess.value = false;
+    lectureFeedback.value =
+      error instanceof Error ? error.message : '暂时无法完成教师讲解。';
+  }
 }
 </script>
 
 <template>
-  <div v-if="lesson" class="page preview-page">
-    <header class="preview-header">
+  <div
+    v-if="lesson"
+    class="page preview-page"
+    :class="{ 'lecture-overlay-hidden': !showLectureOverlay }"
+  >
+    <button
+      class="lecture-overlay-toggle"
+      type="button"
+      @click="showLectureOverlay = !showLectureOverlay"
+    >
+      {{ showLectureOverlay ? '隐藏其他讲解菜单' : '显示完整讲解菜单' }}
+    </button>
+
+    <header v-show="showLectureOverlay" class="preview-header">
       <div>
         <span class="eyebrow">RECORDING PREVIEW</span>
         <h1>{{ lesson.title }}</h1>
-        <p>演示模式仅回放已录制页面与讲解，不连接业务系统，也不会消费真实待办数据。</p>
+        <p>逐步回放录制时的完整业务页面快照；快照只读，不会再次提交真实业务数据。</p>
       </div>
       <div class="preview-header__actions">
         <RouterLink
@@ -81,7 +143,7 @@ function move(direction: -1 | 1) {
       </div>
     </header>
 
-    <section class="preview-metrics">
+    <section v-show="showLectureOverlay" class="preview-metrics">
       <span><small>业务阶段</small><strong>{{ lesson.stages.length }}</strong></span>
       <span><small>录制片段</small><strong>{{ previewSteps.length }}</strong></span>
       <span><small>总时长</small><strong>{{ formatDuration(totalDuration) }}</strong></span>
@@ -91,63 +153,34 @@ function move(direction: -1 | 1) {
 
     <div v-if="current && currentStep" class="preview-layout">
       <main class="business-stage">
-        <div class="browser-chrome">
+        <div v-show="showLectureOverlay" class="browser-chrome">
           <div class="browser-dots"><i></i><i></i><i></i></div>
-          <div class="browser-address">training-preview.local / {{ currentStep.selector }}</div>
-          <span>只读</span>
-        </div>
-
-        <div class="business-toolbar">
-          <div>
-            <span>模拟业务系统</span>
-            <strong>{{ currentStep.pageTitle }}</strong>
+          <div class="browser-address">
+            {{ currentStep.pageSnapshot?.pageUrl ?? currentStep.url ?? currentStep.pageTitle }}
           </div>
-          <div class="mock-user">
-            <span>{{ current.stage.groupKey.slice(0, 1).toUpperCase() || '角' }}</span>
-            {{ current.stage.groupKey || '业务角色' }}
-          </div>
+          <span>页面快照 · 只读</span>
         </div>
 
-        <div class="mock-business-screen">
-          <aside>
-            <strong>业务工作台</strong>
-            <span>我的待办</span>
-            <span class="active">流程办理</span>
-            <span>已办事项</span>
-            <span>业务查询</span>
-          </aside>
-          <section>
-            <div class="mock-breadcrumb">业务办理 / {{ current.stage.name }} / 当前录制步骤</div>
-            <div class="mock-title">
-              <div>
-                <small>模拟单号 MOCK-2026-0718</small>
-                <h2>{{ currentStep.title }}</h2>
-              </div>
-              <span>演示数据</span>
-            </div>
-            <div class="mock-form">
-              <label><span>申请单位</span><strong>第一事业部</strong></label>
-              <label><span>业务类型</span><strong>{{ lesson.moduleName }}</strong></label>
-              <label><span>当前环节</span><strong>{{ current.stage.name }}</strong></label>
-              <label><span>办理角色</span><strong>{{ current.stage.groupKey }}</strong></label>
-              <label class="wide">
-                <span>事项说明</span>
-                <strong>{{ current.stage.description || '按录制步骤完成本环节业务办理。' }}</strong>
-              </label>
-            </div>
-            <div class="mock-action-zone">
-              <span>录制焦点</span>
-              <button type="button">{{ currentStep.actionLabel }}</button>
-              <code>{{ currentStep.selector }}</code>
-            </div>
-          </section>
-        </div>
+        <BusinessSnapshotFrame
+          class="snapshot-business-view"
+          :snapshot="currentStep.pageSnapshot"
+          :fallback-url="currentStep.url"
+          :selector="showStageIntroduction ? undefined : currentStep.selector"
+          :selector-candidates="
+            showStageIntroduction ? undefined : currentStep.selectorCandidates
+          "
+          :rect="showStageIntroduction ? undefined : currentStep.rect"
+          :recorded-viewport="
+            showStageIntroduction ? undefined : currentStep.recordedViewport
+          "
+          :title="`${currentStep.pageTitle}录制页面快照`"
+        />
 
-        <div class="playback-bar">
+        <div v-show="showLectureOverlay" class="playback-bar">
           <button
             class="icon-button"
             type="button"
-            :disabled="currentIndex === 0"
+            :disabled="!canMovePrevious"
             aria-label="上一步"
             @click="move(-1)"
           >
@@ -159,7 +192,7 @@ function move(direction: -1 | 1) {
           <button
             class="icon-button"
             type="button"
-            :disabled="currentIndex === previewSteps.length - 1"
+            :disabled="!canMoveNext"
             aria-label="下一步"
             @click="move(1)"
           >
@@ -169,36 +202,99 @@ function move(direction: -1 | 1) {
       </main>
 
       <aside class="explanation-panel">
-        <div class="explanation-heading">
-          <span>步骤 {{ currentIndex + 1 }} / {{ previewSteps.length }}</span>
-          <strong>{{ currentStep.title }}</strong>
-          <small>{{ current.stage.name }} · {{ current.stage.groupKey }}</small>
-        </div>
-        <div class="instruction">
-          <span>逐步讲解</span>
-          <p>{{ currentStep.note || '请观察页面变化，并理解该动作在业务流程中的作用。' }}</p>
-        </div>
-        <dl>
-          <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
-          <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
-          <div><dt>selector</dt><dd><code>{{ currentStep.selector }}</code></dd></div>
-          <div><dt>durationSeconds</dt><dd>{{ currentStep.durationSeconds }} 秒</dd></div>
-          <div>
-            <dt>完成依据</dt>
-            <dd>{{ current.stage.completionMethod }}</dd>
+        <template v-if="showStageIntroduction">
+          <div class="explanation-heading stage-introduction-heading">
+            <span>
+              本阶段说明 · 阶段 {{ current.stageIndex + 1 }} /
+              {{ lesson.stages.length }}
+            </span>
+            <strong>{{ current.stage.name }}</strong>
+            <small>{{ current.stage.groupKey || '未指定业务角色' }}</small>
           </div>
-        </dl>
+          <div class="instruction stage-introduction">
+            <span>阶段目标与注意事项</span>
+            <p>
+              {{
+                current.stage.description ||
+                '本阶段暂无补充说明，请按照录制节点顺序完成业务操作。'
+              }}
+            </p>
+          </div>
+          <dl>
+            <div><dt>阶段节点</dt><dd>{{ current.stage.recordedSteps.length }} 个</dd></div>
+            <div><dt>负责角色</dt><dd>{{ current.stage.groupKey || '未指定' }}</dd></div>
+            <div><dt>阶段分值</dt><dd>{{ current.stage.score }} 分</dd></div>
+            <div>
+              <dt>完成依据</dt>
+              <dd>{{ current.stage.completionMethod }}</dd>
+            </div>
+          </dl>
+        </template>
+        <template v-else>
+          <div class="explanation-heading">
+            <span>本节点说明 · 步骤 {{ currentIndex + 1 }} / {{ previewSteps.length }}</span>
+            <strong>{{ currentStep.title }}</strong>
+            <small>{{ current.stage.name }} · {{ current.stage.groupKey }}</small>
+          </div>
+          <div class="instruction">
+            <span>逐步讲解</span>
+            <p>{{ currentStep.note || '请观察页面变化，并理解该动作在业务流程中的作用。' }}</p>
+          </div>
+          <dl>
+            <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
+            <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
+            <div><dt>selector</dt><dd><code>{{ currentStep.selector }}</code></dd></div>
+            <div><dt>durationSeconds</dt><dd>{{ currentStep.durationSeconds }} 秒</dd></div>
+            <div>
+              <dt>完成依据</dt>
+              <dd>{{ current.stage.completionMethod }}</dd>
+            </div>
+          </dl>
+        </template>
         <div class="step-controls">
-          <button type="button" :disabled="currentIndex === 0" @click="move(-1)">← 上一步</button>
+          <button type="button" :disabled="!canMovePrevious" @click="move(-1)">
+            ← 上一步
+          </button>
           <button
+            v-if="showStageIntroduction"
             class="primary"
             type="button"
-            :disabled="currentIndex === previewSteps.length - 1"
+            @click="move(1)"
+          >
+            进入本阶段 →
+          </button>
+          <button
+            v-else-if="currentIndex < previewSteps.length - 1"
+            class="primary"
+            type="button"
             @click="move(1)"
           >
             下一步 →
           </button>
+          <button
+            v-else
+            class="primary"
+            type="button"
+            :disabled="Boolean(lesson.lectureCompletedAt)"
+            @click="finishLecture"
+          >
+            {{ lesson.lectureCompletedAt ? '讲解已完成' : '完成教师讲解' }}
+          </button>
         </div>
+        <p
+          v-if="lectureFeedback"
+          class="lecture-feedback"
+          :class="{ success: lectureFeedbackSuccess, danger: !lectureFeedbackSuccess }"
+        >
+          {{ lectureFeedback }}
+        </p>
+        <RouterLink
+          v-if="lesson.lectureCompletedAt"
+          class="publish-link"
+          :to="{ name: 'publish-center', params: { lessonId: lesson.id } }"
+        >
+          前往发布学习与练习 →
+        </RouterLink>
       </aside>
     </div>
 
@@ -219,7 +315,11 @@ function move(direction: -1 | 1) {
       </div>
     </section>
 
-    <section v-if="previewSteps.length" class="card segment-timeline">
+    <section
+      v-if="previewSteps.length"
+      v-show="showLectureOverlay"
+      class="card segment-timeline"
+    >
       <div class="card-header">
         <div>
           <h2>录制片段时间线</h2>
@@ -356,8 +456,33 @@ function move(direction: -1 | 1) {
 
 .business-stage {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
+}
+
+.lecture-overlay-toggle {
+  position: absolute;
+  z-index: 60;
+  top: 14px;
+  right: 380px;
+  min-height: 34px;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 999px;
+  padding: 0 14px;
+  color: #fff;
+  background: rgb(32 39 58 / 78%);
+  box-shadow: 0 10px 28px rgb(15 20 40 / 22%);
+  backdrop-filter: blur(12px);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.lecture-overlay-hidden .business-stage {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.snapshot-business-view {
+  min-height: 0;
 }
 
 .browser-chrome {
@@ -638,6 +763,15 @@ function move(direction: -1 | 1) {
   background: #f7f5ff;
 }
 
+.stage-introduction-heading {
+  background: linear-gradient(135deg, #f7f5ff, #fff);
+}
+
+.stage-introduction {
+  border-color: #cfc8ff;
+  background: linear-gradient(145deg, #f3f0ff, #fbfaff);
+}
+
 .instruction span {
   color: #6555df;
   font-size: 9px;
@@ -808,6 +942,170 @@ function move(direction: -1 | 1) {
   .mock-action-zone code {
     width: 100%;
     margin-left: 0;
+  }
+}
+
+/* 沉浸式讲解：业务界面铺满整个视口，讲解控件悬浮在业务界面上层。 */
+.preview-page {
+  position: relative;
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  overflow: hidden;
+  background: #eef1f6;
+}
+
+.preview-layout {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: block;
+  min-height: 0;
+}
+
+.business-stage {
+  position: absolute;
+  inset: 0;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.mock-business-screen {
+  min-height: 0;
+}
+
+.preview-header,
+.preview-metrics,
+.segment-timeline,
+.explanation-panel {
+  position: absolute;
+  z-index: 10;
+  border: 1px solid rgb(218 223 234 / 88%);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 18px 46px rgb(23 29 55 / 18%);
+  backdrop-filter: blur(14px);
+}
+
+.preview-header {
+  top: 14px;
+  left: 14px;
+  width: min(620px, calc(100vw - 420px));
+  align-items: center;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.preview-header h1 {
+  font-size: 17px;
+}
+
+.preview-header p {
+  max-width: 460px;
+  margin-top: 4px;
+  font-size: 9px;
+}
+
+.preview-metrics {
+  top: 92px;
+  left: 14px;
+  width: min(430px, calc(100vw - 420px));
+}
+
+.preview-metrics > span {
+  padding: 9px 12px 12px;
+}
+
+.preview-metrics strong {
+  font-size: 13px;
+}
+
+.segment-timeline {
+  right: 380px;
+  bottom: 66px;
+  left: 14px;
+  border-radius: 13px;
+}
+
+.segment-timeline .card-header {
+  display: none;
+}
+
+.segment-list {
+  padding: 9px;
+}
+
+.segment-list button {
+  flex-basis: 190px;
+}
+
+.explanation-panel {
+  top: 14px;
+  right: 14px;
+  bottom: 14px;
+  width: 350px;
+  overflow-y: auto;
+  border-radius: 16px;
+}
+
+.lecture-feedback {
+  margin: 0 14px 10px;
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.lecture-feedback.success {
+  color: #087b59;
+  background: #eaf8f2;
+}
+
+.lecture-feedback.danger {
+  color: #a43d48;
+  background: #fff0f1;
+}
+
+.publish-link {
+  display: block;
+  margin: 0 14px 14px;
+  color: #6253d5;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+@media (max-width: 880px) {
+  .lecture-overlay-toggle {
+    top: 10px;
+    right: 10px;
+  }
+
+  .preview-header {
+    right: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .preview-header p,
+  .preview-metrics,
+  .segment-timeline {
+    display: none;
+  }
+
+  .explanation-panel {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 46vh;
+  }
+
+  .explanation-panel dl,
+  .instruction {
+    display: none;
   }
 }
 </style>

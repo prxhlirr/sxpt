@@ -23,12 +23,29 @@ const dataItems = computed(() => store.state.dataItems[lessonId] ?? []);
 const generatedTask = ref<PublishedTask>();
 const feedback = ref('');
 const publishing = ref(false);
+const trainingPublishing = ref(false);
+const feedbackSuccess = ref(false);
 
 const existingTask = computed(() =>
   [...store.state.publishedTasks]
-    .find((task) => task.lessonId === lessonId)
+    .find((task) => task.lessonId === lessonId && task.mode === 'EXAM')
 );
 const activeTask = computed(() => generatedTask.value ?? existingTask.value);
+const learningTask = computed(() =>
+  store.state.publishedTasks.find(
+    (task) => task.lessonId === lessonId && task.mode === 'LEARNING'
+  )
+);
+const practiceTask = computed(() =>
+  store.state.publishedTasks.find(
+    (task) => task.lessonId === lessonId && task.mode === 'PRACTICE'
+  )
+);
+const trainingTasksReady = computed(
+  () =>
+    learningTask.value?.syncStatus === 'SYNCED' &&
+    practiceTask.value?.syncStatus === 'SYNCED'
+);
 const lessonPublished = computed(() => lesson.value?.status === 'PUBLISHED');
 const examConfigured = computed(
   () =>
@@ -126,15 +143,34 @@ function goTo(routeName: string) {
   void router.push({ name: routeName, params: { lessonId } });
 }
 
-function publishExam() {
+async function publishTrainingTasks() {
   feedback.value = '';
+  feedbackSuccess.value = false;
+  trainingPublishing.value = true;
+  try {
+    await store.publishLearningAndPracticeRemote(lessonId);
+    feedbackSuccess.value = true;
+    feedback.value =
+      '学习任务和练习任务已发布到后端，模拟学生现在可以先看一遍流程，再完成练习。';
+  } catch (error) {
+    feedback.value =
+      error instanceof Error ? error.message : '学习、练习任务发布失败';
+  } finally {
+    trainingPublishing.value = false;
+  }
+}
+
+async function publishExam() {
+  feedback.value = '';
+  feedbackSuccess.value = false;
   if (!checklist.value.ready) {
     feedback.value = '发布条件尚未全部通过，请根据阻断原因返回对应步骤处理。';
     return;
   }
   publishing.value = true;
   try {
-    generatedTask.value = store.publishExam(lessonId);
+    generatedTask.value = await store.publishExamRemote(lessonId);
+    feedbackSuccess.value = true;
     feedback.value = `考试任务「${generatedTask.value.title}」已发布，共生成 ${generatedTask.value.assignedCount} 个学员任务。`;
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '考试任务发布失败';
@@ -166,13 +202,53 @@ function publishExam() {
       </button>
     </PageHeader>
 
+    <section class="card training-release">
+      <div class="card-header">
+        <div>
+          <h2>先发布学习与练习任务</h2>
+          <p>备案教案完成教师讲解后，生成一条“看一遍流程”的学习任务和一条可操作的练习任务；身份与班级暂用模拟配置。</p>
+        </div>
+        <button
+          class="primary"
+          type="button"
+          :disabled="trainingPublishing || trainingTasksReady"
+          @click="publishTrainingTasks"
+        >
+          {{
+            trainingPublishing
+              ? '正在同步任务…'
+              : trainingTasksReady
+                ? '学习与练习已发布'
+                : '发布学习与练习'
+          }}
+        </button>
+      </div>
+      <div class="training-release__modes">
+        <div>
+          <span>LEARNING</span>
+          <strong>流程学习</strong>
+          <small>{{ learningTask?.syncStatus ?? '未发布' }}</small>
+        </div>
+        <div>
+          <span>PRACTICE</span>
+          <strong>流程练习</strong>
+          <small>{{ practiceTask?.syncStatus ?? '未发布' }}</small>
+        </div>
+        <div>
+          <span>LECTURE</span>
+          <strong>教师讲解</strong>
+          <small>{{ lesson?.lectureCompletedAt ? '已完成' : '待完成' }}</small>
+        </div>
+      </div>
+    </section>
+
     <WorkflowStepper
       :lesson-id="lessonId"
       current="publish"
       aria-label="教案编排、考试设置、分组设置、数据生成、发布任务"
     />
 
-    <div v-if="feedback" class="notice" :class="{ success: Boolean(activeTask), danger: !activeTask }">
+    <div v-if="feedback" class="notice" :class="{ success: feedbackSuccess, danger: !feedbackSuccess }">
       {{ feedback }}
     </div>
 

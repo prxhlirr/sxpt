@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { CaptureRect } from '../../domain/models';
+import type { BusinessPageSnapshot, CaptureRect } from '../../domain/models';
 
 interface BusinessReadyPayload {
   url: string;
@@ -18,6 +18,7 @@ interface BusinessActionPayload extends BusinessReadyPayload {
     width: number;
     height: number;
   };
+  pageSnapshot?: BusinessPageSnapshot;
 }
 
 interface TargetPayload {

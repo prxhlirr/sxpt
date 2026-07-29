@@ -67,15 +67,17 @@ describe('three-portal workflow rendering', () => {
     expect(html).toContain('归档组');
   });
 
-  it('renders the recorded-guide task runner for a seeded task', async () => {
+  it('renders the seeded exam with only a hideable task description overlay', async () => {
     const html = await renderRoute(
       StudentTaskRunnerView,
       '/student/tasks/student-task-east-handler',
       '/student/tasks/:taskId'
     );
     expect(html).toContain('业务系统演示窗口');
-    expect(html).toContain('当前判定口径');
-    expect(html).toContain('访问目标页面');
+    expect(html).toContain('考试任务说明');
+    expect(html).toContain('隐藏说明');
+    expect(html).not.toContain('当前判定口径');
+    expect(html).not.toContain('访问目标页面');
   });
 
   it('renders combined results and the evidence boundary', async () => {

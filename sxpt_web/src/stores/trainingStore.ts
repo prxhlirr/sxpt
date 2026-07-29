@@ -11,6 +11,8 @@ import type {
   LessonStage,
   PortalRole,
   PublishedTask,
+  RecordedStep,
+  RunMode,
   StudentTask,
   StorageLike,
   TrainingState,
@@ -20,12 +22,28 @@ import {
   createTrainingApi,
   type TrainingApi
 } from '../services/trainingApi';
+import {
+  backendTrainingApi,
+  type BackendTrainingApi
+} from '../services/backendTrainingApi';
+import { getApiConfig } from '../config/api';
+import { createDefaultBusinessPlatforms } from '../data/mockSeed';
 
 export interface TrainingStoreOptions {
   api?: TrainingApi;
+  backend?: BackendTrainingApi;
   storage?: StorageLike;
   now?: () => string;
   idFactory?: (prefix: string) => string;
+}
+
+export interface RemoteSyncState {
+  enabled: boolean;
+  loading: boolean;
+  initialized: boolean;
+  operation: string;
+  lastError: string;
+  lastSyncedAt: string;
 }
 
 export interface DataGenerationSummary {
@@ -44,9 +62,18 @@ export class TrainingValidationError extends Error {
 
 export function createTrainingStore(options: TrainingStoreOptions = {}) {
   const api = options.api ?? createTrainingApi(options.storage);
+  const backend = options.backend ?? backendTrainingApi;
   const now = options.now ?? (() => new Date().toISOString());
   const idFactory = options.idFactory ?? defaultIdFactory;
   const state = reactive(api.loadState()) as TrainingState;
+  const remote = reactive<RemoteSyncState>({
+    enabled: backend.isEnabled(),
+    loading: false,
+    initialized: false,
+    operation: '',
+    lastError: '',
+    lastSyncedAt: ''
+  });
 
   const persist = () => {
     api.saveState(toPlain(state));
@@ -96,7 +123,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   };
 
   const assertLessonConfigurationMutable = (lessonId: string) => {
-    if (state.publishedTasks.some((task) => task.lessonId === lessonId)) {
+    if (
+      state.publishedTasks.some(
+        (task) => task.lessonId === lessonId && task.mode === 'EXAM'
+      )
+    ) {
       throw new Error(
         '该教案已有已发布考试，配置已冻结；请复制教案后创建新版本'
       );
@@ -125,6 +156,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   };
 
   const assertAttemptWithinDuration = (task: StudentTask) => {
+    if (task.mode !== 'EXAM') return;
     const settings = state.examSettings[task.lessonId];
     if (!settings || !task.startedAt) return;
     const deadline =
@@ -180,6 +212,267 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return getBusinessPlatform(platformId)?.modules.find(
       (businessModule) => businessModule.id === moduleId
     );
+  }
+
+  async function runRemote<T>(
+    operation: string,
+    action: () => Promise<T>
+  ): Promise<T> {
+    remote.enabled = backend.isEnabled();
+    remote.loading = true;
+    remote.operation = operation;
+    remote.lastError = '';
+    try {
+      const result = await action();
+      remote.initialized = true;
+      remote.lastSyncedAt = now();
+      return result;
+    } catch (error) {
+      remote.lastError =
+        error instanceof Error ? error.message : '后端接口调用失败';
+      throw error;
+    } finally {
+      remote.loading = false;
+      remote.operation = '';
+    }
+  }
+
+  async function syncBusinessPlatforms(): Promise<BusinessPlatform[]> {
+    if (!backend.isEnabled()) {
+      remote.enabled = false;
+      remote.initialized = true;
+      return state.businessPlatforms;
+    }
+    return runRemote('同步业务平台', async () => {
+      const previousPlatforms = toPlain(state.businessPlatforms);
+      const syncCandidates = [...previousPlatforms];
+      for (const defaultPlatform of createDefaultBusinessPlatforms()) {
+        if (
+          !syncCandidates.some(
+            (platform) =>
+              platform.id === defaultPlatform.id ||
+              platform.code.trim().toUpperCase() ===
+                defaultPlatform.code.trim().toUpperCase()
+          )
+        ) {
+          syncCandidates.push(defaultPlatform);
+        }
+      }
+      const platforms = await backend.listBusinessPlatforms(
+        syncCandidates
+      );
+      state.lessons.forEach((lesson) => {
+        const previous = syncCandidates.find(
+          (platform) => platform.id === lesson.businessPlatformId
+        );
+        const replacement = platforms.find(
+          (platform) =>
+            platform.id === lesson.businessPlatformId ||
+            (previous && platform.code === previous.code)
+        );
+        if (replacement) {
+          lesson.businessPlatformId = replacement.id;
+        }
+      });
+      state.businessPlatforms.splice(
+        0,
+        state.businessPlatforms.length,
+        ...toPlain(platforms)
+      );
+      persist();
+      return state.businessPlatforms;
+    });
+  }
+
+  async function createBusinessPlatformRemote(
+    input: Pick<BusinessPlatform, 'code' | 'name' | 'baseUrl'> &
+      Partial<Pick<BusinessPlatform, 'description' | 'status'>>
+  ): Promise<BusinessPlatform> {
+    if (!backend.isEnabled()) return createBusinessPlatform(input);
+    const code = input.code.trim().toUpperCase();
+    const name = input.name.trim();
+    const baseUrl = input.baseUrl.trim();
+    if (!code || !name || !baseUrl) {
+      throw new Error('平台编码、平台名称和访问地址不能为空');
+    }
+    if (state.businessPlatforms.some((platform) => platform.code === code)) {
+      throw new Error(`业务平台编码已存在：${code}`);
+    }
+    return runRemote('新增业务平台', async () => {
+      const created = await backend.createBusinessPlatform({
+        ...input,
+        code,
+        name,
+        baseUrl
+      });
+      state.businessPlatforms.unshift(toPlain(created));
+      addActivity(
+        'BUSINESS_PLATFORM_CREATED',
+        `新增业务平台：${created.name}`,
+        created.baseUrl
+      );
+      persist();
+      return requireBusinessPlatform(created.id);
+    });
+  }
+
+  async function updateBusinessPlatformRemote(
+    platformId: string,
+    patch: Partial<Omit<BusinessPlatform, 'id' | 'updatedAt' | 'modules'>>
+  ): Promise<BusinessPlatform> {
+    if (!backend.isEnabled()) return updateBusinessPlatform(platformId, patch);
+    const platform = requireBusinessPlatform(platformId);
+    const next: BusinessPlatform = {
+      ...toPlain(platform),
+      ...toPlain(patch),
+      id: platform.id,
+      code: patch.code?.trim().toUpperCase() ?? platform.code,
+      name: patch.name?.trim() ?? platform.name,
+      baseUrl: patch.baseUrl?.trim() ?? platform.baseUrl,
+      description:
+        patch.description !== undefined
+          ? patch.description.trim()
+          : platform.description,
+      updatedAt: now()
+    };
+    if (!next.code || !next.name || !next.baseUrl) {
+      throw new Error('平台编码、平台名称和访问地址不能为空');
+    }
+    if (
+      state.businessPlatforms.some(
+        (candidate) =>
+          candidate.id !== platformId && candidate.code === next.code
+      )
+    ) {
+      throw new Error(`业务平台编码已存在：${next.code}`);
+    }
+    return runRemote('更新业务平台', async () => {
+      const saved = await backend.updateBusinessPlatform(next);
+      Object.assign(platform, next, {
+        name: saved.name,
+        baseUrl: saved.baseUrl,
+        status: saved.status,
+        updatedAt: saved.updatedAt
+      });
+      addActivity(
+        'BUSINESS_PLATFORM_UPDATED',
+        `更新业务平台：${platform.name}`,
+        platform.baseUrl
+      );
+      persist();
+      return platform;
+    });
+  }
+
+  async function setBusinessPlatformStatusRemote(
+    platformId: string,
+    status: BusinessPlatform['status']
+  ): Promise<BusinessPlatform> {
+    if (!backend.isEnabled()) {
+      return updateBusinessPlatform(platformId, { status });
+    }
+    const platform = requireBusinessPlatform(platformId);
+    return runRemote(
+      status === 'ENABLED' ? '启用业务平台' : '停用业务平台',
+      async () => {
+        const saved = await backend.setBusinessPlatformStatus(platform, status);
+        platform.status = saved.status;
+        platform.updatedAt = saved.updatedAt;
+        addActivity(
+          'BUSINESS_PLATFORM_STATUS_UPDATED',
+          `${status === 'ENABLED' ? '启用' : '停用'}业务平台：${platform.name}`,
+          platform.code
+        );
+        persist();
+        return platform;
+      }
+    );
+  }
+
+  async function createBusinessPlatformModuleRemote(
+    platformId: string,
+    input: Pick<BusinessPlatformModule, 'code' | 'name' | 'path'> &
+      Partial<Pick<BusinessPlatformModule, 'description' | 'status'>>
+  ): Promise<BusinessPlatformModule> {
+    if (!backend.isEnabled()) {
+      return createBusinessPlatformModule(platformId, input);
+    }
+    const platform = requireBusinessPlatform(platformId);
+    const before = toPlain(platform);
+    const beforeActivities = toPlain(state.activities);
+    const created = createBusinessPlatformModule(platformId, input);
+    try {
+      await runRemote('保存平台模块', () =>
+        backend.updateBusinessPlatform(toPlain(platform))
+      );
+      return created;
+    } catch (error) {
+      Object.assign(platform, before);
+      state.activities.splice(
+        0,
+        state.activities.length,
+        ...beforeActivities
+      );
+      persist();
+      throw error;
+    }
+  }
+
+  async function updateBusinessPlatformModuleRemote(
+    platformId: string,
+    moduleId: string,
+    patch: Partial<Omit<BusinessPlatformModule, 'id' | 'updatedAt'>>
+  ): Promise<BusinessPlatformModule> {
+    if (!backend.isEnabled()) {
+      return updateBusinessPlatformModule(platformId, moduleId, patch);
+    }
+    const platform = requireBusinessPlatform(platformId);
+    const before = toPlain(platform);
+    const beforeActivities = toPlain(state.activities);
+    const updated = updateBusinessPlatformModule(platformId, moduleId, patch);
+    try {
+      await runRemote('更新平台模块', () =>
+        backend.updateBusinessPlatform(toPlain(platform))
+      );
+      return updated;
+    } catch (error) {
+      Object.assign(platform, before);
+      state.activities.splice(
+        0,
+        state.activities.length,
+        ...beforeActivities
+      );
+      persist();
+      throw error;
+    }
+  }
+
+  async function removeBusinessPlatformModuleRemote(
+    platformId: string,
+    moduleId: string
+  ): Promise<BusinessPlatformModule> {
+    if (!backend.isEnabled()) {
+      return removeBusinessPlatformModule(platformId, moduleId);
+    }
+    const platform = requireBusinessPlatform(platformId);
+    const before = toPlain(platform);
+    const beforeActivities = toPlain(state.activities);
+    const removed = removeBusinessPlatformModule(platformId, moduleId);
+    try {
+      await runRemote('删除平台模块', () =>
+        backend.updateBusinessPlatform(toPlain(platform))
+      );
+      return removed;
+    } catch (error) {
+      Object.assign(platform, before);
+      state.activities.splice(
+        0,
+        state.activities.length,
+        ...beforeActivities
+      );
+      persist();
+      throw error;
+    }
   }
 
   function createBusinessPlatform(
@@ -460,11 +753,22 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         stageKey: `${stage.stageKey}-copy`,
         recordedSteps: stage.recordedSteps.map((step) => ({
           ...toPlain(step),
-          id: idFactory('record')
+          id: idFactory('record'),
+          syncStatus: 'LOCAL',
+          syncError: undefined,
+          remoteEventId: undefined,
+          remoteResourceSnapshotId: undefined,
+          remoteDraftId: undefined,
+          remoteResourceId: undefined
         }))
       })),
       updatedAt: timestamp,
-      publishedAt: undefined
+      publishedAt: undefined,
+      captureSessionId: undefined,
+      captureSessionFinished: undefined,
+      teachingPointId: undefined,
+      remoteCourseId: undefined,
+      lectureCompletedAt: undefined
     };
     state.lessons.unshift(copied);
     state.dataItems[copiedId] = [];
@@ -658,6 +962,290 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     );
     persist();
     return lesson;
+  }
+
+  function markLessonLectureCompleted(lessonId: string): LessonPlan {
+    const lesson = requireLesson(lessonId);
+    if (lesson.status !== 'PUBLISHED') {
+      throw new Error('请先完成教案备案并发布，再进行教师讲解');
+    }
+    lesson.lectureCompletedAt = now();
+    lesson.updatedAt = lesson.lectureCompletedAt;
+    addActivity(
+      'LESSON_LECTURE_COMPLETED',
+      `完成教师讲解：${lesson.title}`,
+      '已按备案步骤完整讲解，可发布学习与练习任务'
+    );
+    persist();
+    return lesson;
+  }
+
+  async function startCaptureSessionRemote(
+    lessonId: string,
+    startUrl: string
+  ): Promise<string> {
+    let lesson = requireLesson(lessonId);
+    if (!backend.isEnabled()) return lesson.captureSessionId ?? '';
+    if (lesson.captureSessionId && !lesson.captureSessionFinished) {
+      return lesson.captureSessionId;
+    }
+    await syncBusinessPlatforms();
+    lesson = requireLesson(lessonId);
+    const platform = requireBusinessPlatform(lesson.businessPlatformId);
+    return runRemote('创建备案采集会话', async () => {
+      const captureSessionId = await backend.startCaptureSession(
+        toPlain(lesson),
+        toPlain(platform),
+        startUrl
+      );
+      lesson.captureSessionId = captureSessionId;
+      lesson.captureSessionFinished = false;
+      lesson.updatedAt = now();
+      persist();
+      return captureSessionId;
+    });
+  }
+
+  async function syncRecordedStep(
+    lessonId: string,
+    stageId: string,
+    stepId: string
+  ): Promise<RecordedStep> {
+    const lesson = requireLesson(lessonId);
+    const stage = requireStage(lesson, stageId);
+    const step = stage.recordedSteps.find(
+      (candidate) => candidate.id === stepId
+    );
+    if (!step) throw new Error(`未找到录制步骤：${stepId}`);
+    if (!backend.isEnabled()) {
+      step.syncStatus = 'LOCAL';
+      persist();
+      return step;
+    }
+    if (step.remoteDraftId && step.syncStatus === 'SYNCED') return step;
+
+    step.syncStatus = 'SYNCING';
+    delete step.syncError;
+    persist();
+    const sequenceNo =
+      lesson.stages
+        .slice(0, lesson.stages.indexOf(stage))
+        .reduce((total, candidate) => total + candidate.recordedSteps.length, 0) +
+      stage.recordedSteps.indexOf(step) +
+      1;
+    try {
+      const binding = await runRemote('上报录制步骤', () =>
+        backend.reportRecordedStep(
+          toPlain(lesson),
+          toPlain(stage),
+          toPlain(step),
+          sequenceNo
+        )
+      );
+      step.remoteEventId = binding.eventId;
+      step.remoteResourceSnapshotId = binding.resourceSnapshotId;
+      step.remoteDraftId = binding.draftId;
+      step.syncStatus = 'SYNCED';
+      delete step.syncError;
+      persist();
+      return step;
+    } catch (error) {
+      step.syncStatus = 'FAILED';
+      step.syncError =
+        error instanceof Error ? error.message : '录制步骤上报失败';
+      persist();
+      throw error;
+    }
+  }
+
+  async function publishLessonRemote(lessonId: string): Promise<LessonPlan> {
+    const lesson = requireLesson(lessonId);
+    const issues = validateLesson(lessonId);
+    if (issues.length) throw new TrainingValidationError(issues);
+    if (!backend.isEnabled()) return publishLesson(lessonId);
+    const platform = requireBusinessPlatform(lesson.businessPlatformId);
+
+    for (const stage of lesson.stages) {
+      for (const step of stage.recordedSteps) {
+        if (!step.remoteDraftId || step.syncStatus !== 'SYNCED') {
+          await syncRecordedStep(lessonId, stage.id, step.id);
+        }
+      }
+    }
+
+    const binding = await runRemote('发布教学点', () =>
+      backend.publishLesson(toPlain(lesson), toPlain(platform))
+    );
+    lesson.teachingPointId = binding.teachingPointId;
+    lesson.captureSessionFinished =
+      lesson.captureSessionFinished || binding.finishedCaptureSession;
+    lesson.stages.forEach((stage) => {
+      stage.recordedSteps.forEach((step) => {
+        const resourceId = binding.resourceIdsByStepId[step.id];
+        if (resourceId) step.remoteResourceId = resourceId;
+      });
+    });
+    persist();
+    return publishLesson(lessonId);
+  }
+
+  function ensureSimulatedModeTask(
+    lessonId: string,
+    mode: 'LEARNING' | 'PRACTICE'
+  ): PublishedTask {
+    const existing = state.publishedTasks.find(
+      (task) => task.lessonId === lessonId && task.mode === mode
+    );
+    if (existing) return existing;
+    const lesson = requireLesson(lessonId);
+    const config = getApiConfig();
+    const startAt = new Date(Date.parse(now()) - 60_000).toISOString();
+    const endAt = new Date(
+      Date.parse(startAt) + 30 * 24 * 60 * 60 * 1000
+    ).toISOString();
+    const id = idFactory('published-task');
+    const title =
+      mode === 'LEARNING'
+        ? `${lesson.title}｜流程学习`
+        : `${lesson.title}｜流程练习`;
+    const published: PublishedTask = {
+      id,
+      lessonId,
+      title,
+      mode,
+      status: 'RUNNING',
+      startAt,
+      endAt,
+      assignedCount: 1,
+      groupCount: new Set(
+        lesson.stages.map((stage) => stage.groupKey).filter(Boolean)
+      ).size,
+      dataCount: 0,
+      completedCount: 0,
+      syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
+    };
+    const assignment: StudentTask = {
+      id: idFactory('student-task'),
+      publishedTaskId: id,
+      lessonId,
+      studentId: config.simulatedStudentId,
+      studentName: config.simulatedStudentName,
+      title,
+      mode,
+      groupKey: lesson.stages[0]?.groupKey ?? 'all',
+      groupKeys: [
+        ...new Set(
+          lesson.stages.map((stage) => stage.groupKey).filter(Boolean)
+        )
+      ],
+      unitId: config.simulatedOrgId,
+      unitName: '模拟班级',
+      dataItemId: `simulated-${mode.toLowerCase()}-${lessonId}`,
+      attemptNumber: 1,
+      submissionValues: {},
+      status: 'TODO',
+      currentStageIndex: 0,
+      completedStageIds: [],
+      syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
+    };
+    state.publishedTasks.unshift(published);
+    state.studentTasks.push(assignment);
+    addActivity(
+      'TRAINING_TASK_CREATED',
+      `生成${mode === 'LEARNING' ? '学习' : '练习'}任务：${title}`,
+      `${config.simulatedStudentName}（模拟身份）`
+    );
+    persist();
+    return published;
+  }
+
+  async function publishModeTaskRemote(
+    lessonId: string,
+    mode: RunMode,
+    published: PublishedTask
+  ): Promise<PublishedTask> {
+    const lesson = requireLesson(lessonId);
+    if (!backend.isEnabled()) {
+      published.syncStatus = 'LOCAL';
+      persist();
+      return published;
+    }
+    if (
+      published.remoteTaskId &&
+      published.syncStatus === 'SYNCED'
+    ) {
+      return published;
+    }
+    const platform = requireBusinessPlatform(lesson.businessPlatformId);
+    published.syncStatus = 'SYNCING';
+    delete published.syncError;
+    persist();
+    try {
+      const binding = await runRemote(`发布${mode}任务`, () =>
+        backend.publishTeachingTask(
+          toPlain(lesson),
+          toPlain(platform),
+          mode,
+          {
+            title: published.title,
+            startAt: published.startAt,
+            endAt: published.endAt,
+            timeLimitMinutes:
+              mode === 'EXAM'
+                ? state.examSettings[lessonId]?.durationMinutes
+                : mode === 'LEARNING'
+                  ? 60
+                  : 120
+          }
+        )
+      );
+      lesson.remoteCourseId = binding.courseId;
+      published.remoteCourseId = binding.courseId;
+      published.remoteTaskId = binding.taskId;
+      published.remoteTeachingPointId = binding.teachingPointId;
+      published.remoteEvaluationRuleId = binding.evaluationRuleId;
+      published.remoteTaskStepIdsByStepId =
+        binding.taskStepIdsByStepId;
+      published.syncStatus = 'SYNCED';
+      delete published.syncError;
+      state.studentTasks
+        .filter((task) => task.publishedTaskId === published.id)
+        .forEach((task) => {
+          task.syncStatus = 'SYNCED';
+          delete task.syncError;
+        });
+      persist();
+      return published;
+    } catch (error) {
+      published.syncStatus = 'FAILED';
+      published.syncError =
+        error instanceof Error ? error.message : `${mode}任务发布失败`;
+      state.studentTasks
+        .filter((task) => task.publishedTaskId === published.id)
+        .forEach((task) => {
+          task.syncStatus = 'FAILED';
+          task.syncError = published.syncError;
+        });
+      persist();
+      throw error;
+    }
+  }
+
+  async function publishLearningAndPracticeRemote(
+    lessonId: string
+  ): Promise<PublishedTask[]> {
+    const lesson = requireLesson(lessonId);
+    if (lesson.status !== 'PUBLISHED' || !lesson.teachingPointId) {
+      throw new Error('请先完成教案备案并发布教学点');
+    }
+    if (!lesson.lectureCompletedAt) {
+      throw new Error('请先在教师讲解页完整讲解一遍备案流程');
+    }
+    const learning = ensureSimulatedModeTask(lessonId, 'LEARNING');
+    const practice = ensureSimulatedModeTask(lessonId, 'PRACTICE');
+    await publishModeTaskRemote(lessonId, 'LEARNING', learning);
+    await publishModeTaskRemote(lessonId, 'PRACTICE', practice);
+    return [learning, practice];
   }
 
   function saveExamSettings(
@@ -961,7 +1549,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
 
   function publishExam(lessonId: string): PublishedTask {
     const existing = state.publishedTasks.find(
-      (task) => task.lessonId === lessonId
+      (task) => task.lessonId === lessonId && task.mode === 'EXAM'
     );
     if (existing) return existing;
     const lesson = requireLesson(lessonId);
@@ -1011,6 +1599,30 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return published;
   }
 
+  async function publishExamRemote(lessonId: string): Promise<PublishedTask> {
+    if (backend.isEnabled()) {
+      const lesson = requireLesson(lessonId);
+      if (!lesson.lectureCompletedAt) {
+        throw new Error('请先完成教师讲解并发布学习、练习任务');
+      }
+      const prerequisiteModes: RunMode[] = ['LEARNING', 'PRACTICE'];
+      const missing = prerequisiteModes.filter(
+        (mode) =>
+          !state.publishedTasks.some(
+            (task) =>
+              task.lessonId === lessonId &&
+              task.mode === mode &&
+              task.syncStatus === 'SYNCED'
+          )
+      );
+      if (missing.length) {
+        throw new Error('请先将学习任务和练习任务同步发布到后端');
+      }
+    }
+    const published = publishExam(lessonId);
+    return publishModeTaskRemote(lessonId, 'EXAM', published);
+  }
+
   function startStudentTask(taskId: string): StudentTask {
     const task = requireStudentTask(taskId);
     requireRunningExam(task);
@@ -1021,6 +1633,51 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     addActivity('STUDENT_TASK_STARTED', `${task.studentName}开始办理`, task.title);
     persist();
     return task;
+  }
+
+  async function startStudentTaskRemote(taskId: string): Promise<StudentTask> {
+    const task = requireStudentTask(taskId);
+    if (!backend.isEnabled()) return startStudentTask(taskId);
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    if (!published || published.syncStatus !== 'SYNCED') {
+      throw new Error('任务尚未同步发布到后端，暂时不能开始');
+    }
+    if (task.remoteExecutionId && task.remoteExecutionStatus === 'RUNNING') {
+      return task;
+    }
+    const previous = toPlain(task);
+    startStudentTask(taskId);
+    task.syncStatus = 'SYNCING';
+    delete task.syncError;
+    persist();
+    const lesson = requireLesson(task.lessonId);
+    const platform = requireBusinessPlatform(lesson.businessPlatformId);
+    try {
+      const binding = await runRemote('开始学生任务', () =>
+        backend.startStudentTaskExecution(
+          toPlain(lesson),
+          toPlain(platform),
+          toPlain(published),
+          toPlain(task)
+        )
+      );
+      task.remoteExecutionId = binding.executionId;
+      task.remoteExecutionStatus = binding.executionStatus;
+      task.remoteContextLoaded = binding.contextLoaded;
+      task.syncStatus = 'SYNCED';
+      delete task.syncError;
+      persist();
+      return task;
+    } catch (error) {
+      restoreObject(task, previous);
+      task.syncStatus = 'FAILED';
+      task.syncError =
+        error instanceof Error ? error.message : '学生任务启动失败';
+      persist();
+      throw error;
+    }
   }
 
   function completeStudentStage(taskId: string, stageId: string): StudentTask {
@@ -1068,6 +1725,48 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return task;
   }
 
+  async function completeStudentStageRemote(
+    taskId: string,
+    stageId: string
+  ): Promise<StudentTask> {
+    const task = requireStudentTask(taskId);
+    if (!backend.isEnabled()) return completeStudentStage(taskId, stageId);
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    if (!published || !task.remoteExecutionId) {
+      throw new Error('后端任务执行尚未开始');
+    }
+    const previous = toPlain(task);
+    const completed = completeStudentStage(taskId, stageId);
+    completed.syncStatus = 'SYNCING';
+    delete completed.syncError;
+    persist();
+    const lesson = requireLesson(task.lessonId);
+    const stage = requireStage(lesson, stageId);
+    try {
+      await runRemote('上报阶段完成轨迹', () =>
+        backend.reportStudentStageCompletion(
+          toPlain(lesson),
+          toPlain(stage),
+          toPlain(published),
+          toPlain(completed)
+        )
+      );
+      completed.syncStatus = 'SYNCED';
+      delete completed.syncError;
+      persist();
+      return completed;
+    } catch (error) {
+      restoreObject(completed, previous);
+      completed.syncStatus = 'FAILED';
+      completed.syncError =
+        error instanceof Error ? error.message : '阶段轨迹上报失败';
+      persist();
+      throw error;
+    }
+  }
+
   function submitStudentTask(
     taskId: string,
     submissionValues: Record<string, string> = {}
@@ -1090,7 +1789,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       throw new Error('必须先完成本人负责的全部必做阶段');
     }
     const submissionFields =
-      state.examSettings[task.lessonId]?.submissionFields ?? [];
+      task.mode === 'EXAM'
+        ? state.examSettings[task.lessonId]?.submissionFields ?? []
+        : [];
     const normalizedSubmissionValues = Object.fromEntries(
       submissionFields.map((field) => [
         field.key,
@@ -1136,6 +1837,98 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       'STUDENT_TASK_SUBMITTED',
       `${task.studentName}已提交`,
       `系统客观评分：${task.objectiveScore}`
+    );
+    persist();
+    return task;
+  }
+
+  async function submitStudentTaskRemote(
+    taskId: string,
+    submissionValues: Record<string, string> = {}
+  ): Promise<StudentTask> {
+    const task = requireStudentTask(taskId);
+    if (!backend.isEnabled()) {
+      return submitStudentTask(taskId, submissionValues);
+    }
+    if (!task.remoteExecutionId) {
+      throw new Error('后端任务执行尚未开始，不能提交');
+    }
+    const previous = toPlain(task);
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    const previousCompletedCount = published?.completedCount;
+    const submitted = submitStudentTask(taskId, submissionValues);
+    submitted.syncStatus = 'SYNCING';
+    delete submitted.syncError;
+    persist();
+    try {
+      const execution = await runRemote('提交学生任务并评分', () =>
+        backend.submitStudentTaskExecution(toPlain(submitted))
+      );
+      submitted.remoteExecutionStatus = execution.executionStatus;
+      submitted.remoteScore = execution.score;
+      if (typeof execution.score === 'number') {
+        submitted.objectiveScore = execution.score;
+      }
+      submitted.syncStatus = 'SYNCED';
+      delete submitted.syncError;
+      persist();
+      return submitted;
+    } catch (error) {
+      restoreObject(submitted, previous);
+      if (published && previousCompletedCount !== undefined) {
+        published.completedCount = previousCompletedCount;
+      }
+      submitted.syncStatus = 'FAILED';
+      submitted.syncError =
+        error instanceof Error ? error.message : '学生任务提交失败';
+      persist();
+      throw error;
+    }
+  }
+
+  function restartLearningOrPractice(taskId: string): StudentTask {
+    const task = requireStudentTask(taskId);
+    if (task.mode === 'EXAM') {
+      throw new Error('考试任务请使用考试重新作答流程');
+    }
+    if (task.status !== 'SUBMITTED' && task.status !== 'GRADED') {
+      throw new Error('只有已完成的学习或练习任务可以重新开始');
+    }
+
+    task.attemptNumber += 1;
+    task.status = 'TODO';
+    task.currentStageIndex = 0;
+    task.completedStageIds = [];
+    task.submissionValues = {};
+    delete task.objectiveScore;
+    delete task.subjectiveScore;
+    delete task.comment;
+    delete task.startedAt;
+    delete task.submittedAt;
+    delete task.gradedAt;
+    delete task.remoteExecutionId;
+    delete task.remoteExecutionStatus;
+    delete task.remoteScore;
+    delete task.remoteContextLoaded;
+    delete task.syncError;
+    task.syncStatus = backend.isEnabled() ? 'SYNCED' : 'LOCAL';
+
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    if (published) {
+      published.completedCount = state.studentTasks.filter(
+        (candidate) =>
+          candidate.publishedTaskId === published.id &&
+          (candidate.status === 'SUBMITTED' || candidate.status === 'GRADED')
+      ).length;
+    }
+    addActivity(
+      'TRAINING_TASK_RESTARTED',
+      `${task.studentName}${task.mode === 'LEARNING' ? '重新学习' : '重新练习'}`,
+      `从教案录制流程第一步开始，第 ${task.attemptNumber} 次`
     );
     persist();
     return task;
@@ -1408,17 +2201,25 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
 
   return {
     state,
+    remote,
     currentLesson,
     getLesson,
     getBusinessPlatform,
     getBusinessPlatformModule,
     setRole,
     createBusinessPlatform,
+    createBusinessPlatformRemote,
     updateBusinessPlatform,
+    updateBusinessPlatformRemote,
+    setBusinessPlatformStatusRemote,
     removeBusinessPlatform,
     createBusinessPlatformModule,
+    createBusinessPlatformModuleRemote,
     updateBusinessPlatformModule,
+    updateBusinessPlatformModuleRemote,
     removeBusinessPlatformModule,
+    removeBusinessPlatformModuleRemote,
+    syncBusinessPlatforms,
     refreshPublishedTaskStatuses,
     createLesson,
     duplicateLesson,
@@ -1429,6 +2230,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     moveStage,
     validateLesson,
     publishLesson,
+    publishLessonRemote,
+    markLessonLectureCompleted,
+    publishLearningAndPracticeRemote,
+    startCaptureSessionRemote,
+    syncRecordedStep,
     saveExamSettings,
     saveGroupPlan,
     saveUnitDataPlans,
@@ -1439,9 +2245,14 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     replaceData,
     validateExamPublication,
     publishExam,
+    publishExamRemote,
     startStudentTask,
+    startStudentTaskRemote,
     completeStudentStage,
+    completeStudentStageRemote,
     submitStudentTask,
+    submitStudentTaskRemote,
+    restartLearningOrPractice,
     restartStudentAttempt,
     gradeStudentTask,
     resetDemo
@@ -1515,4 +2326,11 @@ function replaceReactiveState(target: TrainingState, source: TrainingState) {
 
 function toPlain<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function restoreObject<T extends object>(target: T, source: T): void {
+  Object.keys(target).forEach((key) => {
+    delete (target as Record<string, unknown>)[key];
+  });
+  Object.assign(target, toPlain(source));
 }

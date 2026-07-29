@@ -2,6 +2,7 @@ package com.sxpt.module.connector.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.sxpt.module.connector.entity.ConnectorResource;
+import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 
 /**
@@ -17,4 +18,35 @@ import org.apache.ibatis.annotations.Mapper;
  */
 @Mapper
 public interface ConnectorResourceMapper extends BaseMapper<ConnectorResource> {
+
+    /**
+     * 按租户、原平台和资源编码原子创建或更新正式资源。
+     *
+     * <p>重复的备案发布、浏览器重试或并发请求会命中数据库唯一索引，
+     * 保留首次创建的资源 ID，并刷新可变的页面定位、元数据和来源采集会话。</p>
+     *
+     * @param resource 待沉淀的正式资源。
+     * @return 受影响行数。
+     */
+    @Insert("INSERT INTO connector_resource (" +
+            "id, tenant_id, connector_system_id, resource_code, resource_name, resource_type, " +
+            "page_url, locator, stable_key, metadata_json, source_capture_id, create_by, " +
+            "create_time, update_by, update_time, status, deleted" +
+            ") VALUES (" +
+            "#{id}, #{tenantId}, #{connectorSystemId}, #{resourceCode}, #{resourceName}, #{resourceType}, " +
+            "#{pageUrl}, #{locator}, #{stableKey}, #{metadataJson}, #{sourceCaptureId}, #{createBy}, " +
+            "#{createTime}, #{updateBy}, #{updateTime}, #{status}, #{deleted}" +
+            ") ON CONFLICT (tenant_id, connector_system_id, resource_code) WHERE deleted = false " +
+            "DO UPDATE SET " +
+            "resource_name = EXCLUDED.resource_name, " +
+            "resource_type = EXCLUDED.resource_type, " +
+            "page_url = EXCLUDED.page_url, " +
+            "locator = EXCLUDED.locator, " +
+            "stable_key = EXCLUDED.stable_key, " +
+            "metadata_json = EXCLUDED.metadata_json, " +
+            "source_capture_id = EXCLUDED.source_capture_id, " +
+            "update_by = EXCLUDED.update_by, " +
+            "update_time = EXCLUDED.update_time, " +
+            "status = EXCLUDED.status")
+    int upsertByBusinessKey(ConnectorResource resource);
 }

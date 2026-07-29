@@ -2,6 +2,7 @@ package com.sxpt.common.exception;
 
 import com.sxpt.common.api.ApiResult;
 import com.sxpt.common.api.ApiResultCode;
+import org.apache.shiro.authc.AuthenticationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -57,6 +58,18 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ConstraintViolationException.class)
     public ApiResult<Void> handleConstraintViolationException(ConstraintViolationException exception) {
         return ApiResult.failure(ApiResultCode.PARAM_ERROR.getCode(), exception.getMessage());
+    }
+
+    /**
+     * 处理 JWT 缺失、无效或过期等认证异常。
+     *
+     * @param exception Shiro 认证异常。
+     * @return 401 统一失败响应。
+     */
+    @ResponseStatus(HttpStatus.UNAUTHORIZED)
+    @ExceptionHandler(AuthenticationException.class)
+    public ApiResult<Void> handleAuthenticationException(AuthenticationException exception) {
+        return ApiResult.failure(ApiResultCode.UNAUTHORIZED.getCode(), ApiResultCode.UNAUTHORIZED.getMessage());
     }
 
     /**
