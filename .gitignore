@@ -61,3 +61,6 @@ sxpt_api/src/main/resources/*.properties
 
 # 过滤的内容
 !README.md
+/sxpt_web/.chrome-role-flow-qa2/*
+/sxpt_web/.chrome-role-flow-qa/*
+/sxpt_web/.chrome-platform-flow-qa/*

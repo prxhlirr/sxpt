@@ -13,7 +13,6 @@ interface NavigationItem {
 }
 
 const route = useRoute();
-const router = useRouter();
 const store = useTrainingStore();
 
 const roleOptions: Array<{
@@ -97,35 +96,18 @@ const navigation = computed<NavigationItem[]>(() => {
   ];
 });
 
-const currentRole = computed(() =>
-  roleOptions.find((item) => item.key === store.state.currentRole)
+const currentRole = computed(
+  () => identityProfiles[store.state.currentRole]
 );
-
-watch(
-  () => route.path,
-  (path) => {
-    const role: PortalRole = path.startsWith('/student')
-      ? 'student'
-      : path.startsWith('/teacher')
-        ? 'teacher'
-        : 'admin';
-    if (store.state.currentRole !== role) store.setRole(role);
-  },
-  { immediate: true }
-);
-
-async function switchRole(role: PortalRole) {
-  const option = roleOptions.find((item) => item.key === role);
-  if (!option) return;
-  store.setRole(role);
-  await router.push(option.home);
-}
 </script>
 
 <template>
-  <div class="app-shell">
+  <div
+    class="app-shell"
+    :class="{ 'app-shell--immersive': route.name === 'lesson-editor' }"
+  >
     <aside class="app-sidebar">
-      <RouterLink class="brand" to="/admin/overview">
+      <RouterLink class="brand" to="/platforms">
         <span class="brand-mark">SX</span>
         <span>
           <strong>实训云台</strong>
@@ -133,20 +115,16 @@ async function switchRole(role: PortalRole) {
         </span>
       </RouterLink>
 
-      <div class="role-switcher" aria-label="切换门户">
-        <button
-          v-for="role in roleOptions"
-          :key="role.key"
-          type="button"
-          :class="{ active: store.state.currentRole === role.key }"
-          @click="switchRole(role.key)"
-        >
-          <span>{{ role.shortLabel }}</span>
-          {{ role.label }}
-        </button>
+      <div class="identity-card" aria-label="当前登录身份">
+        <span>{{ currentRole.shortLabel }}</span>
+        <div>
+          <small>当前身份</small>
+          <strong>{{ currentRole.label }}</strong>
+        </div>
+        <RouterLink to="/platforms" title="返回平台选择">↗</RouterLink>
       </div>
 
-      <p class="nav-caption">{{ currentRole?.label }}功能</p>
+      <p class="nav-caption">{{ currentRole.label }}功能</p>
       <nav class="main-nav">
         <RouterLink
           v-for="item in navigation"
@@ -176,9 +154,8 @@ async function switchRole(role: PortalRole) {
     </aside>
 
     <section class="app-workspace">
-      <header class="topbar">
         <div>
-          <span class="breadcrumb">业务实训平台 / {{ currentRole?.label }}</span>
+          <span class="breadcrumb">业务实训平台 / {{ currentRole.label }}</span>
           <strong>{{ String(route.meta.title ?? '工作台') }}</strong>
         </div>
         <div class="topbar-actions">

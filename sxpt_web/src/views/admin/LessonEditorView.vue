@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch
+} from 'vue';
 import { useRoute } from 'vue-router';
-import PageHeader from '../../components/ui/PageHeader.vue';
-import StatusPill from '../../components/ui/StatusPill.vue';
 import type {
   CompletionMethod,
   LessonStage,
@@ -11,33 +17,123 @@ import type {
 } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
 
+type PanelTab = 'stage' | 'step' | 'lesson' | 'publish';
+type TargetKey =
+  | 'create'
+  | 'subject'
+  | 'category'
+  | 'counterparty'
+  | 'amount'
+  | 'date'
+  | 'reason'
+  | 'save'
+  | 'approve'
+  | 'submit';
+
+interface BusinessScenario {
+  systemName: string;
+  pageTitle: string;
+  documentTitle: string;
+  subjectLabel: string;
+  subjectPlaceholder: string;
+  categoryLabel: string;
+  categoryOptions: string[];
+  counterpartyLabel: string;
+  counterpartyPlaceholder: string;
+  amountLabel: string;
+  dateLabel: string;
+  reasonLabel: string;
+}
+
+interface CaptureTarget {
+  key: TargetKey;
+  title: string;
+  actionLabel: string;
+  selector: string;
+  pageTitle: string;
+  note: string;
+}
+
 const route = useRoute();
 const store = useTrainingStore();
-const selectedStageId = ref('');
-const feedback = ref('');
-const feedbackTone = ref<'success' | 'danger'>('success');
 const lessonId = computed(() => String(route.params.lessonId ?? ''));
 const lesson = computed(() => store.getLesson(lessonId.value));
-const configurationLocked = computed(() =>
-  store.state.publishedTasks.some(
-    (task) => task.lessonId === lessonId.value
+const businessPlatform = computed(() =>
+  store.getBusinessPlatform(lesson.value?.businessPlatformId ?? '')
+);
+const businessPlatformModule = computed(() =>
+  store.getBusinessPlatformModule(
+    lesson.value?.businessPlatformId ?? '',
+    lesson.value?.businessPlatformModuleId ?? ''
   )
+);
+const effectiveBusinessPlatformUrl = computed(() =>
+  resolveBusinessPlatformModuleUrl(
+    businessPlatform.value?.baseUrl ?? '',
+    businessPlatformModule.value?.path ?? ''
+  )
+);
+const useEmbeddedBusinessSimulation = computed(
+  () =>
+    !effectiveBusinessPlatformUrl.value ||
+    effectiveBusinessPlatformUrl.value.startsWith('internal://')
+);
+const selectedStageId = ref('');
+const selectedStepId = ref('');
+const recording = ref(false);
+const controlsCollapsed = ref(false);
+const showStagePanel = ref(true);
+const showConfigPanel = ref(false);
+const previewEnabled = ref(true);
+const panelTab = ref<PanelTab>('stage');
+const feedback = ref('');
+const feedbackTone = ref<'success' | 'danger'>('success');
+const activityText = ref('选择业务阶段后，点击“开始录制”即可在下层业务系统中采集操作。');
+const workspaceRef = ref<HTMLElement | null>(null);
+const businessLayerRef = ref<HTMLElement | null>(null);
+const highlightStyle = ref<Record<string, string>>({});
+
+const configurationLocked = computed(() =>
+  store.state.publishedTasks.some((task) => task.lessonId === lessonId.value)
 );
 
 const basicForm = reactive({
   code: '',
   title: '',
   moduleName: '',
+  businessPlatformId: '',
+  businessPlatformModuleId: '',
   description: '',
   objectiveMaxScore: 0,
   subjectiveMaxScore: 0,
   tags: ''
+});
+const availableBasicBusinessModules = computed(() =>
+  (
+    store.getBusinessPlatform(basicForm.businessPlatformId)?.modules ?? []
+  ).filter(
+    (businessModule) =>
+      businessModule.status === 'ENABLED' ||
+      businessModule.id === basicForm.businessPlatformModuleId
+  )
+);
+
+const businessForm = reactive({
+  subject: '',
+  category: '',
+  counterparty: '',
+  amount: '',
+  date: '',
+  reason: ''
 });
 
 type StageDraft = Omit<LessonStage, 'recordedSteps'>;
 const stageForm = ref<StageDraft | null>(null);
 const selectedStage = computed(() =>
   lesson.value?.stages.find((stage) => stage.id === selectedStageId.value)
+);
+const selectedStep = computed(() =>
+  selectedStage.value?.recordedSteps.find((step) => step.id === selectedStepId.value)
 );
 
 const objectiveStageScore = computed(
@@ -52,6 +148,9 @@ const recordedStepCount = computed(
   () =>
     lesson.value?.stages.reduce((total, stage) => total + stage.recordedSteps.length, 0) ??
     0
+);
+const activeStageIndex = computed(
+  () => lesson.value?.stages.findIndex((stage) => stage.id === selectedStageId.value) ?? -1
 );
 const validationMessages = computed<string[]>(() => {
   if (!lesson.value) return ['教案不存在'];
@@ -70,11 +169,178 @@ const completionMethods: Array<{ value: CompletionMethod; label: string }> = [
   { value: 'mixed', label: '流程操作综合判断' }
 ];
 
-const modes: Array<{ key: RunMode; label: string; hint: string }> = [
-  { key: 'LEARNING', label: '演示学习', hint: '只讲解，不办理真实业务' },
-  { key: 'PRACTICE', label: '练习', hint: '使用练习数据完成流程' },
-  { key: 'EXAM', label: '考试', hint: '计分并记录操作轨迹' }
+const modes: Array<{ key: RunMode; label: string }> = [
+  { key: 'LEARNING', label: '演示学习' },
+  { key: 'PRACTICE', label: '练习' },
+  { key: 'EXAM', label: '考试' }
 ];
+
+const businessScenario = computed<BusinessScenario>(() => {
+  const moduleName = lesson.value?.moduleName ?? '';
+  if (moduleName.includes('报销') || moduleName.includes('财务')) {
+    return {
+      systemName: '企业财务共享系统',
+      pageTitle: '费用报销',
+      documentTitle: '费用报销单',
+      subjectLabel: '报销事由',
+      subjectPlaceholder: '请输入本次报销事由',
+      categoryLabel: '费用类型',
+      categoryOptions: ['差旅费', '办公费', '业务招待费'],
+      counterpartyLabel: '收款人',
+      counterpartyPlaceholder: '请输入收款人姓名',
+      amountLabel: '报销金额',
+      dateLabel: '费用发生日期',
+      reasonLabel: '费用说明'
+    };
+  }
+  if (moduleName.includes('合同')) {
+    return {
+      systemName: '合同全生命周期系统',
+      pageTitle: '合同起草',
+      documentTitle: '合同审批单',
+      subjectLabel: '合同名称',
+      subjectPlaceholder: '请输入合同名称',
+      categoryLabel: '合同类型',
+      categoryOptions: ['采购合同', '服务合同', '框架协议'],
+      counterpartyLabel: '合同相对方',
+      counterpartyPlaceholder: '请输入合同相对方',
+      amountLabel: '合同金额',
+      dateLabel: '计划签署日期',
+      reasonLabel: '合同事项说明'
+    };
+  }
+  return {
+    systemName: '企业采购业务系统',
+    pageTitle: '采购申请',
+    documentTitle: '采购申请单',
+    subjectLabel: '申请主题',
+    subjectPlaceholder: '请输入采购申请主题',
+    categoryLabel: '采购品类',
+    categoryOptions: ['办公设备', '信息化服务', '行政物资'],
+    counterpartyLabel: '意向供应商',
+    counterpartyPlaceholder: '请输入意向供应商',
+    amountLabel: '申请金额',
+    dateLabel: '期望到货日期',
+    reasonLabel: '申请原因'
+  };
+});
+
+const captureTargets = computed<Record<TargetKey, CaptureTarget>>(() => {
+  const pageTitle = businessScenario.value.pageTitle;
+  return {
+    create: {
+      key: 'create',
+      title: `新建${businessScenario.value.documentTitle}`,
+      actionLabel: '新建业务单',
+      selector: '[data-action="create"]',
+      pageTitle,
+      note: '进入业务单据新增页面，确认页面已经完成初始化。'
+    },
+    subject: {
+      key: 'subject',
+      title: `填写${businessScenario.value.subjectLabel}`,
+      actionLabel: businessScenario.value.subjectLabel,
+      selector: '[data-business-field="subject"]',
+      pageTitle,
+      note: `填写${businessScenario.value.subjectLabel}并检查输入结果。`
+    },
+    category: {
+      key: 'category',
+      title: `选择${businessScenario.value.categoryLabel}`,
+      actionLabel: businessScenario.value.categoryLabel,
+      selector: '[data-business-field="category"]',
+      pageTitle,
+      note: `根据业务要求选择${businessScenario.value.categoryLabel}。`
+    },
+    counterparty: {
+      key: 'counterparty',
+      title: `填写${businessScenario.value.counterpartyLabel}`,
+      actionLabel: businessScenario.value.counterpartyLabel,
+      selector: '[data-business-field="counterparty"]',
+      pageTitle,
+      note: `录入${businessScenario.value.counterpartyLabel}。`
+    },
+    amount: {
+      key: 'amount',
+      title: `填写${businessScenario.value.amountLabel}`,
+      actionLabel: businessScenario.value.amountLabel,
+      selector: '[data-business-field="amount"]',
+      pageTitle,
+      note: `填写${businessScenario.value.amountLabel}并核对金额格式。`
+    },
+    date: {
+      key: 'date',
+      title: `选择${businessScenario.value.dateLabel}`,
+      actionLabel: businessScenario.value.dateLabel,
+      selector: '[data-business-field="date"]',
+      pageTitle,
+      note: `选择${businessScenario.value.dateLabel}。`
+    },
+    reason: {
+      key: 'reason',
+      title: `填写${businessScenario.value.reasonLabel}`,
+      actionLabel: businessScenario.value.reasonLabel,
+      selector: '[data-business-field="reason"]',
+      pageTitle,
+      note: `补充${businessScenario.value.reasonLabel}，确保说明完整。`
+    },
+    save: {
+      key: 'save',
+      title: '保存业务草稿',
+      actionLabel: '保存草稿',
+      selector: '[data-action="save"]',
+      pageTitle,
+      note: '保存当前业务数据，并确认页面出现保存成功反馈。'
+    },
+    approve: {
+      key: 'approve',
+      title: '完成业务审批',
+      actionLabel: '审批通过',
+      selector: '[data-action="approve"]',
+      pageTitle,
+      note: '执行审批通过，并检查业务状态是否正确更新。'
+    },
+    submit: {
+      key: 'submit',
+      title: `提交${businessScenario.value.documentTitle}`,
+      actionLabel: '提交审批',
+      selector: '[data-action="submit"]',
+      pageTitle,
+      note: '提交业务单据，并确认流程已进入下一处理环节。'
+    }
+  };
+});
+
+const highlightClass = computed(() => {
+  const selector = selectedStep.value?.selector ?? '';
+  if (selector.includes('create')) return 'target-create';
+  if (selector.includes('subject')) return 'target-subject';
+  if (selector.includes('category')) return 'target-category';
+  if (selector.includes('counterparty')) return 'target-counterparty';
+  if (selector.includes('amount')) return 'target-amount';
+  if (selector.includes('date')) return 'target-date';
+  if (selector.includes('reason')) return 'target-reason';
+  if (selector.includes('save')) return 'target-save';
+  if (selector.includes('approve') || selector.includes('handle')) return 'target-approve';
+  if (selector.includes('submit')) return 'target-submit';
+  if (selector.includes('archive')) return 'target-submit';
+  return `target-generic-${Math.max(0, selectedStepIndex.value % 3)}`;
+});
+
+const selectedStepIndex = computed(
+  () => selectedStage.value?.recordedSteps.findIndex((step) => step.id === selectedStepId.value) ?? -1
+);
+const previewText = computed(
+  () =>
+    selectedStep.value?.teachingText ||
+    selectedStep.value?.note ||
+    '在下层业务系统中完成高亮区域的操作。'
+);
+const statusSummary = computed(() => {
+  if (!selectedStage.value) return '尚未选择业务阶段';
+  const state = recording.value ? '录制中' : '已暂停';
+  return `${state} · 第 ${activeStageIndex.value + 1} 阶段 · ${selectedStage.value.recordedSteps.length} 个节点`;
+});
 
 watch(
   lesson,
@@ -83,20 +349,60 @@ watch(
     basicForm.code = current.code;
     basicForm.title = current.title;
     basicForm.moduleName = current.moduleName;
+    basicForm.businessPlatformId = current.businessPlatformId;
+    basicForm.businessPlatformModuleId = current.businessPlatformModuleId;
     basicForm.description = current.description;
     basicForm.objectiveMaxScore = current.objectiveMaxScore;
     basicForm.subjectiveMaxScore = current.subjectiveMaxScore;
     basicForm.tags = current.tags.join('，');
     if (!current.stages.some((stage) => stage.id === selectedStageId.value)) {
       selectedStageId.value = current.stages[0]?.id ?? '';
-    } else {
-      loadStageDraft();
     }
+    const currentStage = current.stages.find((stage) => stage.id === selectedStageId.value);
+    if (!currentStage?.recordedSteps.some((step) => step.id === selectedStepId.value)) {
+      selectedStepId.value = currentStage?.recordedSteps[0]?.id ?? '';
+    }
+    loadStageDraft();
   },
   { immediate: true }
 );
 
-watch(selectedStageId, () => loadStageDraft());
+watch(
+  () => basicForm.businessPlatformId,
+  () => {
+    if (
+      !availableBasicBusinessModules.value.some(
+        (businessModule) =>
+          businessModule.id === basicForm.businessPlatformModuleId
+      )
+    ) {
+      basicForm.businessPlatformModuleId =
+        availableBasicBusinessModules.value[0]?.id ?? '';
+    }
+  }
+);
+
+watch(selectedStageId, () => {
+  loadStageDraft();
+  selectedStepId.value = selectedStage.value?.recordedSteps[0]?.id ?? '';
+});
+
+watch(
+  () => `${selectedStep.value?.id ?? ''}:${selectedStep.value?.selector ?? ''}`,
+  () => void nextTick(updateHighlightPosition),
+  { flush: 'post' }
+);
+
+onMounted(() => {
+  window.addEventListener('resize', updateHighlightPosition);
+  window.addEventListener('message', handleBusinessPlatformMessage);
+  void nextTick(updateHighlightPosition);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', updateHighlightPosition);
+  window.removeEventListener('message', handleBusinessPlatformMessage);
+});
 
 function loadStageDraft() {
   const stage = selectedStage.value;
@@ -115,9 +421,117 @@ function loadStageDraft() {
     : null;
 }
 
+function updateHighlightPosition() {
+  const workspace = workspaceRef.value;
+  const businessLayer = businessLayerRef.value;
+  const step = selectedStep.value;
+  if (!workspace || !businessLayer || !step) {
+    highlightStyle.value = {};
+    return;
+  }
+
+  const preferredSelector = resolvePreviewTargetSelector(step.selector);
+  let target: Element | null = null;
+  try {
+    target = businessLayer.querySelector(step.selector);
+  } catch {
+    target = null;
+  }
+  if (!target) target = businessLayer.querySelector(preferredSelector);
+  if (!target) {
+    highlightStyle.value = {};
+    return;
+  }
+
+  const workspaceRect = workspace.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const padding = 5;
+  highlightStyle.value = {
+    left: `${targetRect.left - workspaceRect.left - padding}px`,
+    top: `${targetRect.top - workspaceRect.top - padding}px`,
+    width: `${targetRect.width + padding * 2}px`,
+    height: `${targetRect.height + padding * 2}px`
+  };
+}
+
+function resolvePreviewTargetSelector(selector: string) {
+  if (selector.includes('create')) return '[data-action="create"]';
+  if (selector.includes('submit')) return '[data-action="submit"]';
+  if (selector.includes('approve') || selector.includes('handle')) {
+    return '[data-action="approve"]';
+  }
+  if (selector.includes('archive')) return '[data-action="submit"]';
+  if (selector.includes('save')) return '[data-action="save"]';
+  if (selector.includes('subject')) return '[data-business-field="subject"]';
+  if (selector.includes('category')) return '[data-business-field="category"]';
+  if (selector.includes('counterparty')) return '[data-business-field="counterparty"]';
+  if (selector.includes('amount')) return '[data-business-field="amount"]';
+  if (selector.includes('date')) return '[data-business-field="date"]';
+  if (selector.includes('reason')) return '[data-business-field="reason"]';
+  return '[data-business-target="form"]';
+}
+
+function handleBusinessPlatformMessage(event: MessageEvent) {
+  const platform = businessPlatform.value;
+  const payload = event.data as Record<string, unknown> | null;
+  if (
+    useEmbeddedBusinessSimulation.value ||
+    !platform ||
+    !recording.value ||
+    configurationLocked.value ||
+    !lesson.value ||
+    !selectedStage.value ||
+    !payload ||
+    payload.type !== 'BUSINESS_ACTION'
+  ) {
+    return;
+  }
+
+  try {
+    const platformOrigin = new URL(
+      effectiveBusinessPlatformUrl.value,
+      window.location.origin
+    ).origin;
+    if (event.origin !== platformOrigin) return;
+  } catch {
+    return;
+  }
+
+  const title = String(payload.title ?? payload.text ?? payload.actionLabel ?? '业务操作');
+  const actionLabel = String(payload.actionLabel ?? payload.text ?? title);
+  const step: RecordedStep = {
+    id: `record-${selectedStage.value.id}-${Date.now()}`,
+    title,
+    pageTitle: String(payload.pageTitle ?? platform.name),
+    actionLabel,
+    selector: String(payload.selector ?? ''),
+    durationSeconds: Number(payload.durationSeconds ?? 8),
+    note: String(payload.note ?? `在${platform.name}中完成“${actionLabel}”。`),
+    kind: 'action',
+    actionType: String(payload.actionType ?? 'click') as RecordedStep['actionType'],
+    url: String(payload.url ?? effectiveBusinessPlatformUrl.value),
+    teachingText: String(payload.teachingText ?? ''),
+    practiceHint: String(payload.practiceHint ?? ''),
+    examGoal: String(payload.examGoal ?? ''),
+    required: payload.required !== false,
+    failurePolicy: 'stop'
+  };
+  store.updateStage(lesson.value.id, selectedStage.value.id, {
+    recordedSteps: [...selectedStage.value.recordedSteps, step]
+  });
+  selectedStepId.value = step.id;
+  showFeedback(`已从“${platform.name}”采集节点：${title}`);
+}
+
 function showFeedback(message: string, tone: 'success' | 'danger' = 'success') {
   feedback.value = message;
   feedbackTone.value = tone;
+  activityText.value = message;
+}
+
+function openPanel(tab: PanelTab) {
+  panelTab.value = tab;
+  showConfigPanel.value = true;
 }
 
 function saveBasicInformation() {
@@ -126,12 +540,18 @@ function saveBasicInformation() {
     store.updateLesson(lesson.value.id, {
       code: basicForm.code.trim(),
       title: basicForm.title.trim(),
-      moduleName: basicForm.moduleName.trim(),
+      moduleName:
+        store.getBusinessPlatformModule(
+          basicForm.businessPlatformId,
+          basicForm.businessPlatformModuleId
+        )?.name ?? basicForm.moduleName.trim(),
+      businessPlatformId: basicForm.businessPlatformId,
+      businessPlatformModuleId: basicForm.businessPlatformModuleId,
       description: basicForm.description.trim(),
       objectiveMaxScore: Number(basicForm.objectiveMaxScore),
       subjectiveMaxScore: Number(basicForm.subjectiveMaxScore),
       tags: basicForm.tags
-        .split(/[，,]/)
+        .split(/[,，]/)
         .map((tag) => tag.trim())
         .filter(Boolean)
     });
@@ -154,17 +574,19 @@ function saveStage() {
       completionMethod: stageForm.value.completionMethod,
       visibility: { ...stageForm.value.visibility }
     });
-    showFeedback(`“${stageForm.value.name}”已保存。`);
+    showFeedback(`“${stageForm.value.name}”阶段规则已保存。`);
   } catch (error) {
     showFeedback(error instanceof Error ? error.message : '阶段保存失败', 'danger');
   }
 }
 
 function addStage() {
-  if (!lesson.value) return;
+  if (!lesson.value || configurationLocked.value) return;
   const index = lesson.value.stages.length + 1;
-  const allocated = objectiveStageScore.value;
-  const remaining = Math.max(0, lesson.value.objectiveMaxScore - allocated);
+  const remaining = Math.max(
+    0,
+    lesson.value.objectiveMaxScore - objectiveStageScore.value
+  );
   try {
     const stage = store.addStage(lesson.value.id, {
       stageKey: `stage_${index}`,
@@ -178,6 +600,7 @@ function addStage() {
       recordedSteps: []
     });
     selectedStageId.value = stage.id;
+    openPanel('stage');
     showFeedback(`已添加“${stage.name}”。`);
   } catch (error) {
     showFeedback(error instanceof Error ? error.message : '阶段添加失败', 'danger');
@@ -185,7 +608,7 @@ function addStage() {
 }
 
 function removeSelectedStage() {
-  if (!lesson.value || !selectedStage.value) return;
+  if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
   if (!window.confirm(`确认删除“${selectedStage.value.name}”及其录制步骤吗？`)) return;
   const currentIndex = lesson.value.stages.findIndex(
     (stage) => stage.id === selectedStageId.value
@@ -203,7 +626,7 @@ function removeSelectedStage() {
 }
 
 function moveSelectedStage(direction: 'up' | 'down') {
-  if (!lesson.value || !selectedStage.value) return;
+  if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
   try {
     store.moveStage(lesson.value.id, selectedStage.value.id, direction);
     showFeedback(direction === 'up' ? '阶段已上移。' : '阶段已下移。');
@@ -212,26 +635,82 @@ function moveSelectedStage(direction: 'up' | 'down') {
   }
 }
 
-function addRecordedStep() {
-  if (!lesson.value || !selectedStage.value) return;
-  const order = selectedStage.value.recordedSteps.length + 1;
+function startRecording() {
+  if (!selectedStage.value) {
+    showFeedback('请先选择或添加一个业务阶段。', 'danger');
+    return;
+  }
+  if (configurationLocked.value) return;
+  recording.value = true;
+  activityText.value = `正在录制“${selectedStage.value.name}”，请直接操作下层业务系统。`;
+}
+
+function pauseRecording() {
+  recording.value = false;
+  activityText.value = '录制已暂停，可编辑节点、调整顺序或保存当前阶段。';
+}
+
+function captureBusinessAction(targetKey: TargetKey) {
+  const target = captureTargets.value[targetKey];
+  if (!recording.value || !lesson.value || !selectedStage.value || configurationLocked.value) {
+    activityText.value = `已执行业务操作“${target.actionLabel}”；开始录制后该操作会生成教案节点。`;
+    return;
+  }
   const step: RecordedStep = {
     id: `record-${selectedStage.value.id}-${Date.now()}`,
-    title: `录制操作 ${order}`,
-    pageTitle: '业务系统页面',
-    actionLabel: '点击业务操作',
-    selector: `[data-training-step="${order}"]`,
+    title: target.title,
+    pageTitle: target.pageTitle,
+    actionLabel: target.actionLabel,
+    selector: target.selector,
     durationSeconds: 8,
-    note: '说明本步应观察的页面反馈和业务结果。'
+    note: target.note,
+    kind: 'action',
+    actionType: targetKey === 'submit' ? 'submit' : targetKey === 'category' ? 'select' : 'click',
+    url: effectiveBusinessPlatformUrl.value,
+    teachingText: target.note,
+    practiceHint: `请完成“${target.actionLabel}”操作。`,
+    examGoal: `正确完成${target.title}`,
+    required: true,
+    failurePolicy: 'stop'
   };
   store.updateStage(lesson.value.id, selectedStage.value.id, {
     recordedSteps: [...selectedStage.value.recordedSteps, step]
   });
-  showFeedback('已添加模拟录制步骤，可继续完善步骤信息。');
+  selectedStepId.value = step.id;
+  previewEnabled.value = true;
+  showFeedback(`已采集节点：${step.title}`);
+}
+
+function addRecordedStep() {
+  if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
+  const order = selectedStage.value.recordedSteps.length + 1;
+  const step: RecordedStep = {
+    id: `guide-${selectedStage.value.id}-${Date.now()}`,
+    title: `操作说明 ${order}`,
+    pageTitle: businessScenario.value.pageTitle,
+    actionLabel: '查看操作说明',
+    selector: selectedStep.value?.selector || '[data-business-target="form"]',
+    durationSeconds: 8,
+    note: '说明当前业务步骤的操作要求和预期结果。',
+    kind: 'guide',
+    actionType: 'guide',
+    url: effectiveBusinessPlatformUrl.value,
+    teachingText: '请按照说明完成高亮区域中的业务操作。',
+    practiceHint: '观察高亮区域后再进行操作。',
+    examGoal: '理解本步骤业务要求',
+    required: false,
+    failurePolicy: 'skip'
+  };
+  store.updateStage(lesson.value.id, selectedStage.value.id, {
+    recordedSteps: [...selectedStage.value.recordedSteps, step]
+  });
+  selectedStepId.value = step.id;
+  openPanel('step');
+  showFeedback('已在当前页面插入说明节点。');
 }
 
 function updateRecordedStep(stepId: string, patch: Partial<RecordedStep>) {
-  if (!lesson.value || !selectedStage.value) return;
+  if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
   store.updateStage(lesson.value.id, selectedStage.value.id, {
     recordedSteps: selectedStage.value.recordedSteps.map((step) =>
       step.id === stepId ? { ...step, ...patch } : step
@@ -240,368 +719,716 @@ function updateRecordedStep(stepId: string, patch: Partial<RecordedStep>) {
 }
 
 function removeRecordedStep(stepId: string) {
-  if (!lesson.value || !selectedStage.value) return;
+  if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
+  const index = selectedStage.value.recordedSteps.findIndex((step) => step.id === stepId);
+  const nextSteps = selectedStage.value.recordedSteps.filter((step) => step.id !== stepId);
   store.updateStage(lesson.value.id, selectedStage.value.id, {
-    recordedSteps: selectedStage.value.recordedSteps.filter((step) => step.id !== stepId)
+    recordedSteps: nextSteps
   });
+  selectedStepId.value = nextSteps[Math.max(0, index - 1)]?.id ?? nextSteps[0]?.id ?? '';
   showFeedback('录制步骤已移除。');
 }
 
-function inputValue(event: Event) {
-  return (event.target as HTMLInputElement).value;
+function moveRecordedStep(direction: 'up' | 'down') {
+  if (!lesson.value || !selectedStage.value || !selectedStep.value || configurationLocked.value) {
+    return;
+  }
+  const steps = [...selectedStage.value.recordedSteps];
+  const currentIndex = steps.findIndex((step) => step.id === selectedStep.value?.id);
+  const targetIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= steps.length) return;
+  [steps[currentIndex], steps[targetIndex]] = [steps[targetIndex], steps[currentIndex]];
+  store.updateStage(lesson.value.id, selectedStage.value.id, { recordedSteps: steps });
+  showFeedback(direction === 'up' ? '节点已上移。' : '节点已下移。');
 }
 
-function numberValue(event: Event) {
-  return Number((event.target as HTMLInputElement).value);
+function undoLastStep() {
+  const lastStep = selectedStage.value?.recordedSteps.at(-1);
+  if (!lastStep) {
+    showFeedback('当前阶段没有可撤销的节点。', 'danger');
+    return;
+  }
+  removeRecordedStep(lastStep.id);
+}
+
+function saveCurrentStage() {
+  saveStage();
+  pauseRecording();
 }
 
 function publishLesson() {
   if (!lesson.value) return;
   try {
     store.publishLesson(lesson.value.id);
-    showFeedback('教案发布成功，现在可以进入考试设置并配置人员分组。');
+    showFeedback('教案发布成功，现在可以进入考试设置。');
   } catch (error) {
     showFeedback(error instanceof Error ? error.message : '发布校验未通过', 'danger');
+    openPanel('publish');
   }
+}
+
+function inputValue(event: Event) {
+  return (event.target as HTMLInputElement).value;
+}
+
+function resolveBusinessPlatformModuleUrl(baseUrl: string, path: string) {
+  if (!baseUrl) return '';
+  if (/^[a-z][a-z\d+.-]*:\/\//i.test(path)) return path;
+  if (baseUrl.startsWith('internal://')) {
+    return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+  }
+  try {
+    return new URL(path, baseUrl).toString();
+  } catch {
+    return `${baseUrl.replace(/\/$/, '')}/${path.replace(/^\//, '')}`;
+  }
+}
+
+function numberValue(event: Event) {
+  return Number((event.target as HTMLInputElement).value);
 }
 </script>
 
 <template>
-  <div v-if="lesson" class="page editor-page">
-    <PageHeader
-      eyebrow="LESSON WORKBENCH"
-      :title="lesson.title"
-      description="把录制步骤编排成任意数量的串行业务阶段，并定义每个角色的完成标准。"
+  <section v-if="lesson" ref="workspaceRef" class="authoring-workspace">
+    <main ref="businessLayerRef" class="business-layer" aria-label="下层业务系统操作界面">
+      <iframe
+        v-if="!useEmbeddedBusinessSimulation && businessPlatform"
+        class="configured-business-frame"
+        :src="effectiveBusinessPlatformUrl"
+        :title="`${businessPlatform.name}${businessPlatformModule ? ` / ${businessPlatformModule.name}` : ''}业务界面`"
+        @load="activityText = `业务模块“${businessPlatformModule?.name ?? businessPlatform.name}”已加载，可开始录制。`"
+      />
+      <template v-else>
+      <header class="business-header">
+        <div class="business-brand">
+          <span class="business-brand__mark">B</span>
+          <span>
+            <strong>{{ businessScenario.systemName }}</strong>
+            <small>BUSINESS OPERATION SYSTEM</small>
+          </span>
+        </div>
+        <label class="business-search">
+          <span>⌕</span>
+          <input aria-label="搜索业务功能" placeholder="搜索功能、单据或流程" />
+        </label>
+        <div class="business-user">
+          <span class="business-user__status">业务系统已连接</span>
+          <span class="business-avatar">薛</span>
+          <span><strong>薛老师</strong><small>业务操作员</small></span>
+        </div>
+      </header>
+
+      <div class="business-body">
+        <aside class="business-sidebar">
+          <span class="business-nav-title">业务工作台</span>
+          <nav>
+            <button type="button"><i>⌂</i>工作首页</button>
+            <button class="active" type="button"><i>▤</i>{{ businessScenario.pageTitle }}</button>
+            <button type="button"><i>⌛</i>待办中心 <em>3</em></button>
+            <button type="button"><i>✓</i>已办业务</button>
+            <button type="button"><i>◈</i>业务档案</button>
+            <button type="button"><i>▥</i>统计报表</button>
+          </nav>
+          <div class="business-sidebar__help">
+            <strong>业务操作环境</strong>
+            <span>当前页面用于真实界面上的教案步骤采集。</span>
+          </div>
+        </aside>
+
+        <section class="business-content">
+          <div class="business-breadcrumb">业务工作台 / {{ businessScenario.pageTitle }} / 新建单据</div>
+          <div class="business-page-title">
+            <div>
+              <h1>{{ businessScenario.pageTitle }}</h1>
+              <p>填写业务信息并提交审批，所有操作均可由上层教案编排蒙版采集。</p>
+            </div>
+            <button
+              class="business-primary target-create"
+              data-action="create"
+              type="button"
+              @click="captureBusinessAction('create')"
+            >
+              ＋ 新建业务单
+            </button>
+          </div>
+
+          <div class="business-stats">
+            <span><small>待提交</small><strong>12</strong><em>本周 +3</em></span>
+            <span><small>审批中</small><strong>7</strong><em>平均 1.6 天</em></span>
+            <span><small>已完成</small><strong>36</strong><em>完成率 92%</em></span>
+            <span><small>本月金额</small><strong>286.4 万</strong><em>预算内</em></span>
+          </div>
+
+          <div class="business-document-grid">
+            <article class="business-card business-form-card" data-business-target="form">
+              <div class="business-card__header">
+                <div>
+                  <span class="business-tag">待提交</span>
+                  <h2>{{ businessScenario.documentTitle }}</h2>
+                </div>
+                <span class="business-document-no">单据编号：系统自动生成</span>
+              </div>
+
+              <div class="business-form">
+                <label class="target-subject">
+                  <span>{{ businessScenario.subjectLabel }} <i>*</i></span>
+                  <input
+                    v-model="businessForm.subject"
+                    data-business-field="subject"
+                    :placeholder="businessScenario.subjectPlaceholder"
+                    @focus="captureBusinessAction('subject')"
+                  />
+                </label>
+                <label class="target-category">
+                  <span>{{ businessScenario.categoryLabel }} <i>*</i></span>
+                  <select
+                    v-model="businessForm.category"
+                    data-business-field="category"
+                    @change="captureBusinessAction('category')"
+                  >
+                    <option value="" disabled>请选择</option>
+                    <option
+                      v-for="option in businessScenario.categoryOptions"
+                      :key="option"
+                      :value="option"
+                    >
+                      {{ option }}
+                    </option>
+                  </select>
+                </label>
+                <label class="target-counterparty">
+                  <span>{{ businessScenario.counterpartyLabel }} <i>*</i></span>
+                  <input
+                    v-model="businessForm.counterparty"
+                    data-business-field="counterparty"
+                    :placeholder="businessScenario.counterpartyPlaceholder"
+                    @focus="captureBusinessAction('counterparty')"
+                  />
+                </label>
+                <label class="target-amount">
+                  <span>{{ businessScenario.amountLabel }} <i>*</i></span>
+                  <div class="amount-input">
+                    <b>¥</b>
+                    <input
+                      v-model="businessForm.amount"
+                      data-business-field="amount"
+                      type="number"
+                      placeholder="0.00"
+                      @focus="captureBusinessAction('amount')"
+                    />
+                  </div>
+                </label>
+                <label class="target-date">
+                  <span>{{ businessScenario.dateLabel }} <i>*</i></span>
+                  <input
+                    v-model="businessForm.date"
+                    data-business-field="date"
+                    type="date"
+                    @change="captureBusinessAction('date')"
+                  />
+                </label>
+                <label class="wide target-reason">
+                  <span>{{ businessScenario.reasonLabel }}</span>
+                  <textarea
+                    v-model="businessForm.reason"
+                    data-business-field="reason"
+                    rows="5"
+                    placeholder="请输入详细说明"
+                    @focus="captureBusinessAction('reason')"
+                  />
+                </label>
+              </div>
+
+              <div class="business-form-actions">
+                <button
+                  class="target-save"
+                  data-action="save"
+                  type="button"
+                  @click="captureBusinessAction('save')"
+                >
+                  保存草稿
+                </button>
+                <button
+                  class="business-dark target-approve"
+                  data-action="approve"
+                  type="button"
+                  @click="captureBusinessAction('approve')"
+                >
+                  审批通过
+                </button>
+                <button
+                  class="business-primary target-submit"
+                  data-action="submit"
+                  type="button"
+                  @click="captureBusinessAction('submit')"
+                >
+                  提交审批
+                </button>
+              </div>
+            </article>
+
+            <aside class="business-card business-summary">
+              <span class="business-tag">流程预览</span>
+              <h2>单据处理进度</h2>
+              <div class="business-process">
+                <span class="done"><i>✓</i><b>申请人填报</b><small>当前操作</small></span>
+                <span><i>2</i><b>部门负责人审批</b><small>等待处理</small></span>
+                <span><i>3</i><b>业务部门复核</b><small>等待处理</small></span>
+                <span><i>4</i><b>归档完成</b><small>流程结束</small></span>
+              </div>
+              <div class="business-summary__notice">
+                <strong>操作提示</strong>
+                <p>请确认必填信息完整。提交后，单据将自动流转至下一审批角色。</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </div>
+      </template>
+    </main>
+
+    <div
+      v-if="!controlsCollapsed && previewEnabled && selectedStep"
+      class="teaching-mask"
+      aria-label="录制节点蒙版预览"
     >
-      <RouterLink
-        class="button secondary"
-        :to="{ name: 'lesson-recording', params: { lessonId: lesson.id } }"
-      >
-        ▶ 录制回看
-      </RouterLink>
-      <button
-        class="primary"
-        type="button"
-        :disabled="configurationLocked"
-        @click="publishLesson"
-      >
-        {{ configurationLocked ? '考试已发布 · 配置冻结' : '发布教案' }}
-      </button>
-    </PageHeader>
-
-    <nav class="flow-nav" aria-label="业务配置流程">
-      <span class="active"><i>1</i> 教案编排</span>
-      <RouterLink :to="{ name: 'exam-setup', params: { lessonId: lesson.id } }">
-        <i>2</i> 考试设置
-      </RouterLink>
-      <RouterLink :to="{ name: 'group-setup', params: { lessonId: lesson.id } }">
-        <i>3</i> 分组设置
-      </RouterLink>
-      <RouterLink :to="{ name: 'exam-data', params: { lessonId: lesson.id } }">
-        <i>4</i> 考试数据
-      </RouterLink>
-      <RouterLink :to="{ name: 'publish-center', params: { lessonId: lesson.id } }">
-        <i>5</i> 发布任务
-      </RouterLink>
-    </nav>
-
-    <div v-if="feedback" class="notice" :class="feedbackTone">{{ feedback }}</div>
-    <div v-if="configurationLocked" class="notice">
-      此教案已有考试任务，当前版本已冻结以保护在考和历史成绩。需要调整时，请在教案列表复制为新版本后再编排。
+      <div
+        v-if="useEmbeddedBusinessSimulation"
+        class="target-highlight"
+        :class="highlightClass"
+        :style="highlightStyle"
+      />
+      <div class="teaching-bubble">
+        <span>步骤 {{ selectedStepIndex + 1 }} / {{ selectedStage?.recordedSteps.length }}</span>
+        <strong>{{ selectedStep.title }}</strong>
+        <p>{{ previewText }}</p>
+        <small>{{ selectedStep.pageTitle }} · {{ selectedStep.actionLabel }}</small>
+        <div>
+          <button
+            type="button"
+            :disabled="selectedStepIndex <= 0"
+            @click="selectedStepId = selectedStage!.recordedSteps[selectedStepIndex - 1].id"
+          >
+            上一步
+          </button>
+          <button
+            type="button"
+            :disabled="selectedStepIndex >= (selectedStage?.recordedSteps.length ?? 0) - 1"
+            @click="selectedStepId = selectedStage!.recordedSteps[selectedStepIndex + 1].id"
+          >
+            下一步
+          </button>
+        </div>
+      </div>
     </div>
 
-    <section
-      class="card basic-card"
-      :class="{ 'configuration-locked': configurationLocked }"
-    >
-      <div class="card-header">
+    <header v-if="!controlsCollapsed" class="authoring-commandbar">
+      <div class="authoring-heading">
+        <span class="recording-dot" :class="{ active: recording }" />
         <div>
-          <h2>基础信息与总分</h2>
-          <p>基础信息、标签和评分上限将贯穿考试发布与成绩展示。</p>
+          <small>教案编排 · 业务系统实时采集</small>
+          <strong>{{ lesson.title }}</strong>
         </div>
-        <div class="header-badges">
-          <StatusPill :status="lesson.status" />
-          <span>V{{ lesson.version }}</span>
-        </div>
+        <span class="version-badge">V{{ lesson.version }}</span>
+        <span v-if="businessPlatform" class="platform-context-badge">
+          {{ businessPlatform.name }}
+          <template v-if="businessPlatformModule">
+            / {{ businessPlatformModule.name }}
+          </template>
+        </span>
       </div>
-      <div class="card-body">
-        <div class="form-grid three">
-          <label>
-            <span>教案编号</span>
-            <input v-model="basicForm.code" />
-          </label>
-          <label>
-            <span>教案名称</span>
-            <input v-model="basicForm.title" />
-          </label>
-          <label>
-            <span>业务模块</span>
-            <input v-model="basicForm.moduleName" />
-          </label>
-          <label class="wide">
-            <span>教学简介</span>
-            <textarea v-model="basicForm.description" rows="3" />
-          </label>
-          <label>
-            <span>客观分上限</span>
-            <input v-model.number="basicForm.objectiveMaxScore" type="number" min="0" />
-          </label>
-          <label>
-            <span>主观分上限</span>
-            <input v-model.number="basicForm.subjectiveMaxScore" type="number" min="0" />
-          </label>
-          <label>
-            <span>标签（逗号分隔）</span>
-            <input v-model="basicForm.tags" placeholder="采购，审批，多角色" />
-          </label>
-        </div>
-        <div class="score-summary">
-          <span><small>教案总分</small><strong>{{ totalScore }}</strong></span>
-          <span><small>阶段客观分合计</small><strong>{{ objectiveStageScore }}</strong></span>
-          <span><small>动态阶段</small><strong>{{ lesson.stages.length }}</strong></span>
-          <span><small>录制步骤</small><strong>{{ recordedStepCount }}</strong></span>
-          <button class="secondary" type="button" @click="saveBasicInformation">保存基础信息</button>
-        </div>
+      <div class="command-actions">
+        <RouterLink class="command-link" :to="{ name: 'lesson-list' }">返回教案</RouterLink>
+        <button
+          v-if="!recording"
+          type="button"
+          :disabled="configurationLocked || !selectedStage"
+          @click="startRecording"
+        >
+          ● 开始录制
+        </button>
+        <button v-else type="button" @click="pauseRecording">Ⅱ 暂停</button>
+        <button type="button" :disabled="configurationLocked" @click="undoLastStep">
+          ↶ 撤销节点
+        </button>
+        <button type="button" :disabled="configurationLocked" @click="addRecordedStep">
+          ＋ 插入说明
+        </button>
+        <button type="button" :disabled="configurationLocked || !selectedStage" @click="saveCurrentStage">
+          保存本阶段
+        </button>
+        <button class="command-primary" type="button" :disabled="configurationLocked" @click="publishLesson">
+          发布教案
+        </button>
+        <RouterLink
+          class="command-link"
+          :to="{ name: 'lesson-recording', params: { lessonId: lesson.id } }"
+        >
+          录制回看
+        </RouterLink>
+        <a
+          v-if="businessPlatform && !useEmbeddedBusinessSimulation"
+          class="command-link"
+          :href="effectiveBusinessPlatformUrl"
+          target="_blank"
+          rel="noreferrer"
+        >
+          单独打开业务模块 ↗
+        </a>
       </div>
-    </section>
+    </header>
 
-    <section
-      class="editor-grid"
-      :class="{ 'configuration-locked': configurationLocked }"
-    >
-      <aside class="card stage-rail">
-        <div class="card-header">
-          <div>
-            <h2>阶段时间线</h2>
-            <p>不限角色数量，按实际业务顺序串联。</p>
-          </div>
-          <button class="primary compact" type="button" @click="addStage">＋ 阶段</button>
+    <aside v-if="!controlsCollapsed && showStagePanel" class="glass-panel stage-panel">
+      <div class="panel-header">
+        <div>
+          <small>FLOW & STEPS</small>
+          <h2>业务阶段与节点</h2>
         </div>
-        <div class="timeline">
-          <button
-            v-for="(stage, index) in lesson.stages"
-            :key="stage.id"
-            class="timeline-item"
-            :class="{ active: stage.id === selectedStageId }"
-            type="button"
-            @click="selectedStageId = stage.id"
-          >
-            <span class="stage-index">{{ index + 1 }}</span>
+        <button type="button" :disabled="configurationLocked" @click="addStage">＋ 阶段</button>
+      </div>
+      <div class="stage-list">
+        <article
+          v-for="(stage, index) in lesson.stages"
+          :key="stage.id"
+          class="stage-item"
+          :class="{ active: stage.id === selectedStageId }"
+        >
+          <button type="button" @click="selectedStageId = stage.id">
+            <span>{{ index + 1 }}</span>
             <span>
               <strong>{{ stage.name }}</strong>
               <small>{{ stage.groupKey || '未指定角色' }} · {{ stage.score }} 分</small>
             </span>
             <em>{{ stage.recordedSteps.length }}</em>
           </button>
-          <div v-if="!lesson.stages.length" class="empty-stage">
-            暂无阶段。添加第一个业务阶段开始编排。
-          </div>
-        </div>
-      </aside>
-
-      <main v-if="stageForm && selectedStage" class="stage-workspace">
-        <section class="card">
-          <div class="card-header">
-            <div>
-              <h2>阶段规则</h2>
-              <p>角色、计分与完成方式共同决定学员在该阶段的任务。</p>
-            </div>
-            <div class="inline-actions">
-              <button
-                type="button"
-                :disabled="lesson.stages[0]?.id === selectedStage.id"
-                @click="moveSelectedStage('up')"
-              >
-                ↑ 上移
-              </button>
-              <button
-                type="button"
-                :disabled="lesson.stages.at(-1)?.id === selectedStage.id"
-                @click="moveSelectedStage('down')"
-              >
-                ↓ 下移
-              </button>
-              <button class="danger" type="button" @click="removeSelectedStage">删除阶段</button>
-            </div>
-          </div>
-          <div class="card-body">
-            <div class="form-grid three">
-              <label>
-                <span>阶段名称</span>
-                <input v-model="stageForm.name" />
-              </label>
-              <label>
-                <span>阶段标识 stageKey</span>
-                <input v-model="stageForm.stageKey" />
-              </label>
-              <label>
-                <span>负责角色 groupKey</span>
-                <input v-model="stageForm.groupKey" placeholder="例如 maker / reviewer" />
-              </label>
-              <label>
-                <span>阶段分值</span>
-                <input v-model.number="stageForm.score" type="number" min="0" />
-              </label>
-              <label>
-                <span>完成方式 completionMethod</span>
-                <select v-model="stageForm.completionMethod">
-                  <option
-                    v-for="method in completionMethods"
-                    :key="method.value"
-                    :value="method.value"
-                  >
-                    {{ method.label }}
-                  </option>
-                </select>
-              </label>
-              <label class="required-toggle">
-                <span>任务要求</span>
-                <span>
-                  <input v-model="stageForm.required" type="checkbox" />
-                  {{ stageForm.required ? '必做阶段' : '选做阶段' }}
-                </span>
-              </label>
-              <label class="wide">
-                <span>教学说明</span>
-                <textarea
-                  v-model="stageForm.description"
-                  rows="4"
-                  placeholder="说明业务目标、前置条件、移交规则和易错点"
-                />
-              </label>
-            </div>
-
-            <div class="visibility-panel">
-              <div>
-                <strong>三种模式可见性</strong>
-                <small>同一教案可针对演示、练习和考试显示不同阶段。</small>
-              </div>
-              <label v-for="mode in modes" :key="mode.key">
-                <input v-model="stageForm.visibility[mode.key]" type="checkbox" />
-                <span><strong>{{ mode.label }}</strong><small>{{ mode.hint }}</small></span>
-              </label>
-            </div>
-            <div class="save-row">
-              <button class="primary" type="button" @click="saveStage">保存阶段规则</button>
-            </div>
-          </div>
-        </section>
-
-        <section class="card recording-card">
-          <div class="card-header">
-            <div>
-              <h2>录制步骤</h2>
-              <p>保留页面、动作、元素选择器、时长与逐步讲解，演示时不执行业务。</p>
-            </div>
-            <button class="secondary" type="button" @click="addRecordedStep">
-              ＋ 添加模拟录制步骤
-            </button>
-          </div>
-          <div class="recorded-list">
-            <article
-              v-for="(step, stepIndex) in selectedStage.recordedSteps"
+          <div v-if="stage.id === selectedStageId" class="step-list">
+            <button
+              v-for="(step, stepIndex) in stage.recordedSteps"
               :key="step.id"
-              class="recorded-step"
+              type="button"
+              :class="{ active: step.id === selectedStepId }"
+              @click="selectedStepId = step.id"
+              @dblclick="openPanel('step')"
             >
-              <span class="recorded-index">{{ stepIndex + 1 }}</span>
-              <div class="recorded-fields">
-                <label>
-                  <span>步骤标题</span>
-                  <input
-                    :value="step.title"
-                    @change="updateRecordedStep(step.id, { title: inputValue($event) })"
-                  />
-                </label>
-                <label>
-                  <span>页面 pageTitle</span>
-                  <input
-                    :value="step.pageTitle"
-                    @change="updateRecordedStep(step.id, { pageTitle: inputValue($event) })"
-                  />
-                </label>
-                <label>
-                  <span>动作 actionLabel</span>
-                  <input
-                    :value="step.actionLabel"
-                    @change="updateRecordedStep(step.id, { actionLabel: inputValue($event) })"
-                  />
-                </label>
-                <label>
-                  <span>选择器 selector</span>
-                  <input
-                    :value="step.selector"
-                    class="mono"
-                    @change="updateRecordedStep(step.id, { selector: inputValue($event) })"
-                  />
-                </label>
-                <label>
-                  <span>时长 durationSeconds（秒）</span>
-                  <input
-                    :value="step.durationSeconds"
-                    type="number"
-                    min="1"
-                    @change="
-                      updateRecordedStep(step.id, { durationSeconds: numberValue($event) })
-                    "
-                  />
-                </label>
-                <label class="step-note">
-                  <span>逐步讲解</span>
-                  <input
-                    :value="step.note"
-                    @change="updateRecordedStep(step.id, { note: inputValue($event) })"
-                  />
-                </label>
-              </div>
-              <button
-                class="danger compact"
-                type="button"
-                title="删除录制步骤"
-                @click="removeRecordedStep(step.id)"
-              >
-                删除
-              </button>
-            </article>
-            <div v-if="!selectedStage.recordedSteps.length" class="empty-state">
-              <div>
-                <strong>该阶段还没有录制步骤</strong><br />
-                可添加 Mock 步骤完善演示，也可等待后续接入真实录制数据。
-              </div>
+              <i>{{ stepIndex + 1 }}</i>
+              <span>
+                <strong>{{ step.title }}</strong>
+                <small>{{ step.kind === 'guide' ? '说明节点' : step.actionLabel }}</small>
+              </span>
+              <b v-if="step.id === selectedStepId">●</b>
+            </button>
+            <div v-if="!stage.recordedSteps.length" class="step-empty">
+              开始录制后，操作下层业务系统即可自动生成节点。
             </div>
           </div>
-        </section>
-      </main>
-
-      <section v-else class="card no-stage">
-        <div class="empty-state">
-          <div><strong>请选择或添加一个阶段</strong><br />阶段可按实际业务需要动态增加。</div>
+        </article>
+        <div v-if="!lesson.stages.length" class="stage-empty">
+          暂无业务阶段，请先添加阶段。
         </div>
-      </section>
-    </section>
+      </div>
+      <div class="stage-panel-actions">
+        <button type="button" :disabled="activeStageIndex <= 0" @click="moveSelectedStage('up')">
+          ↑ 上移
+        </button>
+        <button
+          type="button"
+          :disabled="activeStageIndex < 0 || activeStageIndex >= lesson.stages.length - 1"
+          @click="moveSelectedStage('down')"
+        >
+          ↓ 下移
+        </button>
+        <button type="button" @click="openPanel('stage')">阶段配置</button>
+      </div>
+    </aside>
 
-    <section class="card publish-check">
-      <div>
-        <span class="eyebrow">PUBLISH CHECK</span>
-        <h2>发布校验</h2>
-        <p>发布前检查基础信息、阶段分值、角色与录制步骤；通过后再进入考试设置。</p>
+    <aside v-if="!controlsCollapsed && showConfigPanel" class="glass-panel config-panel">
+      <div class="config-tabs">
+        <button :class="{ active: panelTab === 'stage' }" type="button" @click="panelTab = 'stage'">阶段</button>
+        <button :class="{ active: panelTab === 'step' }" type="button" @click="panelTab = 'step'">节点</button>
+        <button :class="{ active: panelTab === 'lesson' }" type="button" @click="panelTab = 'lesson'">教案</button>
+        <button :class="{ active: panelTab === 'publish' }" type="button" @click="panelTab = 'publish'">校验</button>
+        <button class="config-close" type="button" aria-label="关闭配置" @click="showConfigPanel = false">×</button>
       </div>
-      <div class="check-result">
-        <span v-if="!validationMessages.length" class="check-ok">✓ 校验通过，可以发布</span>
-        <ul v-else>
-          <li v-for="message in validationMessages" :key="message">{{ message }}</li>
-        </ul>
+
+      <div v-if="panelTab === 'stage' && stageForm" class="config-content">
+        <div class="config-title">
+          <div><small>STAGE RULE</small><h2>阶段规则</h2></div>
+          <button class="danger-text" type="button" @click="removeSelectedStage">删除</button>
+        </div>
+        <label>
+          <span>阶段名称</span>
+          <input v-model="stageForm.name" :disabled="configurationLocked" />
+        </label>
+        <div class="config-grid">
+          <label>
+            <span>阶段标识 stageKey</span>
+            <input v-model="stageForm.stageKey" :disabled="configurationLocked" />
+          </label>
+          <label>
+            <span>负责角色 groupKey</span>
+            <input v-model="stageForm.groupKey" :disabled="configurationLocked" />
+          </label>
+          <label>
+            <span>阶段分值</span>
+            <input v-model.number="stageForm.score" type="number" min="0" :disabled="configurationLocked" />
+          </label>
+          <label>
+            <span>完成方式 completionMethod</span>
+            <select v-model="stageForm.completionMethod" :disabled="configurationLocked">
+              <option v-for="method in completionMethods" :key="method.value" :value="method.value">
+                {{ method.label }}
+              </option>
+            </select>
+          </label>
+        </div>
+        <label>
+          <span>教学说明</span>
+          <textarea v-model="stageForm.description" rows="4" :disabled="configurationLocked" />
+        </label>
+        <div class="visibility-editor">
+          <span>模式可见性 visibility</span>
+          <label v-for="mode in modes" :key="mode.key">
+            <input v-model="stageForm.visibility[mode.key]" type="checkbox" :disabled="configurationLocked" />
+            {{ mode.label }}
+          </label>
+        </div>
+        <label class="checkbox-row">
+          <input v-model="stageForm.required" type="checkbox" :disabled="configurationLocked" />
+          必做业务阶段
+        </label>
+        <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveStage">
+          保存阶段规则
+        </button>
       </div>
-      <div class="publish-actions">
-        <button class="secondary" type="button" @click="publishLesson">执行发布校验</button>
+
+      <div v-else-if="panelTab === 'step'" class="config-content">
+        <div class="config-title">
+          <div><small>RECORDED STEP</small><h2>节点配置</h2></div>
+          <span v-if="selectedStep">{{ selectedStepIndex + 1 }} / {{ selectedStage?.recordedSteps.length }}</span>
+        </div>
+        <template v-if="selectedStep">
+          <label>
+            <span>步骤标题</span>
+            <input
+              :value="selectedStep.title"
+              :disabled="configurationLocked"
+              @change="updateRecordedStep(selectedStep.id, { title: inputValue($event) })"
+            />
+          </label>
+          <div class="config-grid">
+            <label>
+              <span>页面 pageTitle</span>
+              <input
+                :value="selectedStep.pageTitle"
+                :disabled="configurationLocked"
+                @change="updateRecordedStep(selectedStep.id, { pageTitle: inputValue($event) })"
+              />
+            </label>
+            <label>
+              <span>动作 actionLabel</span>
+              <input
+                :value="selectedStep.actionLabel"
+                :disabled="configurationLocked"
+                @change="updateRecordedStep(selectedStep.id, { actionLabel: inputValue($event) })"
+              />
+            </label>
+          </div>
+          <label>
+            <span>元素选择器 selector</span>
+            <input
+              class="mono"
+              :value="selectedStep.selector"
+              :disabled="configurationLocked"
+              @change="updateRecordedStep(selectedStep.id, { selector: inputValue($event) })"
+            />
+          </label>
+          <label>
+            <span>逐步讲解</span>
+            <textarea
+              :value="selectedStep.teachingText ?? selectedStep.note"
+              rows="4"
+              :disabled="configurationLocked"
+              @change="
+                updateRecordedStep(selectedStep.id, {
+                  teachingText: inputValue($event),
+                  note: inputValue($event)
+                })
+              "
+            />
+          </label>
+          <div class="config-grid">
+            <label>
+              <span>时长 durationSeconds</span>
+              <input
+                :value="selectedStep.durationSeconds"
+                type="number"
+                min="1"
+                :disabled="configurationLocked"
+                @change="updateRecordedStep(selectedStep.id, { durationSeconds: numberValue($event) })"
+              />
+            </label>
+            <label>
+              <span>失败策略</span>
+              <select
+                :value="selectedStep.failurePolicy ?? 'stop'"
+                :disabled="configurationLocked"
+                @change="
+                  updateRecordedStep(selectedStep.id, {
+                    failurePolicy: inputValue($event) as 'stop' | 'retry' | 'skip'
+                  })
+                "
+              >
+                <option value="stop">停止并等待处理</option>
+                <option value="retry">允许重试</option>
+                <option value="skip">允许跳过</option>
+              </select>
+            </label>
+          </div>
+          <label class="checkbox-row">
+            <input
+              type="checkbox"
+              :checked="selectedStep.required ?? true"
+              :disabled="configurationLocked"
+              @change="
+                updateRecordedStep(selectedStep.id, {
+                  required: ($event.target as HTMLInputElement).checked
+                })
+              "
+            />
+            必做节点
+          </label>
+          <div class="node-actions">
+            <button type="button" @click="moveRecordedStep('up')">↑ 上移</button>
+            <button type="button" @click="moveRecordedStep('down')">↓ 下移</button>
+            <button class="danger-text" type="button" @click="removeRecordedStep(selectedStep.id)">删除节点</button>
+          </div>
+        </template>
+        <div v-else class="config-empty">
+          请选择一个已录制节点，或操作下层业务系统生成新节点。
+        </div>
+      </div>
+
+      <div v-else-if="panelTab === 'lesson'" class="config-content">
+        <div class="config-title">
+          <div><small>LESSON SETTINGS</small><h2>教案基础配置</h2></div>
+          <span>V{{ lesson.version }}</span>
+        </div>
+        <div class="config-grid">
+          <label><span>教案编号</span><input v-model="basicForm.code" :disabled="configurationLocked" /></label>
+          <label><span>教案名称</span><input v-model="basicForm.title" :disabled="configurationLocked" /></label>
+        </div>
+        <label>
+          <span>录制业务平台</span>
+          <select v-model="basicForm.businessPlatformId" :disabled="configurationLocked">
+            <option
+              v-for="platform in store.state.businessPlatforms.filter((item) => item.status === 'ENABLED' || item.id === basicForm.businessPlatformId)"
+              :key="platform.id"
+              :value="platform.id"
+            >
+              {{ platform.name }} · {{ platform.baseUrl }}
+            </option>
+          </select>
+        </label>
+        <label>
+          <span>录制平台模块</span>
+          <select
+            v-model="basicForm.businessPlatformModuleId"
+            :disabled="configurationLocked || !basicForm.businessPlatformId"
+          >
+            <option value="" disabled>
+              {{
+                basicForm.businessPlatformId
+                  ? '请选择业务平台下的模块'
+                  : '请先选择业务平台'
+              }}
+            </option>
+            <option
+              v-for="businessModule in availableBasicBusinessModules"
+              :key="businessModule.id"
+              :value="businessModule.id"
+            >
+              {{ businessModule.name }} · {{ businessModule.path }}
+            </option>
+          </select>
+          <small v-if="basicForm.businessPlatformId && !availableBasicBusinessModules.length">
+            当前平台没有可用模块，请先由管理员在业务平台管理中新增。
+          </small>
+        </label>
+        <label><span>教学简介</span><textarea v-model="basicForm.description" rows="4" :disabled="configurationLocked" /></label>
+        <div class="config-grid">
+          <label><span>客观分上限</span><input v-model.number="basicForm.objectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
+          <label><span>主观分上限</span><input v-model.number="basicForm.subjectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
+        </div>
+        <label><span>标签（逗号分隔）</span><input v-model="basicForm.tags" :disabled="configurationLocked" /></label>
+        <div class="score-strip">
+          <span><small>教案总分</small><strong>{{ totalScore }}</strong></span>
+          <span><small>阶段分合计</small><strong>{{ objectiveStageScore }}</strong></span>
+          <span><small>录制节点</small><strong>{{ recordedStepCount }}</strong></span>
+        </div>
+        <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveBasicInformation">
+          保存基础信息
+        </button>
+      </div>
+
+      <div v-else class="config-content">
+        <div class="config-title">
+          <div><small>PUBLISH CHECK</small><h2>发布校验</h2></div>
+          <span>{{ validationMessages.length ? `${validationMessages.length} 项待处理` : '校验通过' }}</span>
+        </div>
+        <p class="publish-description">
+          发布前检查基础信息、阶段分值、角色与录制步骤；通过后再进入考试设置。
+        </p>
+        <div v-if="validationMessages.length" class="validation-list">
+          <span v-for="message in validationMessages" :key="message">! {{ message }}</span>
+        </div>
+        <div v-else class="validation-ok">✓ 教案完整，可执行发布</div>
+        <button class="panel-primary" type="button" :disabled="configurationLocked" @click="publishLesson">
+          执行发布校验
+        </button>
         <RouterLink
-          class="button primary next-step"
+          class="panel-next"
           :to="{ name: 'exam-setup', params: { lessonId: lesson.id } }"
         >
           下一步：考试设置 →
         </RouterLink>
       </div>
-    </section>
-  </div>
+    </aside>
+
+    <div v-if="!controlsCollapsed" class="quick-controls">
+      <button type="button" :class="{ active: showStagePanel }" @click="showStagePanel = !showStagePanel">
+        {{ showStagePanel ? '隐藏阶段' : '显示阶段' }}
+      </button>
+      <button type="button" :class="{ active: showConfigPanel }" @click="showConfigPanel = !showConfigPanel">
+        {{ showConfigPanel ? '隐藏配置' : '节点配置' }}
+      </button>
+      <button type="button" :class="{ active: previewEnabled }" @click="previewEnabled = !previewEnabled">
+        {{ previewEnabled ? '隐藏蒙版' : '显示蒙版' }}
+      </button>
+      <button type="button" @click="openPanel('lesson')">教案设置</button>
+      <button type="button" @click="openPanel('publish')">发布校验</button>
+    </div>
+
+    <footer v-if="!controlsCollapsed" class="authoring-status" aria-live="polite">
+      <span>{{ activityText }}</span>
+      <strong>{{ statusSummary }}</strong>
+    </footer>
+
+    <button class="collapse-controls" type="button" @click="controlsCollapsed = !controlsCollapsed">
+      {{ controlsCollapsed ? '展开编排操作' : '隐藏全部' }}
+    </button>
+
+    <div v-if="feedback && !controlsCollapsed" class="authoring-toast" :class="feedbackTone">
+      {{ feedback }}
+      <button type="button" aria-label="关闭提示" @click="feedback = ''">×</button>
+    </div>
+
+    <div v-if="configurationLocked" class="locked-shield">
+      <strong>当前教案版本已冻结</strong>
+      <span>该教案已有考试任务，只能查看下层业务界面和已录制蒙版；请复制为新版本后再修改。</span>
+      <RouterLink class="button primary" :to="{ name: 'lesson-list' }">返回教案列表</RouterLink>
+    </div>
+  </section>
 
   <section v-else class="standalone-state">
     <span>404</span>
@@ -612,463 +1439,1525 @@ function publishLesson() {
 </template>
 
 <style scoped>
-.editor-page {
-  display: grid;
-  gap: 16px;
-}
-
-.editor-page :deep(.page-header) {
-  margin-bottom: 0;
-}
-
-.flow-nav {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(120px, 1fr));
+.authoring-workspace {
+  position: relative;
+  height: 100vh;
+  min-height: 620px;
   overflow: hidden;
-  border: 1px solid #e5e8ef;
-  border-radius: 12px;
+  color: #172033;
+  background: #eef2f7;
+}
+
+.business-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: #f2f5f9;
+}
+
+.configured-business-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
   background: #fff;
 }
 
-.flow-nav a,
-.flow-nav span {
-  display: flex;
-  min-height: 52px;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-right: 1px solid #eceef3;
-  color: #707c8f;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.flow-nav > :last-child {
-  border-right: 0;
-}
-
-.flow-nav i {
+.business-header {
   display: grid;
-  width: 23px;
-  height: 23px;
-  place-items: center;
-  border-radius: 50%;
-  background: #eef1f6;
-  font-style: normal;
-  font-size: 10px;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(260px, 1.2fr) minmax(280px, 0.8fr);
+  height: 66px;
+  align-items: center;
+  gap: 24px;
+  border-bottom: 1px solid #dfe5ec;
+  padding: 0 24px;
+  background: #fff;
 }
 
-.flow-nav .active {
-  color: #5b4bd8;
-  background: #f4f1ff;
-}
-
-.flow-nav .active i {
-  color: #fff;
-  background: var(--purple);
-}
-
-.basic-card {
-  overflow: hidden;
-}
-
-.header-badges {
+.business-brand,
+.business-user,
+.business-heading {
   display: flex;
   align-items: center;
-  gap: 8px;
-  color: #788396;
-  font-size: 11px;
 }
 
-.score-summary {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  margin-top: 17px;
-  border-top: 1px dashed #e0e4ec;
-  padding-top: 16px;
+.business-brand {
+  gap: 10px;
 }
 
-.score-summary > span {
+.business-brand__mark {
   display: grid;
-  gap: 3px;
-}
-
-.score-summary small {
-  color: #8490a2;
-  font-size: 10px;
-}
-
-.score-summary strong {
-  font-size: 20px;
-}
-
-.score-summary button {
-  margin-left: auto;
-}
-
-.editor-grid {
-  display: grid;
-  grid-template-columns: 285px minmax(0, 1fr);
-  align-items: start;
-  gap: 16px;
-}
-
-.stage-rail {
-  position: sticky;
-  top: 88px;
-  overflow: hidden;
-}
-
-.compact {
-  min-height: 31px;
-  padding: 0 10px;
-  font-size: 11px;
-}
-
-.timeline {
-  display: grid;
-  padding: 10px;
-}
-
-.timeline-item {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  min-height: 64px;
-  align-items: center;
-  gap: 9px;
-  border: 1px solid transparent;
-  padding: 8px;
-  text-align: left;
-}
-
-.timeline-item:hover,
-.timeline-item.active {
-  border-color: #ded9ff;
-  background: #f7f5ff;
-  box-shadow: none;
-  transform: none;
-}
-
-.stage-index,
-.recorded-index {
-  display: grid;
-  width: 27px;
-  height: 27px;
+  width: 34px;
+  height: 34px;
   place-items: center;
   border-radius: 9px;
-  color: #6757da;
-  background: #efedff;
+  color: #fff;
+  background: #087f70;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.business-brand > span:last-child,
+.business-user > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.business-brand strong {
+  font-size: 14px;
+}
+
+.business-brand small {
+  color: #99a3b1;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.business-search {
+  position: relative;
+  display: block;
+}
+
+.business-search > span {
+  position: absolute;
+  z-index: 1;
+  left: 13px;
+  top: 50%;
+  color: #8d98a8;
+  transform: translateY(-50%);
+}
+
+.business-search input {
+  border-color: #e2e7ed;
+  border-radius: 7px;
+  padding-left: 38px;
+  background: #f7f9fb;
+  font-size: 12px;
+}
+
+.business-user {
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.business-user__status {
+  margin-right: 10px;
+  color: #16806f;
+  font-size: 10px;
+}
+
+.business-user__status::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #12a879;
+  content: "";
+}
+
+.business-avatar {
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border-radius: 8px;
+  color: #087f70;
+  background: #dff6f1;
   font-size: 11px;
   font-weight: 900;
 }
 
-.timeline-item > span:nth-child(2) {
-  display: grid;
-  min-width: 0;
-  gap: 4px;
+.business-user strong {
+  font-size: 11px;
 }
 
-.timeline-item strong {
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.timeline-item small {
-  color: #8b95a7;
+.business-user small {
+  color: #929cad;
   font-size: 9px;
 }
 
-.timeline-item em {
+.business-body {
   display: grid;
-  min-width: 21px;
-  height: 21px;
+  grid-template-columns: 208px minmax(0, 1fr);
+  height: calc(100% - 66px);
+}
+
+.business-sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #dde4ec;
+  padding: 22px 13px;
+  background: #202c3b;
+  color: #d8e0e9;
+}
+
+.business-nav-title {
+  margin: 0 10px 11px;
+  color: #8190a2;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+}
+
+.business-sidebar nav {
+  display: grid;
+  gap: 4px;
+}
+
+.business-sidebar nav button {
+  display: grid;
+  grid-template-columns: 24px 1fr auto;
+  min-height: 42px;
+  align-items: center;
+  border: 0;
+  padding: 0 11px;
+  color: #aeb9c7;
+  background: transparent;
+  text-align: left;
+  font-size: 11px;
+}
+
+.business-sidebar nav button:hover,
+.business-sidebar nav button.active {
+  color: #fff;
+  background: rgb(255 255 255 / 9%);
+  box-shadow: none;
+  transform: none;
+}
+
+.business-sidebar nav i {
+  font-style: normal;
+}
+
+.business-sidebar nav em {
+  display: grid;
+  width: 18px;
+  height: 18px;
   place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #c65e5e;
+  font-style: normal;
+  font-size: 8px;
+}
+
+.business-sidebar__help {
+  display: grid;
+  gap: 7px;
+  margin-top: auto;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 9px;
+  padding: 12px;
+  color: #9da9b8;
+  background: rgb(255 255 255 / 4%);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.business-sidebar__help strong {
+  color: #dce4ed;
+  font-size: 10px;
+}
+
+.business-content {
+  overflow: auto;
+  padding: 19px 26px 110px;
+}
+
+.business-breadcrumb {
+  margin-bottom: 13px;
+  color: #8d98a8;
+  font-size: 9px;
+}
+
+.business-page-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.business-page-title h1 {
+  margin: 0;
+  font-size: 23px;
+}
+
+.business-page-title p {
+  margin: 5px 0 0;
+  color: #7c8798;
+  font-size: 10px;
+}
+
+.business-primary,
+.business-dark {
+  color: #fff;
+}
+
+.business-primary {
+  border-color: #087f70;
+  background: #087f70;
+}
+
+.business-dark {
+  border-color: #2c3a4d;
+  background: #2c3a4d;
+}
+
+.business-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 11px;
+  margin: 16px 0;
+}
+
+.business-stats > span {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: end;
+  gap: 4px 10px;
+  border: 1px solid #e0e6ed;
+  border-radius: 9px;
+  padding: 12px 14px;
+  background: #fff;
+}
+
+.business-stats small {
+  grid-column: 1 / -1;
+  color: #7b8797;
+  font-size: 9px;
+}
+
+.business-stats strong {
+  font-size: 18px;
+}
+
+.business-stats em {
+  color: #148472;
+  font-style: normal;
+  font-size: 8px;
+}
+
+.business-document-grid {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) 250px;
+  align-items: start;
+  gap: 14px;
+}
+
+.business-card {
+  border: 1px solid #dfe5ec;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 4px 12px rgb(29 43 62 / 3%);
+}
+
+.business-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e7ebf0;
+  padding: 16px 18px;
+}
+
+.business-card__header > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.business-card h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.business-tag {
+  display: inline-flex;
+  width: max-content;
   border-radius: 999px;
-  color: #718096;
-  background: #eef1f5;
+  padding: 4px 8px;
+  color: #087f70;
+  background: #dff7f2;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.business-document-no {
+  color: #909aa9;
+  font-size: 9px;
+}
+
+.business-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 16px;
+  padding: 18px;
+}
+
+.business-form label {
+  color: #556274;
+  font-size: 10px;
+}
+
+.business-form label > span {
+  font-weight: 700;
+}
+
+.business-form label i {
+  color: #d34e59;
+  font-style: normal;
+}
+
+.business-form input,
+.business-form select,
+.business-form textarea {
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.business-form .wide {
+  grid-column: 1 / -1;
+}
+
+.amount-input {
+  position: relative;
+}
+
+.amount-input b {
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 11px;
+  color: #5c6879;
+  transform: translateY(-50%);
+}
+
+.amount-input input {
+  padding-left: 27px;
+}
+
+.business-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  border-top: 1px solid #e7ebf0;
+  padding: 13px 18px;
+}
+
+.business-form-actions button {
+  min-height: 35px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+
+.business-summary {
+  padding: 17px;
+}
+
+.business-summary h2 {
+  margin: 9px 0 17px;
+  font-size: 16px;
+}
+
+.business-process {
+  display: grid;
+  gap: 0;
+}
+
+.business-process > span {
+  position: relative;
+  display: grid;
+  grid-template-columns: 27px 1fr;
+  gap: 2px 9px;
+  min-height: 57px;
+}
+
+.business-process > span:not(:last-child)::after {
+  position: absolute;
+  top: 25px;
+  bottom: 2px;
+  left: 13px;
+  width: 1px;
+  background: #dfe5eb;
+  content: "";
+}
+
+.business-process i {
+  display: grid;
+  grid-row: 1 / 3;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border: 1px solid #d8dfe7;
+  border-radius: 50%;
+  color: #8995a5;
   font-style: normal;
   font-size: 9px;
 }
 
-.empty-stage {
-  padding: 25px 12px;
-  color: #8b95a7;
-  font-size: 11px;
-  line-height: 1.7;
-  text-align: center;
+.business-process .done i {
+  border-color: #0e8a76;
+  color: #fff;
+  background: #0e8a76;
 }
 
-.stage-workspace {
-  display: grid;
-  min-width: 0;
-  gap: 16px;
+.business-process b {
+  font-size: 10px;
 }
 
-.required-toggle > span:last-child {
-  display: flex;
-  min-height: 41px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid #dce1eb;
-  border-radius: 9px;
-  padding: 0 11px;
-  color: #4b586c;
-  background: #fff;
+.business-process small {
+  color: #919baa;
+  font-size: 8px;
 }
 
-.required-toggle input,
-.visibility-panel input {
-  width: auto;
-}
-
-.visibility-panel {
-  display: grid;
-  grid-template-columns: minmax(170px, 1fr) repeat(3, minmax(150px, 0.8fr));
-  align-items: stretch;
-  gap: 8px;
-  margin-top: 16px;
-  border-radius: 11px;
-  padding: 12px;
-  background: #f7f8fb;
-}
-
-.visibility-panel > div,
-.visibility-panel label {
-  display: flex;
-  align-items: center;
-}
-
-.visibility-panel > div {
-  display: grid;
-  gap: 4px;
-}
-
-.visibility-panel small {
-  color: #8993a4;
+.business-summary__notice {
+  margin-top: 7px;
+  border-radius: 7px;
+  padding: 11px;
+  color: #6e7887;
+  background: #f5f8fa;
   font-size: 9px;
-  line-height: 1.45;
 }
 
-.visibility-panel label {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px;
-  border: 1px solid #e4e7ee;
-  border-radius: 9px;
-  padding: 9px;
-  background: #fff;
+.business-summary__notice strong {
+  color: #415064;
 }
 
-.visibility-panel label span {
-  display: grid;
-  gap: 3px;
+.business-summary__notice p {
+  margin: 5px 0 0;
+  line-height: 1.6;
 }
 
-.visibility-panel label strong {
-  font-size: 11px;
+.authoring-commandbar,
+.glass-panel,
+.quick-controls,
+.authoring-status,
+.collapse-controls,
+.authoring-toast {
+  position: absolute;
+  z-index: 20;
 }
 
-.save-row {
+.authoring-commandbar {
+  top: 12px;
+  left: 12px;
+  right: 12px;
   display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid rgb(210 217 226 / 78%);
+  border-radius: 10px;
+  padding: 7px 9px 7px 13px;
+  background: rgb(249 251 253 / 74%);
+  box-shadow: 0 10px 30px rgb(27 38 55 / 10%);
+  backdrop-filter: blur(12px) saturate(1.12);
 }
 
-.recording-card {
-  overflow: hidden;
-}
-
-.recorded-list {
-  display: grid;
-}
-
-.recorded-step {
-  display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 11px;
-  border-bottom: 1px solid #edf0f5;
-  padding: 15px 18px;
-}
-
-.recorded-step:last-child {
-  border-bottom: 0;
-}
-
-.recorded-fields {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(110px, 1fr));
+.authoring-heading {
+  display: flex;
+  min-width: 260px;
+  align-items: center;
   gap: 9px;
 }
 
-.recorded-fields label {
-  min-width: 0;
+.authoring-heading > div {
+  display: grid;
+  gap: 2px;
 }
 
-.recorded-fields input {
-  padding: 8px;
+.authoring-heading small {
+  color: #7a8798;
+  font-size: 8px;
+}
+
+.authoring-heading strong {
+  overflow: hidden;
+  max-width: 270px;
   font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.step-note {
-  grid-column: 1 / -1;
+.recording-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #a9b2be;
+}
+
+.recording-dot.active {
+  background: #e35360;
+  box-shadow: 0 0 0 4px rgb(227 83 96 / 14%);
+  animation: recording-pulse 1.5s infinite;
+}
+
+.version-badge {
+  border: 1px solid #d8dee7;
+  border-radius: 999px;
+  padding: 3px 6px;
+  color: #758194;
+  background: rgb(255 255 255 / 72%);
+  font-size: 8px;
+}
+
+.platform-context-badge {
+  overflow: hidden;
+  max-width: 150px;
+  border: 1px solid #cde6df;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #087b69;
+  background: rgb(232 249 244 / 82%);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.command-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.command-actions button,
+.command-link {
+  display: inline-flex;
+  min-height: 31px;
+  align-items: center;
+  border: 1px solid rgb(54 67 84 / 20%);
+  border-radius: 7px;
+  padding: 0 10px;
+  color: #fff;
+  background: rgb(43 55 72 / 78%);
+  box-shadow: 0 5px 14px rgb(26 37 52 / 13%);
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.command-actions button:hover:not(:disabled),
+.command-link:hover {
+  border-color: rgb(43 55 72 / 55%);
+  background: rgb(31 42 57 / 94%);
+  box-shadow: 0 7px 17px rgb(26 37 52 / 20%);
+  transform: translateY(-1px);
+}
+
+.command-actions .command-primary {
+  border-color: rgb(90 72 223 / 60%);
+  background: rgb(91 73 224 / 88%);
+}
+
+.glass-panel {
+  border: 1px solid rgb(207 216 226 / 86%);
+  border-radius: 10px;
+  background: rgb(247 250 252 / 82%);
+  box-shadow: 0 16px 42px rgb(22 34 50 / 16%);
+  backdrop-filter: blur(16px) saturate(1.1);
+}
+
+.stage-panel {
+  top: 73px;
+  bottom: 61px;
+  left: 12px;
+  width: 310px;
+  overflow: hidden;
+}
+
+.panel-header {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid rgb(210 218 227 / 72%);
+  padding: 10px 12px;
+}
+
+.panel-header small,
+.config-title small {
+  color: #6f5ce4;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.panel-header h2,
+.config-title h2 {
+  margin: 2px 0 0;
+  font-size: 12px;
+}
+
+.panel-header button {
+  min-height: 28px;
+  border-color: #d3d9e2;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 8px;
+}
+
+.stage-list {
+  height: calc(100% - 101px);
+  overflow: auto;
+  padding: 8px;
+}
+
+.stage-item {
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 8px;
+}
+
+.stage-item + .stage-item {
+  margin-top: 5px;
+}
+
+.stage-item.active {
+  border-color: rgb(106 88 229 / 22%);
+  background: rgb(242 240 255 / 72%);
+}
+
+.stage-item > button {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 51px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  padding: 7px 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.stage-item > button:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.stage-item > button > span:first-child {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border-radius: 7px;
+  color: #6655d7;
+  background: #e7e3ff;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.stage-item > button > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.stage-item > button strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stage-item > button small {
+  color: #818c9d;
+  font-size: 8px;
+}
+
+.stage-item > button em {
+  display: grid;
+  min-width: 19px;
+  height: 19px;
+  place-items: center;
+  border-radius: 999px;
+  color: #687589;
+  background: #e7ebf0;
+  font-style: normal;
+  font-size: 8px;
+}
+
+.step-list {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid rgb(215 220 230 / 55%);
+  padding: 6px 7px 8px 32px;
+}
+
+.step-list > button {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 5px 6px;
+  background: rgb(255 255 255 / 48%);
+  text-align: left;
+}
+
+.step-list > button:hover,
+.step-list > button.active {
+  border-color: #cfc7ff;
+  background: rgb(255 255 255 / 88%);
+  box-shadow: none;
+  transform: none;
+}
+
+.step-list i {
+  display: grid;
+  width: 19px;
+  height: 19px;
+  place-items: center;
+  border-radius: 5px;
+  color: #596679;
+  background: #e8ecf2;
+  font-style: normal;
+  font-size: 7px;
+}
+
+.step-list > button > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.step-list strong {
+  overflow: hidden;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-list small {
+  color: #8994a5;
+  font-size: 7px;
+}
+
+.step-list b {
+  color: #6754dd;
+  font-size: 7px;
+}
+
+.step-empty,
+.stage-empty {
+  padding: 15px 7px;
+  color: #7e8999;
+  font-size: 8px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.stage-panel-actions {
+  display: flex;
+  height: 45px;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px solid rgb(210 218 227 / 72%);
+  padding: 7px 8px;
+}
+
+.stage-panel-actions button {
+  min-height: 27px;
+  flex: 1;
+  border-color: #d5dbe4;
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 8px;
+}
+
+.config-panel {
+  top: 73px;
+  right: 12px;
+  bottom: 61px;
+  width: 390px;
+  overflow: hidden;
+}
+
+.config-tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr) 36px;
+  min-height: 43px;
+  align-items: stretch;
+  border-bottom: 1px solid rgb(210 218 227 / 72%);
+  padding: 0 7px;
+}
+
+.config-tabs button {
+  min-height: 42px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 0 8px;
+  color: #758194;
+  background: transparent;
+  font-size: 8px;
+}
+
+.config-tabs button:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.config-tabs button.active {
+  border-bottom-color: #6856df;
+  color: #5745d1;
+}
+
+.config-tabs .config-close {
+  font-size: 18px;
+}
+
+.config-content {
+  display: grid;
+  max-height: calc(100% - 43px);
+  gap: 11px;
+  overflow: auto;
+  padding: 14px;
+}
+
+.config-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.config-title > span {
+  color: #7c8798;
+  font-size: 8px;
+}
+
+.config-content label {
+  gap: 5px;
+  font-size: 9px;
+}
+
+.config-content input,
+.config-content select,
+.config-content textarea {
+  border-radius: 6px;
+  padding: 8px 9px;
+  font-size: 9px;
+}
+
+.config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.visibility-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  border-radius: 7px;
+  padding: 9px;
+  background: rgb(237 241 246 / 85%);
+}
+
+.visibility-editor > span {
+  width: 100%;
+  color: #596679;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.visibility-editor label,
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.visibility-editor input,
+.checkbox-row input {
+  width: auto;
+}
+
+.panel-primary,
+.panel-next {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #6552dd;
+  border-radius: 7px;
+  color: #fff;
+  background: #6552dd;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.danger-text {
+  min-height: 27px;
+  border-color: #ffd5d9;
+  padding: 0 8px;
+  color: #c7434f;
+  background: #fff4f5;
+  font-size: 8px;
+}
+
+.node-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.node-actions button {
+  min-height: 29px;
+  flex: 1;
+  border-color: #d5dbe4;
+  padding: 0 7px;
+  font-size: 8px;
 }
 
 .mono {
   font-family: "Cascadia Code", Consolas, monospace;
 }
 
-.no-stage {
-  min-height: 340px;
-}
-
-.publish-check {
+.score-strip {
   display: grid;
-  grid-template-columns: minmax(230px, 0.9fr) minmax(270px, 1.3fr) auto;
-  align-items: center;
-  gap: 20px;
-  padding: 20px;
-  background:
-    radial-gradient(circle at 90% 0, rgb(109 93 252 / 10%), transparent 35%),
-    #fff;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
 }
 
-.publish-check h2,
-.publish-check p {
+.score-strip > span {
+  display: grid;
+  gap: 3px;
+  border-radius: 7px;
+  padding: 9px;
+  background: #eef2f6;
+}
+
+.score-strip small {
+  color: #7c8798;
+  font-size: 7px;
+}
+
+.score-strip strong {
+  font-size: 15px;
+}
+
+.publish-description {
   margin: 0;
-}
-
-.publish-check p {
-  margin-top: 6px;
-  color: #798497;
-  font-size: 11px;
+  color: #6f7b8c;
+  font-size: 9px;
   line-height: 1.65;
 }
 
-.check-result {
-  color: #bd4852;
-  font-size: 11px;
+.validation-list {
+  display: grid;
+  gap: 6px;
 }
 
-.check-result ul {
-  margin: 0;
-  padding-left: 18px;
+.validation-list span,
+.validation-ok {
+  border-radius: 7px;
+  padding: 9px;
+  font-size: 8px;
 }
 
-.check-result li + li {
-  margin-top: 5px;
+.validation-list span {
+  color: #b13f4a;
+  background: #fff2f3;
 }
 
-.check-ok {
-  color: #07835e;
-  font-weight: 800;
+.validation-ok {
+  color: #08755f;
+  background: #e8f8f3;
 }
 
-.publish-actions {
+.config-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  color: #7b8798;
+  font-size: 9px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.quick-controls {
+  right: 117px;
+  bottom: 13px;
   display: flex;
-  gap: 8px;
+  gap: 5px;
 }
 
-.next-step {
-  display: inline-flex;
+.quick-controls button,
+.collapse-controls {
+  min-height: 31px;
+  border-color: rgb(44 57 75 / 22%);
+  border-radius: 7px;
+  padding: 0 9px;
+  color: #fff;
+  background: rgb(45 58 77 / 72%);
+  box-shadow: 0 6px 17px rgb(25 36 51 / 13%);
+  backdrop-filter: blur(10px);
+  font-size: 8px;
+}
+
+.quick-controls button.active {
+  background: rgb(91 73 224 / 82%);
+}
+
+.collapse-controls {
+  right: 13px;
+  bottom: 13px;
+  min-width: 96px;
+}
+
+.authoring-status {
+  bottom: 13px;
+  left: 12px;
+  display: flex;
+  width: min(650px, calc(100% - 610px));
+  min-height: 32px;
   align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  border: 1px solid rgb(208 217 227 / 80%);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #566276;
+  background: rgb(248 250 252 / 74%);
+  box-shadow: 0 7px 20px rgb(28 40 57 / 9%);
+  backdrop-filter: blur(12px);
+  font-size: 8px;
+}
+
+.authoring-status span {
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.configuration-locked input,
-.configuration-locked select,
-.configuration-locked textarea,
-.configuration-locked button {
+.authoring-status strong {
+  color: #445064;
+  white-space: nowrap;
+}
+
+.authoring-toast {
+  top: 76px;
+  left: 50%;
+  display: flex;
+  min-width: 280px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #bce6da;
+  border-radius: 8px;
+  padding: 9px 10px 9px 13px;
+  color: #08755f;
+  background: rgb(235 250 246 / 94%);
+  box-shadow: 0 12px 30px rgb(23 52 45 / 14%);
+  font-size: 9px;
+  transform: translateX(-50%);
+}
+
+.authoring-toast.danger {
+  border-color: #f1c3c7;
+  color: #b23d48;
+  background: rgb(255 242 243 / 96%);
+}
+
+.authoring-toast button {
+  min-height: 22px;
+  border: 0;
+  padding: 0 4px;
+  color: inherit;
+  background: transparent;
+}
+
+.teaching-mask {
+  position: absolute;
+  z-index: 12;
+  inset: 0;
+  overflow: hidden;
   pointer-events: none;
-  opacity: 0.62;
 }
 
-.editor-grid.configuration-locked .timeline-item {
+.target-highlight {
+  position: absolute;
+  z-index: 1;
+  border: 2px solid #6e5df3;
+  border-radius: 8px;
+  box-shadow:
+    0 0 0 9999px rgb(22 31 44 / 31%),
+    0 0 0 5px rgb(110 93 243 / 19%),
+    0 9px 28px rgb(26 36 52 / 21%);
+  transition: all 200ms ease;
+}
+
+.target-highlight.target-create {
+  top: 103px;
+  right: 27px;
+  width: 119px;
+  height: 40px;
+}
+
+.target-highlight.target-subject {
+  top: 299px;
+  left: 235px;
+  width: calc((100% - 529px) / 2);
+  height: 65px;
+}
+
+.target-highlight.target-category {
+  top: 299px;
+  left: calc(235px + (100% - 529px) / 2 + 16px);
+  width: calc((100% - 529px) / 2);
+  height: 65px;
+}
+
+.target-highlight.target-counterparty {
+  top: 378px;
+  left: 235px;
+  width: calc((100% - 529px) / 2);
+  height: 65px;
+}
+
+.target-highlight.target-amount {
+  top: 378px;
+  left: calc(235px + (100% - 529px) / 2 + 16px);
+  width: calc((100% - 529px) / 2);
+  height: 65px;
+}
+
+.target-highlight.target-date {
+  top: 457px;
+  left: 235px;
+  width: calc((100% - 529px) / 2);
+  height: 65px;
+}
+
+.target-highlight.target-reason {
+  top: 536px;
+  left: 235px;
+  width: calc(100% - 529px);
+  height: 112px;
+}
+
+.target-highlight.target-save {
+  right: 251px;
+  bottom: 117px;
+  width: 83px;
+  height: 37px;
+}
+
+.target-highlight.target-approve {
+  right: 157px;
+  bottom: 117px;
+  width: 87px;
+  height: 37px;
+}
+
+.target-highlight.target-submit {
+  right: 58px;
+  bottom: 117px;
+  width: 92px;
+  height: 37px;
+}
+
+.target-highlight.target-generic-0,
+.target-highlight.target-generic-1,
+.target-highlight.target-generic-2 {
+  top: 299px;
+  left: 235px;
+  width: calc((100% - 529px) / 2);
+  height: 65px;
+}
+
+.target-highlight.target-generic-1 {
+  left: calc(235px + (100% - 529px) / 2 + 16px);
+}
+
+.target-highlight.target-generic-2 {
+  top: 378px;
+}
+
+.teaching-bubble {
+  position: absolute;
+  z-index: 2;
+  top: 159px;
+  left: 50%;
+  display: grid;
+  width: min(330px, calc(100% - 40px));
+  gap: 7px;
+  border: 1px solid rgb(215 220 231 / 94%);
+  border-radius: 10px;
+  padding: 13px;
+  color: #273246;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 17px 45px rgb(20 31 48 / 22%);
+  backdrop-filter: blur(12px);
+  transform: translateX(-18%);
   pointer-events: auto;
-  opacity: 1;
 }
 
-@media (max-width: 1180px) {
-  .editor-grid {
-    grid-template-columns: 240px minmax(0, 1fr);
+.teaching-bubble > span {
+  color: #6855dc;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.teaching-bubble > strong {
+  font-size: 13px;
+}
+
+.teaching-bubble p {
+  margin: 0;
+  color: #647084;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.teaching-bubble small {
+  color: #929cab;
+  font-size: 8px;
+}
+
+.teaching-bubble > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.teaching-bubble button {
+  min-height: 27px;
+  border-color: #d7dce5;
+  border-radius: 6px;
+  padding: 0 8px;
+  font-size: 8px;
+}
+
+.locked-shield {
+  position: absolute;
+  z-index: 50;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 9px;
+  padding: 25px;
+  color: #7b4d19;
+  background: rgb(255 250 235 / 76%);
+  backdrop-filter: blur(3px);
+  text-align: center;
+}
+
+.locked-shield strong {
+  font-size: 18px;
+}
+
+.locked-shield span {
+  max-width: 520px;
+  font-size: 11px;
+  line-height: 1.7;
+}
+
+@keyframes recording-pulse {
+  50% {
+    box-shadow: 0 0 0 7px rgb(227 83 96 / 4%);
+  }
+}
+
+@media (max-width: 1250px) {
+  .authoring-heading {
+    min-width: auto;
   }
 
-  .recorded-fields,
-  .visibility-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .authoring-heading strong {
+    max-width: 150px;
   }
 
-  .visibility-panel > div {
-    grid-column: 1 / -1;
+  .command-actions button,
+  .command-link {
+    padding: 0 7px;
+    font-size: 8px;
   }
 
-  .publish-check {
+  .business-document-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .business-summary {
+    display: none;
+  }
+
+  .target-highlight.target-subject,
+  .target-highlight.target-counterparty,
+  .target-highlight.target-date,
+  .target-highlight.target-generic-0,
+  .target-highlight.target-generic-2 {
+    width: calc((100% - 279px) / 2);
+  }
+
+  .target-highlight.target-category,
+  .target-highlight.target-amount,
+  .target-highlight.target-generic-1 {
+    left: calc(235px + (100% - 279px) / 2 + 16px);
+    width: calc((100% - 279px) / 2);
+  }
+
+  .target-highlight.target-reason {
+    width: calc(100% - 279px);
+  }
+
+  .authoring-status {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .authoring-workspace {
+    min-height: 720px;
+  }
+
+  .business-header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .business-search,
+  .business-user__status,
+  .business-user > span:last-child {
+    display: none;
+  }
+
+  .business-body {
+    grid-template-columns: 70px minmax(0, 1fr);
+  }
+
+  .business-sidebar {
+    padding-inline: 8px;
+  }
+
+  .business-nav-title,
+  .business-sidebar nav button:not(.active),
+  .business-sidebar__help,
+  .business-sidebar nav button.active {
+    font-size: 0;
+  }
+
+  .business-sidebar nav button {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    padding: 0;
+  }
+
+  .business-sidebar nav i {
+    font-size: 13px;
+  }
+
+  .business-content {
+    padding-inline: 16px;
+  }
+
+  .business-stats {
     grid-template-columns: 1fr 1fr;
   }
 
-  .publish-actions {
-    grid-column: 1 / -1;
-    justify-content: flex-end;
+  .authoring-commandbar {
+    align-items: flex-start;
+  }
+
+  .command-actions {
+    max-width: 520px;
+    flex-wrap: wrap;
+  }
+
+  .command-actions .command-link:last-child,
+  .command-actions button:nth-of-type(3) {
+    display: none;
+  }
+
+  .stage-panel {
+    width: 280px;
+  }
+
+  .config-panel {
+    width: 350px;
+  }
+
+  .target-highlight {
+    display: none;
   }
 }
 
-@media (max-width: 820px) {
-  .flow-nav {
+@media (max-width: 720px) {
+  .authoring-workspace {
+    height: 100vh;
+    min-height: 650px;
+  }
+
+  .business-content {
+    padding: 16px 10px 100px;
+  }
+
+  .business-stats {
+    display: none;
+  }
+
+  .business-document-grid {
+    margin-top: 14px;
+  }
+
+  .business-form {
     grid-template-columns: 1fr;
   }
 
-  .flow-nav a,
-  .flow-nav span {
-    min-height: 42px;
-    border-right: 0;
-    border-bottom: 1px solid #eceef3;
-  }
-
-  .editor-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .stage-rail {
-    position: static;
-  }
-}
-
-@media (max-width: 620px) {
-  .score-summary {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-  }
-
-  .score-summary button {
-    grid-column: 1 / -1;
-    margin-left: 0;
-  }
-
-  .recorded-fields,
-  .visibility-panel,
-  .publish-check {
-    grid-template-columns: 1fr;
-  }
-
-  .recorded-step {
-    grid-template-columns: 26px minmax(0, 1fr);
-  }
-
-  .recorded-step > button {
-    grid-column: 2;
-    justify-self: start;
-  }
-
-  .visibility-panel > div,
-  .publish-actions {
+  .business-form .wide {
     grid-column: auto;
   }
 
-  .publish-actions {
-    flex-direction: column;
+  .authoring-heading,
+  .command-actions .command-link,
+  .command-actions button:nth-of-type(2),
+  .command-actions button:nth-of-type(3),
+  .command-actions button:nth-of-type(4) {
+    display: none;
+  }
+
+  .authoring-commandbar {
+    justify-content: flex-end;
+  }
+
+  .stage-panel,
+  .config-panel {
+    top: 69px;
+    right: 8px;
+    bottom: 55px;
+    left: 8px;
+    width: auto;
+  }
+
+  .config-panel {
+    z-index: 25;
+  }
+
+  .quick-controls {
+    right: 112px;
+    left: 8px;
+    overflow-x: auto;
+  }
+
+  .quick-controls button:nth-child(n + 4) {
+    display: none;
+  }
+
+  .teaching-bubble {
+    top: 125px;
+    left: 50%;
+    transform: translateX(-50%);
   }
 }
 </style>

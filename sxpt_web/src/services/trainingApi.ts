@@ -1,5 +1,9 @@
-import { createMockTrainingState } from '../data/mockSeed';
-import type { PortalRole, StorageLike, TrainingState } from '../domain/models';
+
+import {
+  createDefaultBusinessPlatforms,
+  createMockTrainingState
+} from '../data/mockSeed';
+import type { StorageLike, TrainingState } from '../domain/models';
 
 export const TRAINING_STORAGE_KEY = 'sxpt_web.training.demo.v1';
 export const AUTH_SESSION_STORAGE_KEY = 'sxpt_web.auth.session.v1';
@@ -1035,6 +1039,9 @@ function isTrainingState(value: unknown): value is TrainingState {
       value.currentRole === 'student') &&
     Array.isArray(value.lessons) &&
     value.lessons.every(isLessonRecord) &&
+    (!('businessPlatforms' in value) ||
+      (Array.isArray(value.businessPlatforms) &&
+        value.businessPlatforms.every(isBusinessPlatformRecord))) &&
     isRecord(value.examSettings) &&
     isRecord(value.groupPlans) &&
     isRecord(value.unitDataPlans) &&
@@ -1061,6 +1068,27 @@ function isTrainingState(value: unknown): value is TrainingState {
             Array.isArray(item.audit)
         )
     )
+  );
+}
+
+function isBusinessPlatformRecord(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.baseUrl === 'string' &&
+    (!('modules' in value) ||
+      (Array.isArray(value.modules) &&
+        value.modules.every(isBusinessPlatformModuleRecord)))
+  );
+}
+
+function isBusinessPlatformModuleRecord(value: unknown) {
+  return (
+    isRecord(value) &&
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.path === 'string'
   );
 }
 
@@ -1107,6 +1135,41 @@ function isStudentTaskRecord(value: unknown) {
  */
 function normalizeState(state: TrainingState): TrainingState {
   const normalized = clone(state);
+  const defaultPlatforms = createDefaultBusinessPlatforms();
+  const storedPlatforms =
+    Array.isArray(normalized.businessPlatforms) &&
+    normalized.businessPlatforms.length > 0
+      ? normalized.businessPlatforms
+      : defaultPlatforms;
+  normalized.businessPlatforms = storedPlatforms.map((platform) => ({
+    ...platform,
+    modules: Array.isArray(platform.modules)
+      ? platform.modules
+      : clone(
+          defaultPlatforms.find((candidate) => candidate.code === platform.code)
+            ?.modules ?? []
+        )
+  }));
+  normalized.lessons = normalized.lessons.map((lesson) => ({
+    ...lesson,
+    businessPlatformId:
+      lesson.businessPlatformId ||
+      resolveLegacyBusinessPlatformId(
+        lesson.moduleName,
+        normalized.businessPlatforms
+      ),
+    businessPlatformModuleId:
+      lesson.businessPlatformModuleId ||
+      resolveLegacyBusinessPlatformModuleId(
+        lesson.businessPlatformId ||
+          resolveLegacyBusinessPlatformId(
+            lesson.moduleName,
+            normalized.businessPlatforms
+          ),
+        lesson.moduleName,
+        normalized.businessPlatforms
+      )
+  }));
   normalized.studentTasks = normalized.studentTasks.map((task) => ({
     ...task,
     groupKeys:
@@ -1131,6 +1194,47 @@ function normalizeState(state: TrainingState): TrainingState {
     });
   });
   return normalized;
+}
+
+function resolveLegacyBusinessPlatformId(
+  moduleName: string,
+  platforms: TrainingState['businessPlatforms']
+) {
+  const code = moduleName.includes('报销') || moduleName.includes('财务')
+    ? 'EXPENSE'
+    : moduleName.includes('合同')
+      ? 'CONTRACT'
+      : 'PURCHASE';
+  return (
+    platforms.find((platform) => platform.code === code)?.id ??
+    platforms.find((platform) => platform.status === 'ENABLED')?.id ??
+    platforms[0]?.id ??
+    ''
+  );
+}
+
+function resolveLegacyBusinessPlatformModuleId(
+  platformId: string,
+  moduleName: string,
+  platforms: TrainingState['businessPlatforms']
+) {
+  const modules =
+    platforms.find((platform) => platform.id === platformId)?.modules ?? [];
+  const keywords = moduleName
+    .split(/[\s、/与及管理业务]+/)
+    .map((keyword) => keyword.trim())
+    .filter((keyword) => keyword.length >= 2);
+  return (
+    modules.find((module) =>
+      keywords.some(
+        (keyword) =>
+          module.name.includes(keyword) || module.description.includes(keyword)
+      )
+    )?.id ??
+    modules.find((module) => module.status === 'ENABLED')?.id ??
+    modules[0]?.id ??
+    ''
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
