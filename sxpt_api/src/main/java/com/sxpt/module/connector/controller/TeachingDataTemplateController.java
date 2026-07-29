@@ -2,11 +2,13 @@ package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
 import com.sxpt.module.connector.dto.CreateTeachingDataTemplateRequest;
+import com.sxpt.module.connector.dto.UpdateTeachingDataTemplateRequest;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.service.TeachingDataTemplateService;
 import com.sxpt.module.connector.vo.TeachingDataTemplateVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -55,6 +57,53 @@ public class TeachingDataTemplateController {
     }
 
     /**
+     * 查询教学业务数据模板详情。
+     *
+     * @param id 模板 ID。
+     * @return 教学业务数据模板详情。
+     */
+    @GetMapping("/{id}")
+    public ApiResult<TeachingDataTemplateVO> detail(@PathVariable String id) {
+        return ApiResult.success(toVO(teachingDataTemplateService.getTeachingDataTemplateById(id)));
+    }
+
+    /**
+     * 更新教学业务数据模板。
+     *
+     * @param id 模板 ID。
+     * @param request 更新教学业务数据模板请求。
+     * @return 已更新的教学业务数据模板。
+     */
+    @PostMapping("/{id}/update")
+    public ApiResult<TeachingDataTemplateVO> update(@PathVariable String id,
+                                                    @Valid @RequestBody UpdateTeachingDataTemplateRequest request) {
+        TeachingDataTemplate template = toUpdateEntity(id, request);
+        return ApiResult.success(toVO(teachingDataTemplateService.updateTeachingDataTemplate(template)));
+    }
+
+    /**
+     * 启用教学业务数据模板。
+     *
+     * @param id 模板 ID。
+     * @return 已启用的教学业务数据模板。
+     */
+    @PostMapping("/{id}/enable")
+    public ApiResult<TeachingDataTemplateVO> enable(@PathVariable String id) {
+        return ApiResult.success(toVO(teachingDataTemplateService.enableTeachingDataTemplate(id)));
+    }
+
+    /**
+     * 停用教学业务数据模板。
+     *
+     * @param id 模板 ID。
+     * @return 已停用的教学业务数据模板。
+     */
+    @PostMapping("/{id}/disable")
+    public ApiResult<TeachingDataTemplateVO> disable(@PathVariable String id) {
+        return ApiResult.success(toVO(teachingDataTemplateService.disableTeachingDataTemplate(id)));
+    }
+
+    /**
      * 查询指定原平台下的教学业务数据模板。
      *
      * @param tenantId 租户 ID。
@@ -63,8 +112,16 @@ public class TeachingDataTemplateController {
      */
     @GetMapping
     public ApiResult<List<TeachingDataTemplateVO>> listByConnector(@RequestParam String tenantId,
-                                                                   @RequestParam String connectorSystemId) {
-        return ApiResult.success(toVOList(teachingDataTemplateService.listTemplatesByConnector(tenantId, connectorSystemId)));
+                                                                   @RequestParam String connectorSystemId,
+                                                                   @RequestParam(required = false) String moduleCode,
+                                                                   @RequestParam(required = false) String sceneType) {
+        if (moduleCode != null && moduleCode.trim().length() > 0
+                && sceneType != null && sceneType.trim().length() > 0) {
+            return ApiResult.success(toVOList(teachingDataTemplateService
+                    .listTemplatesByModuleAndScene(tenantId, connectorSystemId, moduleCode, sceneType)));
+        }
+        return ApiResult.success(toVOList(teachingDataTemplateService
+                .listTemplatesByConnector(tenantId, connectorSystemId)));
     }
 
     /**
@@ -100,9 +157,40 @@ public class TeachingDataTemplateController {
         template.setTemplateCode(request.getTemplateCode());
         template.setTemplateName(request.getTemplateName());
         template.setSceneType(request.getSceneType());
+        template.setModuleCode(request.getModuleCode());
+        template.setStrategyId(request.getStrategyId());
         template.setInitState(request.getInitState());
         template.setSupportMode(request.getSupportMode());
         template.setConfigJson(request.getConfigJson());
+        return template;
+    }
+
+    /**
+     * 将更新请求转换为数据模板实体。
+     *
+     * @param id 模板 ID。
+     * @param request 更新教学业务数据模板请求。
+     * @return 教学业务数据模板实体。
+     */
+    private TeachingDataTemplate toUpdateEntity(String id, UpdateTeachingDataTemplateRequest request) {
+        TeachingDataTemplate template = new TeachingDataTemplate();
+        template.setId(id);
+        template.setTeachingPointId(request.getTeachingPointId());
+        template.setTemplateName(request.getTemplateName());
+        template.setSceneType(request.getSceneType());
+        template.setModuleCode(request.getModuleCode());
+        template.setStrategyId(request.getStrategyId());
+        template.setInitState(request.getInitState());
+        template.setSupportMode(request.getSupportMode());
+        template.setConfigJson(request.getConfigJson());
+        template.setDataSchemaJson(request.getDataSchemaJson());
+        template.setMockRuleJson(request.getMockRuleJson());
+        template.setReadonlyFlag(request.getReadonlyFlag());
+        template.setRequestSchemaJson(request.getRequestSchemaJson());
+        template.setRequiredOrgRoleJson(request.getRequiredOrgRoleJson());
+        template.setResultCheckSchemaJson(request.getResultCheckSchemaJson());
+        template.setSensitiveFieldPolicyJson(request.getSensitiveFieldPolicyJson());
+        template.setUpdateBy(request.getUpdateBy());
         return template;
     }
 
@@ -135,9 +223,18 @@ public class TeachingDataTemplateController {
         vo.setTemplateCode(template.getTemplateCode());
         vo.setTemplateName(template.getTemplateName());
         vo.setSceneType(template.getSceneType());
+        vo.setModuleCode(template.getModuleCode());
+        vo.setStrategyId(template.getStrategyId());
         vo.setInitState(template.getInitState());
         vo.setSupportMode(template.getSupportMode());
         vo.setConfigJson(template.getConfigJson());
+        vo.setDataSchemaJson(template.getDataSchemaJson());
+        vo.setMockRuleJson(template.getMockRuleJson());
+        vo.setReadonlyFlag(template.getReadonlyFlag());
+        vo.setRequestSchemaJson(template.getRequestSchemaJson());
+        vo.setRequiredOrgRoleJson(template.getRequiredOrgRoleJson());
+        vo.setResultCheckSchemaJson(template.getResultCheckSchemaJson());
+        vo.setSensitiveFieldPolicyJson(template.getSensitiveFieldPolicyJson());
         vo.setStatus(template.getStatus());
         vo.setCreateTime(template.getCreateTime());
         vo.setUpdateTime(template.getUpdateTime());

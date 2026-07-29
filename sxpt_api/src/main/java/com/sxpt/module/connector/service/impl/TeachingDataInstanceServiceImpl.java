@@ -6,6 +6,8 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.TeachingDataInstanceService;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,18 +31,6 @@ import java.util.List;
 @Service
 @Profile("!test")
 public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceService {
-
-    private static final String DEFAULT_INSTANCE_STATUS = "CREATED";
-
-    private static final String INSTANCE_STATUS_LOCKED = "LOCKED";
-
-    private static final String INSTANCE_STATUS_DISCARDED = "DISCARDED";
-
-    private static final String INSTANCE_STATUS_RESET = "RESET";
-
-    private static final String DEFAULT_STATUS = "ACTIVE";
-
-    private static final String DISABLED_STATUS = "DISABLED";
 
     private static final long DEFAULT_RESET_COUNT = 0L;
 
@@ -146,7 +136,7 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
         TeachingDataInstance instance = getExistingInstance(id);
         ensureNotDiscarded(instance);
         LocalDateTime now = LocalDateTime.now();
-        instance.setInstanceStatus(INSTANCE_STATUS_LOCKED);
+        instance.setInstanceStatus(DataInstanceStatus.LOCKED.getValue());
         instance.setLockTime(now);
         instance.setUpdateTime(now);
         teachingDataInstanceMapper.updateById(instance);
@@ -165,8 +155,8 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
         TeachingDataInstance instance = getExistingInstance(id);
         ensureNotLocked(instance);
         LocalDateTime now = LocalDateTime.now();
-        instance.setInstanceStatus(INSTANCE_STATUS_DISCARDED);
-        instance.setStatus(DISABLED_STATUS);
+        instance.setInstanceStatus(DataInstanceStatus.DISCARDED.getValue());
+        instance.setStatus(RecordStatus.DISABLED.getValue());
         instance.setUpdateTime(now);
         teachingDataInstanceMapper.updateById(instance);
         return instance;
@@ -199,7 +189,7 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
         instance.setExternalBusinessNo(externalBusinessNo);
         instance.setExternalStatus(externalStatus);
         instance.setMetadataJson(metadataJson);
-        instance.setInstanceStatus(INSTANCE_STATUS_RESET);
+        instance.setInstanceStatus(DataInstanceStatus.RESET.getValue());
         instance.setResetCount(resetCount + 1L);
         instance.setUpdateTime(now);
         teachingDataInstanceMapper.updateById(instance);
@@ -255,7 +245,7 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
      * @param instance 教学业务数据实例。
      */
     private void ensureNotLocked(TeachingDataInstance instance) {
-        if (INSTANCE_STATUS_LOCKED.equals(instance.getInstanceStatus())) {
+        if (DataInstanceStatus.LOCKED.getValue().equals(instance.getInstanceStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
     }
@@ -266,7 +256,7 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
      * @param instance 教学业务数据实例。
      */
     private void ensureNotDiscarded(TeachingDataInstance instance) {
-        if (INSTANCE_STATUS_DISCARDED.equals(instance.getInstanceStatus())) {
+        if (DataInstanceStatus.DISCARDED.getValue().equals(instance.getInstanceStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
     }
@@ -274,7 +264,7 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
     private void fillCreateDefaults(TeachingDataInstance instance) {
         LocalDateTime now = LocalDateTime.now();
         if (!StringUtils.hasText(instance.getInstanceStatus())) {
-            instance.setInstanceStatus(DEFAULT_INSTANCE_STATUS);
+            instance.setInstanceStatus(DataInstanceStatus.CREATED.getValue());
         }
         if (instance.getResetCount() == null) {
             instance.setResetCount(DEFAULT_RESET_COUNT);
@@ -286,7 +276,7 @@ public class TeachingDataInstanceServiceImpl implements TeachingDataInstanceServ
             instance.setUpdateTime(now);
         }
         if (!StringUtils.hasText(instance.getStatus())) {
-            instance.setStatus(DEFAULT_STATUS);
+            instance.setStatus(RecordStatus.ACTIVE.getValue());
         }
         if (instance.getDeleted() == null) {
             instance.setDeleted(Boolean.FALSE);

@@ -39,6 +39,12 @@ public class CreateTeachingDataTemplateRequest {
     @Size(max = 32, message = "场景类型长度不能超过 32")
     private String sceneType;
 
+    @Size(max = 128, message = "模块编码长度不能超过 128")
+    private String moduleCode;
+
+    @Size(max = 64, message = "策略 ID 长度不能超过 64")
+    private String strategyId;
+
     @Size(max = 64, message = "初始状态长度不能超过 64")
     private String initState;
 
@@ -94,6 +100,22 @@ public class CreateTeachingDataTemplateRequest {
 
     public void setSceneType(String sceneType) {
         this.sceneType = sceneType;
+    }
+
+    public String getModuleCode() {
+        return moduleCode;
+    }
+
+    public void setModuleCode(String moduleCode) {
+        this.moduleCode = moduleCode;
+    }
+
+    public String getStrategyId() {
+        return strategyId;
+    }
+
+    public void setStrategyId(String strategyId) {
+        this.strategyId = strategyId;
     }
 
     public String getInitState() {

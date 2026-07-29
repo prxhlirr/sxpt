@@ -2,9 +2,15 @@ package com.sxpt.module.connector;
 
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.PlatformLaunchContext;
+import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.PlatformLaunchContextMapper;
+import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
 import com.sxpt.module.connector.service.impl.PlatformLaunchContextServiceImpl;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.LaunchStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.ValidationStatus;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -38,7 +44,10 @@ class PlatformLaunchContextServiceImplTests {
 
     private final PlatformLaunchContextMapper mapper = mock(PlatformLaunchContextMapper.class);
 
-    private final PlatformLaunchContextService service = new PlatformLaunchContextServiceImpl(mapper);
+    private final TeachingDataInstanceMapper teachingDataInstanceMapper = mock(TeachingDataInstanceMapper.class);
+
+    private final PlatformLaunchContextService service = new PlatformLaunchContextServiceImpl(
+            mapper, teachingDataInstanceMapper);
 
     /**
      * 校验创建启动上下文时生成 token、保存 hash 并补齐默认字段。
@@ -48,6 +57,7 @@ class PlatformLaunchContextServiceImplTests {
     @Test
     void createLaunchContextShouldGenerateTokenHashAndDefaults() throws Exception {
         PlatformLaunchContext launchContext = buildValidLaunchContext();
+        when(teachingDataInstanceMapper.selectById("instance_001")).thenReturn(buildReadyPassedInstance());
 
         PlatformLaunchContextService.CreatedLaunchContext created = service.createLaunchContext(launchContext);
 
@@ -57,17 +67,40 @@ class PlatformLaunchContextServiceImplTests {
         assertFalse(created.getLaunchToken().equals(launchContext.getLaunchTokenHash()));
         assertEquals(sha256(created.getLaunchToken()), launchContext.getLaunchTokenHash());
         assertEquals(64, launchContext.getLaunchTokenHash().length());
-        assertEquals("CREATED", launchContext.getLaunchStatus());
-        assertEquals("ACTIVE", launchContext.getStatus());
+        assertEquals(LaunchStatus.CREATED.getValue(), launchContext.getLaunchStatus());
+        assertEquals(RecordStatus.ACTIVE.getValue(), launchContext.getStatus());
         assertEquals(Boolean.FALSE, launchContext.getDeleted());
         assertNotNull(launchContext.getCreateTime());
         assertNotNull(launchContext.getUpdateTime());
         assertNotNull(launchContext.getExpireTime());
         assertTrue(launchContext.getExpireTime().isAfter(LocalDateTime.now()));
+        assertEquals("biz_001", launchContext.getExternalBusinessId());
+        assertEquals("org_required", launchContext.getRequiredExternalOrgId());
+        assertEquals("role_required", launchContext.getRequiredExternalRoleId());
+        assertNotNull(launchContext.getSdkConfigSnapshotJson());
+        assertTrue(launchContext.getSdkConfigSnapshotJson().contains("\"sdkMode\":\"CAPTURE\""));
+        assertTrue(launchContext.getSdkConfigSnapshotJson().contains("\"dataInstanceId\":\"instance_001\""));
+        assertNotNull(launchContext.getDataInstanceValidationSnapshotJson());
+        assertTrue(launchContext.getDataInstanceValidationSnapshotJson().contains("\"validationStatus\":\"PASSED\""));
+        assertTrue(launchContext.getDataInstanceValidationSnapshotJson().contains("\"externalBusinessId\":\"biz_001\""));
 
         ArgumentCaptor<PlatformLaunchContext> captor = ArgumentCaptor.forClass(PlatformLaunchContext.class);
         verify(mapper).insert(captor.capture());
         assertSame(launchContext, captor.getValue());
+    }
+
+    /**
+     * 校验绑定的数据实例未通过原平台校验时拒绝创建 launchToken。
+     */
+    @Test
+    void createLaunchContextShouldRejectUnvalidatedDataInstance() {
+        PlatformLaunchContext launchContext = buildValidLaunchContext();
+        TeachingDataInstance instance = buildReadyPassedInstance();
+        instance.setValidationStatus(ValidationStatus.FAILED.getValue());
+        when(teachingDataInstanceMapper.selectById("instance_001")).thenReturn(instance);
+
+        assertThrows(BusinessException.class, () -> service.createLaunchContext(launchContext));
+        verify(mapper, times(0)).insert(launchContext);
     }
 
     /**
@@ -92,18 +125,39 @@ class PlatformLaunchContextServiceImplTests {
         String launchToken = "ctx_token_001";
         PlatformLaunchContext launchContext = buildValidLaunchContext();
         launchContext.setLaunchTokenHash(sha256(launchToken));
-        launchContext.setLaunchStatus("CREATED");
+        launchContext.setLaunchStatus(LaunchStatus.CREATED.getValue());
         launchContext.setExpireTime(LocalDateTime.now().plusMinutes(5));
         when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
+        when(teachingDataInstanceMapper.selectById("instance_001")).thenReturn(buildReadyPassedInstance());
 
         PlatformLaunchContext verified = service.verifyLaunchToken("tenant_001", launchToken);
 
         assertSame(launchContext, verified);
-        assertEquals("VERIFIED", verified.getLaunchStatus());
+        assertEquals(LaunchStatus.VERIFIED.getValue(), verified.getLaunchStatus());
         assertNotNull(verified.getVerifiedTime());
+        assertNotNull(verified.getVerifyTime());
+        assertNotNull(verified.getVerifyRequestId());
+        assertTrue(verified.getVerifyRequestId().startsWith("verify_"));
         assertNotNull(verified.getUpdateTime());
         verify(mapper).selectOne(org.mockito.ArgumentMatchers.any());
         verify(mapper).updateById(launchContext);
+    }
+
+    /**
+     * 校验 verify 时会再次确认数据实例仍然可用，防止 token 创建后实例被废弃或校验失败。
+     */
+    @Test
+    void verifyLaunchTokenShouldRejectFailedDataInstance() {
+        PlatformLaunchContext launchContext = buildValidLaunchContext();
+        launchContext.setLaunchStatus(LaunchStatus.CREATED.getValue());
+        launchContext.setExpireTime(LocalDateTime.now().plusMinutes(5));
+        TeachingDataInstance instance = buildReadyPassedInstance();
+        instance.setInstanceStatus(DataInstanceStatus.FAILED.getValue());
+        when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
+        when(teachingDataInstanceMapper.selectById("instance_001")).thenReturn(instance);
+
+        assertThrows(BusinessException.class, () -> service.verifyLaunchToken("tenant_001", "ctx_failed_instance"));
+        verify(mapper, times(0)).updateById(launchContext);
     }
 
     /**
@@ -124,12 +178,12 @@ class PlatformLaunchContextServiceImplTests {
     @Test
     void verifyLaunchTokenShouldRejectExpiredContext() {
         PlatformLaunchContext launchContext = buildValidLaunchContext();
-        launchContext.setLaunchStatus("CREATED");
+        launchContext.setLaunchStatus(LaunchStatus.CREATED.getValue());
         launchContext.setExpireTime(LocalDateTime.now().minusMinutes(1));
         when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
 
         assertThrows(BusinessException.class, () -> service.verifyLaunchToken("tenant_001", "ctx_expired"));
-        assertEquals("EXPIRED", launchContext.getLaunchStatus());
+        assertEquals(LaunchStatus.EXPIRED.getValue(), launchContext.getLaunchStatus());
         verify(mapper).updateById(launchContext);
     }
 
@@ -139,7 +193,7 @@ class PlatformLaunchContextServiceImplTests {
     @Test
     void verifyLaunchTokenShouldRejectAlreadyVerifiedContext() {
         PlatformLaunchContext launchContext = buildValidLaunchContext();
-        launchContext.setLaunchStatus("VERIFIED");
+        launchContext.setLaunchStatus(LaunchStatus.VERIFIED.getValue());
         launchContext.setExpireTime(LocalDateTime.now().plusMinutes(5));
         when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
 
@@ -158,13 +212,13 @@ class PlatformLaunchContextServiceImplTests {
     @Test
     void markLaunchContextUsedShouldUpdateVerifiedContext() {
         PlatformLaunchContext launchContext = buildValidLaunchContext();
-        launchContext.setLaunchStatus("VERIFIED");
+        launchContext.setLaunchStatus(LaunchStatus.VERIFIED.getValue());
         when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
 
         PlatformLaunchContext used = service.markLaunchContextUsed("launch_001");
 
         assertSame(launchContext, used);
-        assertEquals("USED", used.getLaunchStatus());
+        assertEquals(LaunchStatus.USED.getValue(), used.getLaunchStatus());
         assertNotNull(used.getUsedTime());
         assertNotNull(used.getUpdateTime());
         verify(mapper).updateById(launchContext);
@@ -176,7 +230,7 @@ class PlatformLaunchContextServiceImplTests {
     @Test
     void markLaunchContextUsedShouldRejectCreatedContext() {
         PlatformLaunchContext launchContext = buildValidLaunchContext();
-        launchContext.setLaunchStatus("CREATED");
+        launchContext.setLaunchStatus(LaunchStatus.CREATED.getValue());
         when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
 
         assertThrows(BusinessException.class, () -> service.markLaunchContextUsed("launch_001"));
@@ -189,13 +243,13 @@ class PlatformLaunchContextServiceImplTests {
     @Test
     void markLaunchContextFailedShouldRecordErrorMessage() {
         PlatformLaunchContext launchContext = buildValidLaunchContext();
-        launchContext.setLaunchStatus("VERIFIED");
+        launchContext.setLaunchStatus(LaunchStatus.VERIFIED.getValue());
         when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(launchContext);
 
         PlatformLaunchContext failed = service.markLaunchContextFailed("launch_001", "原平台 session 建立失败");
 
         assertSame(launchContext, failed);
-        assertEquals("FAILED", failed.getLaunchStatus());
+        assertEquals(LaunchStatus.FAILED.getValue(), failed.getLaunchStatus());
         assertEquals("原平台 session 建立失败", failed.getErrorMessage());
         assertNotNull(failed.getUpdateTime());
         verify(mapper).updateById(launchContext);
@@ -217,10 +271,37 @@ class PlatformLaunchContextServiceImplTests {
         launchContext.setTenantId("tenant_001");
         launchContext.setUserId("user_001");
         launchContext.setConnectorSystemId("connector_001");
+        launchContext.setDataInstanceId("instance_001");
         launchContext.setSceneType("RECORD");
         launchContext.setSdkMode("CAPTURE");
         launchContext.setTargetUrl("/record/apply");
         return launchContext;
+    }
+
+    /**
+     * 构造已通过原平台校验的数据实例。
+     *
+     * @return 教学数据实例。
+     */
+    private TeachingDataInstance buildReadyPassedInstance() {
+        TeachingDataInstance instance = new TeachingDataInstance();
+        instance.setId("instance_001");
+        instance.setTenantId("tenant_001");
+        instance.setConnectorSystemId("connector_001");
+        instance.setOwnerUserId("user_001");
+        instance.setSceneType("RECORD");
+        instance.setExternalBusinessId("biz_001");
+        instance.setExternalBusinessNo("NO-biz_001");
+        instance.setExternalStatus("DRAFT");
+        instance.setRequiredExternalOrgId("org_required");
+        instance.setRequiredExternalRoleId("role_required");
+        instance.setRequirementSnapshotJson("{\"scope\":\"demo\"}");
+        instance.setInstanceStatus(DataInstanceStatus.READY.getValue());
+        instance.setValidationStatus(ValidationStatus.PASSED.getValue());
+        instance.setValidationTime(LocalDateTime.now().minusMinutes(1));
+        instance.setValidationResultJson("{\"passed\":true}");
+        instance.setDeleted(Boolean.FALSE);
+        return instance;
     }
 
     /**

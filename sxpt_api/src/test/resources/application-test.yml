@@ -18,6 +18,10 @@ sxpt:
       enabled: false
     data-instance-controller:
       enabled: false
+    business-module-controller:
+      enabled: false
+    module-data-strategy-controller:
+      enabled: false
   capture:
     session-controller:
       enabled: false
@@ -46,6 +50,9 @@ sxpt:
       enabled: false
   task:
     publish-controller:
+      enabled: false
+  teaching-data:
+    admin-controller:
       enabled: false
   execution:
     task-execution-controller:

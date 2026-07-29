@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>采购申请业务系统 - 脚本接入示例</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        color: #1f2937;
+        background: #f3f6fa;
+        font-family:
+          Inter,
+          "Microsoft YaHei",
+          "PingFang SC",
+          Arial,
+          sans-serif;
+      }
+
+      .business-shell {
+        display: grid;
+        grid-template-columns: 220px minmax(0, 1fr);
+        min-height: 100vh;
+      }
+
+      .business-nav {
+        border-right: 1px solid #d8e1ec;
+        background: #1f2937;
+        color: #dbe7f4;
+        padding: 24px 18px;
+      }
+
+      .business-nav strong {
+        display: block;
+        color: white;
+        font-size: 18px;
+        margin-bottom: 24px;
+      }
+
+      .business-nav span {
+        display: block;
+        padding: 11px 12px;
+        border-radius: 6px;
+      }
+
+      .business-nav span.active {
+        background: #334155;
+      }
+
+      main {
+        padding: 24px;
+      }
+
+      .toolbar,
+      .form,
+      .result-panel {
+        background: white;
+        border: 1px solid #dbe4ef;
+        border-radius: 8px;
+        box-shadow: 0 12px 28px rgba(15, 23, 42, 0.05);
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 18px;
+        margin-bottom: 18px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin-top: 0;
+      }
+
+      h1 {
+        margin-bottom: 8px;
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+
+      button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 6px;
+        padding: 0 16px;
+        background: #0f766e;
+        color: white;
+        font-weight: 700;
+        cursor: pointer;
+        transition:
+          background 160ms ease,
+          transform 160ms ease;
+      }
+
+      button:hover {
+        background: #115e59;
+      }
+
+      button.secondary {
+        background: #334155;
+      }
+
+      .content-grid {
+        display: grid;
+        grid-template-columns: minmax(460px, 1fr) 260px;
+        gap: 18px;
+      }
+
+      .form {
+        padding: 22px;
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      label {
+        display: grid;
+        gap: 7px;
+        color: #475569;
+        font-size: 13px;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid #cbd5e1;
+        border-radius: 6px;
+        padding: 10px;
+        font: inherit;
+        transition:
+          border-color 160ms ease,
+          box-shadow 160ms ease;
+      }
+
+      input:focus,
+      select:focus,
+      textarea:focus {
+        outline: none;
+        border-color: #0f766e;
+        box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.14);
+      }
+
+      textarea {
+        grid-column: 1 / -1;
+        min-height: 100px;
+      }
+
+      .form-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 12px;
+        margin-top: 20px;
+      }
+
+      .result-panel {
+        padding: 20px;
+      }
+
+      .status-pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 28px;
+        padding: 0 10px;
+        border-radius: 999px;
+        background: #ccfbf1;
+        color: #115e59;
+        font-weight: 700;
+      }
+
+      .result-id {
+        margin-top: 16px;
+        padding: 12px;
+        border-radius: 6px;
+        background: #f8fafc;
+        border: 1px dashed #cbd5e1;
+        font-family: Consolas, monospace;
+      }
+
+      .access-note {
+        color: #64748b;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 700px) {
+        .business-shell { grid-template-columns: 1fr; }
+        .business-nav { display: none; }
+        main { padding: 116px 12px 72px; }
+        .toolbar { align-items: flex-start; flex-direction: column; padding: 14px; }
+        h1 { font-size: 21px; }
+        .content-grid, .form-grid { grid-template-columns: 1fr; }
+        .form, .result-panel { padding: 14px; }
+        textarea { grid-column: auto; }
+        .form-actions { flex-wrap: wrap; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="business-shell">
+      <aside class="business-nav">
+        <strong>采购系统</strong>
+        <span class="active">采购申请</span>
+        <span>审批中心</span>
+        <span>供应商管理</span>
+        <span>统计报表</span>
+      </aside>
+      <main>
+        <section class="toolbar">
+          <div>
+            <h1>采购申请</h1>
+            <p class="access-note">这是业务系统主动接入教学脚本的示例页面。</p>
+          </div>
+          <button data-action="create">新建申请</button>
+        </section>
+
+        <section class="content-grid">
+          <form class="form" data-action="fill">
+            <div class="form-grid">
+              <label>
+                供应商
+                <input data-action="supplier" data-label="供应商" value="" />
+              </label>
+              <label>
+                采购品类
+                <select data-action="category" data-label="采购品类">
+                  <option>办公设备</option>
+                  <option>低值易耗</option>
+                  <option>软件服务</option>
+                </select>
+              </label>
+              <label>
+                申请金额
+                <input data-action="amount" data-label="申请金额" value="" />
+              </label>
+              <label>
+                期望到货日期
+                <input data-action="arrivalDate" data-label="期望到货日期" value="" />
+              </label>
+              <label>
+                申请原因
+                <textarea data-action="reason" data-label="申请原因"></textarea>
+              </label>
+            </div>
+            <div class="form-actions">
+              <button class="secondary" type="button" data-action="approve">审批通过</button>
+              <button id="submit-application" type="button" data-action="submit">提交申请</button>
+            </div>
+          </form>
+
+          <aside class="result-panel" data-action="result">
+            <span class="status-pill">待提交</span>
+            <h2>业务单据</h2>
+            <p>完成操作后，将此单号作为考试成果提交。</p>
+            <div class="result-id">采购-2026-0001</div>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <script
+      src="/training-recorder.js"
+      data-teaching-parent-origin="*"
+      data-teaching-allowed-parent-origins="*"
+    ></script>
+    <script>
+      document.getElementById('submit-application').addEventListener('click', function () {
+        window.setTimeout(function () {
+          window.location.href = '/business-approval-demo.html';
+        }, 180);
+      });
+    </script>
+  </body>
+</html>

@@ -5,11 +5,18 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.config.JwtProperties;
 import com.sxpt.controller.AuthLoginRequest;
 import com.sxpt.controller.AuthLoginResponse;
+import com.sxpt.module.user.entity.TeachRole;
 import com.sxpt.module.user.entity.TeachUser;
+import com.sxpt.module.user.entity.TeachUserOrg;
+import com.sxpt.module.user.entity.TeachUserRole;
+import com.sxpt.module.user.mapper.TeachRoleMapper;
 import com.sxpt.module.user.mapper.TeachUserMapper;
+import com.sxpt.module.user.mapper.TeachUserOrgMapper;
+import com.sxpt.module.user.mapper.TeachUserRoleMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -42,7 +49,7 @@ class AuthLoginServiceImplTests {
         TeachUserMapper mapper = mock(TeachUserMapper.class);
         TeachUser teachUser = buildLoginUser("StrongPassword123");
         when(mapper.selectOne(any(Wrapper.class))).thenReturn(teachUser);
-        AuthLoginServiceImpl service = buildService(mapper);
+        AuthLoginServiceImpl service = buildService(mapper, buildUserRoleMapper(), buildRoleMapper(), buildUserOrgMapper());
 
         AuthLoginResponse response = service.login(buildRequest("StrongPassword123"));
 
@@ -50,6 +57,8 @@ class AuthLoginServiceImplTests {
         assertThat(response.getTokenType()).isEqualTo("Bearer");
         assertThat(response.getUser().getUserId()).isEqualTo("user_001");
         assertThat(response.getUser().getEmployeeNo()).isEqualTo("T001");
+        assertThat(response.getUser().getRoles()).containsExactly("teacher");
+        assertThat(response.getUser().getOrgIds()).containsExactly("org-class-001");
         assertThat(teachUser.getFailedLoginCount()).isEqualTo(0);
         assertThat(teachUser.getLastLoginTime()).isNotNull();
         verify(mapper, times(1)).updateById(teachUser);
@@ -63,7 +72,7 @@ class AuthLoginServiceImplTests {
         TeachUserMapper mapper = mock(TeachUserMapper.class);
         TeachUser teachUser = buildLoginUser("StrongPassword123");
         when(mapper.selectOne(any(Wrapper.class))).thenReturn(teachUser);
-        AuthLoginServiceImpl service = buildService(mapper);
+        AuthLoginServiceImpl service = buildService(mapper, buildUserRoleMapper(), buildRoleMapper(), buildUserOrgMapper());
 
         assertThatThrownBy(() -> service.login(buildRequest("WrongPassword123")))
                 .isInstanceOf(BusinessException.class);
@@ -77,7 +86,7 @@ class AuthLoginServiceImplTests {
     @Test
     void loginShouldRejectUnsupportedLoginType() {
         TeachUserMapper mapper = mock(TeachUserMapper.class);
-        AuthLoginServiceImpl service = buildService(mapper);
+        AuthLoginServiceImpl service = buildService(mapper, buildUserRoleMapper(), buildRoleMapper(), buildUserOrgMapper());
         AuthLoginRequest request = buildRequest("StrongPassword123");
         request.setLoginType("SSO_TICKET");
 
@@ -86,16 +95,55 @@ class AuthLoginServiceImplTests {
         verify(mapper, times(0)).selectOne(any(Wrapper.class));
     }
 
-    private AuthLoginServiceImpl buildService(TeachUserMapper mapper) {
+    private AuthLoginServiceImpl buildService(
+            TeachUserMapper mapper,
+            TeachUserRoleMapper userRoleMapper,
+            TeachRoleMapper roleMapper,
+            TeachUserOrgMapper userOrgMapper
+    ) {
         JwtProperties jwtProperties = new JwtProperties();
         jwtProperties.setSecret("sxpt_test_jwt_secret");
         jwtProperties.setExpireSeconds(7200L);
         return new AuthLoginServiceImpl(
                 mapper,
+                userRoleMapper,
+                roleMapper,
+                userOrgMapper,
                 passwordHashService,
                 new JwtService(jwtProperties),
                 jwtProperties
         );
+    }
+
+    private TeachUserRoleMapper buildUserRoleMapper() {
+        TeachUserRoleMapper mapper = mock(TeachUserRoleMapper.class);
+        TeachUserRole userRole = new TeachUserRole();
+        userRole.setTenantId("tenant_001");
+        userRole.setUserId("user_001");
+        userRole.setRoleId("role_teacher");
+        when(mapper.selectList(any(Wrapper.class))).thenReturn(Collections.singletonList(userRole));
+        return mapper;
+    }
+
+    private TeachRoleMapper buildRoleMapper() {
+        TeachRoleMapper mapper = mock(TeachRoleMapper.class);
+        TeachRole role = new TeachRole();
+        role.setId("role_teacher");
+        role.setRoleCode("teacher");
+        role.setStatus("ACTIVE");
+        role.setDeleted(Boolean.FALSE);
+        when(mapper.selectList(any(Wrapper.class))).thenReturn(Collections.singletonList(role));
+        return mapper;
+    }
+
+    private TeachUserOrgMapper buildUserOrgMapper() {
+        TeachUserOrgMapper mapper = mock(TeachUserOrgMapper.class);
+        TeachUserOrg userOrg = new TeachUserOrg();
+        userOrg.setTenantId("tenant_001");
+        userOrg.setUserId("user_001");
+        userOrg.setOrgId("org-class-001");
+        when(mapper.selectList(any(Wrapper.class))).thenReturn(Collections.singletonList(userOrg));
+        return mapper;
     }
 
     private AuthLoginRequest buildRequest(String password) {

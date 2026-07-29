@@ -56,6 +56,36 @@ public class WebConfig implements WebMvcConfigurer {
                 .maxAge(3600);
     }
 
+    /**
+     * 配置前后端分离开发环境跨域。
+     *
+     * 业务功能：
+     * 1. 允许 sxpt_web 在 Vite 开发端口访问 sxpt_api。
+     * 2. 支持登录、后续携带 Authorization 的业务请求和浏览器预检请求。
+     *
+     * 关键流程：
+     * 1. 浏览器从 `127.0.0.1:5173` 发起跨域请求。
+     * 2. Spring MVC 在进入 Controller 前返回 CORS 响应头。
+     * 3. 预检通过后浏览器才会发送真实登录或业务请求。
+     */
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/**")
+                .allowedOrigins(
+                        "http://127.0.0.1:5173",
+                        "http://localhost:5173",
+                        "http://127.0.0.1:5174",
+                        "http://localhost:5174",
+                        "http://127.0.0.1:5175",
+                        "http://localhost:5175"
+                )
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedHeaders("*")
+                .exposedHeaders("Authorization")
+                .allowCredentials(true)
+                .maxAge(3600);
+    }
+
     @Override
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new TraceIdInterceptor()).addPathPatterns("/**");

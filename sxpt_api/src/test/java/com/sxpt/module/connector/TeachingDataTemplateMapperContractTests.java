@@ -36,9 +36,21 @@ class TeachingDataTemplateMapperContractTests {
     void teachingDataTemplateEntityShouldMapTeachingDataTemplateTable() throws NoSuchFieldException {
         TableName tableName = TeachingDataTemplate.class.getAnnotation(TableName.class);
         Field idField = TeachingDataTemplate.class.getDeclaredField("id");
+        Field moduleCodeField = TeachingDataTemplate.class.getDeclaredField("moduleCode");
+        Field strategyIdField = TeachingDataTemplate.class.getDeclaredField("strategyId");
+        Field requestSchemaJsonField = TeachingDataTemplate.class.getDeclaredField("requestSchemaJson");
+        Field requiredOrgRoleJsonField = TeachingDataTemplate.class.getDeclaredField("requiredOrgRoleJson");
+        Field resultCheckSchemaJsonField = TeachingDataTemplate.class.getDeclaredField("resultCheckSchemaJson");
+        Field sensitiveFieldPolicyJsonField = TeachingDataTemplate.class.getDeclaredField("sensitiveFieldPolicyJson");
 
         assertEquals("teaching_data_template", tableName.value());
         assertTrue(idField.isAnnotationPresent(TableId.class));
+        assertEquals(String.class, moduleCodeField.getType());
+        assertEquals(String.class, strategyIdField.getType());
+        assertEquals(String.class, requestSchemaJsonField.getType());
+        assertEquals(String.class, requiredOrgRoleJsonField.getType());
+        assertEquals(String.class, resultCheckSchemaJsonField.getType());
+        assertEquals(String.class, sensitiveFieldPolicyJsonField.getType());
     }
 
     /**

@@ -5,6 +5,8 @@ import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.TeachingDataInstanceService;
 import com.sxpt.module.connector.service.impl.TeachingDataInstanceServiceImpl;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -47,9 +49,9 @@ class TeachingDataInstanceServiceImplTests {
         TeachingDataInstance saved = service.createTeachingDataInstance(instance);
 
         assertSame(instance, saved);
-        assertEquals("CREATED", saved.getInstanceStatus());
+        assertEquals(DataInstanceStatus.CREATED.getValue(), saved.getInstanceStatus());
         assertEquals(0L, saved.getResetCount());
-        assertEquals("ACTIVE", saved.getStatus());
+        assertEquals(RecordStatus.ACTIVE.getValue(), saved.getStatus());
         assertEquals(Boolean.FALSE, saved.getDeleted());
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
@@ -131,7 +133,7 @@ class TeachingDataInstanceServiceImplTests {
         TeachingDataInstance result = service.lockTeachingDataInstance("tdi_001");
 
         assertSame(instance, result);
-        assertEquals("LOCKED", result.getInstanceStatus());
+        assertEquals(DataInstanceStatus.LOCKED.getValue(), result.getInstanceStatus());
         assertNotNull(result.getLockTime());
         assertNotNull(result.getUpdateTime());
         verify(mapper).updateById(instance);
@@ -143,7 +145,7 @@ class TeachingDataInstanceServiceImplTests {
     @Test
     void discardTeachingDataInstanceShouldRejectLockedInstance() {
         TeachingDataInstance instance = buildValidInstance();
-        instance.setInstanceStatus("LOCKED");
+        instance.setInstanceStatus(DataInstanceStatus.LOCKED.getValue());
         when(mapper.selectById("tdi_001")).thenReturn(instance);
 
         assertThrows(BusinessException.class, () -> service.discardTeachingDataInstance("tdi_001"));
@@ -161,8 +163,8 @@ class TeachingDataInstanceServiceImplTests {
         TeachingDataInstance result = service.discardTeachingDataInstance("tdi_001");
 
         assertSame(instance, result);
-        assertEquals("DISCARDED", result.getInstanceStatus());
-        assertEquals("DISABLED", result.getStatus());
+        assertEquals(DataInstanceStatus.DISCARDED.getValue(), result.getInstanceStatus());
+        assertEquals(RecordStatus.DISABLED.getValue(), result.getStatus());
         assertNotNull(result.getUpdateTime());
         verify(mapper).updateById(instance);
     }
@@ -180,7 +182,7 @@ class TeachingDataInstanceServiceImplTests {
                 "tdi_001", "biz_002", "NO-002", "DRAFT", "{\"source\":\"reset\"}");
 
         assertSame(instance, result);
-        assertEquals("RESET", result.getInstanceStatus());
+        assertEquals(DataInstanceStatus.RESET.getValue(), result.getInstanceStatus());
         assertEquals(3L, result.getResetCount());
         assertEquals("biz_002", result.getExternalBusinessId());
         assertEquals("NO-002", result.getExternalBusinessNo());

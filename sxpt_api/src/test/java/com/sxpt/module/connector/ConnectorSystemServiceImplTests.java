@@ -2,8 +2,12 @@ package com.sxpt.module.connector;
 
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.ConnectorSystem;
+import com.sxpt.module.connector.entity.PlatformCapability;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
+import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
 import com.sxpt.module.connector.service.impl.ConnectorSystemServiceImpl;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -39,16 +43,43 @@ class ConnectorSystemServiceImplTests {
     @Test
     void createConnectorSystemShouldFillDefaultsAndInsert() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem connectorSystem = buildValidConnectorSystem();
 
         ConnectorSystem saved = service.createConnectorSystem(connectorSystem);
 
-        assertEquals("ACTIVE", saved.getStatus());
+        assertEquals(RecordStatus.ACTIVE.getValue(), saved.getStatus());
         assertFalse(saved.getDeleted());
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
+        assertEquals("system", saved.getCreateBy());
+        assertEquals("system", saved.getUpdateBy());
         verify(mapper, times(1)).insert(saved);
+    }
+
+    /**
+     * 验证创建本地联调平台时会补齐平台能力审计字段，避免能力表非空约束导致平台创建失败。
+     */
+    @Test
+    void createLocalDevConnectorSystemShouldFillCapabilityAuditFields() {
+        ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
+        PlatformCapabilityMapper capabilityMapper = mock(PlatformCapabilityMapper.class);
+        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper, capabilityMapper);
+        ConnectorSystem connectorSystem = buildValidConnectorSystem();
+        connectorSystem.setSystemType("LOCAL_DEV");
+        connectorSystem.setCreateBy("admin_001");
+
+        service.createConnectorSystem(connectorSystem);
+
+        ArgumentCaptor<PlatformCapability> captor = ArgumentCaptor.forClass(PlatformCapability.class);
+        verify(capabilityMapper, times(6)).insert(captor.capture());
+        for (PlatformCapability capability : captor.getAllValues()) {
+            assertEquals("admin_001", capability.getCreateBy());
+            assertEquals("admin_001", capability.getUpdateBy());
+            assertEquals(capability.getCapabilityCode(), capability.getCapabilityType());
+            assertNotNull(capability.getCreateTime());
+            assertNotNull(capability.getUpdateTime());
+        }
     }
 
     /**
@@ -57,7 +88,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void createConnectorSystemShouldRejectMissingRequiredField() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem connectorSystem = buildValidConnectorSystem();
         connectorSystem.setSystemCode(" ");
 
@@ -71,7 +102,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void updateConnectorSystemShouldUpdateEditableFields() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem existing = buildValidConnectorSystem();
         existing.setCreateTime(LocalDateTime.now().minusDays(1));
         when(mapper.selectOne(any())).thenReturn(existing);
@@ -96,12 +127,36 @@ class ConnectorSystemServiceImplTests {
     }
 
     /**
+     * 校验更新原平台基础信息时，如果请求没有携带配置 JSON，应保留数据库已有配置。
+     */
+    @Test
+    void updateConnectorSystemShouldKeepExistingConfigJsonWhenRequestConfigIsNull() {
+        ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
+        ConnectorSystemServiceImpl service = buildService(mapper);
+        ConnectorSystem existing = buildValidConnectorSystem();
+        existing.setConfigJson("{\"adapter\":\"local\"}");
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        ConnectorSystem update = new ConnectorSystem();
+        update.setId("connector_001");
+        update.setSystemName("updated origin");
+        update.setSystemType("LOCAL_DEV");
+        update.setBaseUrl("http://127.0.0.1:8080/local-origin");
+        update.setAuthType("NONE");
+
+        ConnectorSystem result = service.updateConnectorSystem(update);
+
+        assertEquals("{\"adapter\":\"local\"}", result.getConfigJson());
+        verify(mapper, times(1)).updateById(result);
+    }
+
+    /**
      * 校验更新不存在的原平台配置时返回业务异常。
      */
     @Test
     void updateConnectorSystemShouldRejectMissingRecord() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem update = buildValidConnectorSystem();
         when(mapper.selectOne(any())).thenReturn(null);
 
@@ -115,7 +170,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void updateConnectorSystemShouldRejectMissingRequiredField() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem update = buildValidConnectorSystem();
         update.setBaseUrl(" ");
 
@@ -129,14 +184,14 @@ class ConnectorSystemServiceImplTests {
     @Test
     void enableConnectorSystemShouldSetActiveStatus() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem existing = buildValidConnectorSystem();
-        existing.setStatus("DISABLED");
+        existing.setStatus(RecordStatus.DISABLED.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
 
         ConnectorSystem result = service.enableConnectorSystem("connector_001");
 
-        assertEquals("ACTIVE", result.getStatus());
+        assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
         assertNotNull(result.getUpdateTime());
         verify(mapper, times(1)).updateById(result);
     }
@@ -147,14 +202,14 @@ class ConnectorSystemServiceImplTests {
     @Test
     void disableConnectorSystemShouldSetDisabledStatus() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem existing = buildValidConnectorSystem();
-        existing.setStatus("ACTIVE");
+        existing.setStatus(RecordStatus.ACTIVE.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
 
         ConnectorSystem result = service.disableConnectorSystem("connector_001");
 
-        assertEquals("DISABLED", result.getStatus());
+        assertEquals(RecordStatus.DISABLED.getValue(), result.getStatus());
         assertNotNull(result.getUpdateTime());
         verify(mapper, times(1)).updateById(result);
     }
@@ -165,7 +220,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void changeStatusShouldRejectBlankId() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
 
         assertThrows(BusinessException.class, () -> service.enableConnectorSystem(" "));
         verify(mapper, times(0)).selectOne(any());
@@ -178,7 +233,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void getConnectorSystemByIdShouldReturnExistingRecord() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem connectorSystem = buildValidConnectorSystem();
         when(mapper.selectOne(any())).thenReturn(connectorSystem);
 
@@ -194,7 +249,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void getConnectorSystemByIdShouldRejectMissingRecord() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         when(mapper.selectOne(any())).thenReturn(null);
 
         assertThrows(BusinessException.class, () -> service.getConnectorSystemById("connector_missing"));
@@ -207,7 +262,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void listConnectorSystemsByTenantIdShouldReturnTenantRecords() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem connectorSystem = buildValidConnectorSystem();
         when(mapper.selectList(any())).thenReturn(Collections.singletonList(connectorSystem));
 
@@ -224,7 +279,7 @@ class ConnectorSystemServiceImplTests {
     @Test
     void listConnectorSystemsByTenantIdShouldRejectBlankTenantId() {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
-        ConnectorSystemServiceImpl service = new ConnectorSystemServiceImpl(mapper);
+        ConnectorSystemServiceImpl service = buildService(mapper);
 
         assertThrows(BusinessException.class, () -> service.listConnectorSystemsByTenantId(" "));
         verify(mapper, times(0)).selectList(any());
@@ -245,5 +300,15 @@ class ConnectorSystemServiceImplTests {
         connectorSystem.setBaseUrl("https://origin.example.com");
         connectorSystem.setAuthType("TOKEN");
         return connectorSystem;
+    }
+
+    /**
+     * 构造带能力注册依赖的服务，避免测试遗漏 LOCAL_DEV 平台自动补能力的协作者。
+     *
+     * @param mapper 原平台配置 Mapper。
+     * @return 原平台配置服务。
+     */
+    private ConnectorSystemServiceImpl buildService(ConnectorSystemMapper mapper) {
+        return new ConnectorSystemServiceImpl(mapper, mock(PlatformCapabilityMapper.class));
     }
 }

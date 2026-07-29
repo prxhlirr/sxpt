@@ -36,9 +36,21 @@ class TeachingDataInstanceMapperContractTests {
     void teachingDataInstanceEntityShouldMapTeachingDataInstanceTable() throws NoSuchFieldException {
         TableName tableName = TeachingDataInstance.class.getAnnotation(TableName.class);
         Field idField = TeachingDataInstance.class.getDeclaredField("id");
+        Field requirementItemIdField = TeachingDataInstance.class.getDeclaredField("requirementItemId");
+        Field requiredExternalOrgIdField = TeachingDataInstance.class.getDeclaredField("requiredExternalOrgId");
+        Field requiredExternalRoleIdField = TeachingDataInstance.class.getDeclaredField("requiredExternalRoleId");
+        Field requirementSnapshotJsonField = TeachingDataInstance.class.getDeclaredField("requirementSnapshotJson");
+        Field validationResultJsonField = TeachingDataInstance.class.getDeclaredField("validationResultJson");
+        Field lockVersionField = TeachingDataInstance.class.getDeclaredField("lockVersion");
 
         assertEquals("teaching_data_instance", tableName.value());
         assertTrue(idField.isAnnotationPresent(TableId.class));
+        assertEquals(String.class, requirementItemIdField.getType());
+        assertEquals(String.class, requiredExternalOrgIdField.getType());
+        assertEquals(String.class, requiredExternalRoleIdField.getType());
+        assertEquals(String.class, requirementSnapshotJsonField.getType());
+        assertEquals(String.class, validationResultJsonField.getType());
+        assertEquals(Long.class, lockVersionField.getType());
     }
 
     /**

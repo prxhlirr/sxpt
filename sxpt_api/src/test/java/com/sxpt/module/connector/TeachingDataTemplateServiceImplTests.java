@@ -5,6 +5,7 @@ import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.TeachingDataTemplateService;
 import com.sxpt.module.connector.service.impl.TeachingDataTemplateServiceImpl;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
@@ -47,7 +48,7 @@ class TeachingDataTemplateServiceImplTests {
         TeachingDataTemplate saved = service.createTeachingDataTemplate(template);
 
         assertSame(template, saved);
-        assertEquals("ACTIVE", saved.getStatus());
+        assertEquals(RecordStatus.ACTIVE.getValue(), saved.getStatus());
         assertEquals(Boolean.FALSE, saved.getDeleted());
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
@@ -98,6 +99,78 @@ class TeachingDataTemplateServiceImplTests {
     }
 
     /**
+     * 校验更新模板时只覆盖模板规则字段并刷新更新时间。
+     */
+    @Test
+    void updateTeachingDataTemplateShouldPatchEditableFields() {
+        TeachingDataTemplate existing = buildValidTemplate();
+        existing.setTemplateCode("record_apply_default");
+        when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(existing);
+
+        TeachingDataTemplate update = new TeachingDataTemplate();
+        update.setId("tpl_001");
+        update.setTemplateName("updated template");
+        update.setSceneType("PRACTICE");
+        update.setModuleCode("record_apply");
+        update.setInitState("DRAFT");
+        update.setSupportMode("PRACTICE");
+        update.setConfigJson("{\"mode\":\"practice\"}");
+        update.setDataSchemaJson("{\"fields\":[]}");
+        update.setReadonlyFlag(Boolean.FALSE);
+
+        TeachingDataTemplate result = service.updateTeachingDataTemplate(update);
+
+        assertEquals("record_apply_default", result.getTemplateCode());
+        assertEquals("updated template", result.getTemplateName());
+        assertEquals("PRACTICE", result.getSceneType());
+        assertEquals("{\"mode\":\"practice\"}", result.getConfigJson());
+        assertEquals("{\"fields\":[]}", result.getDataSchemaJson());
+        assertEquals(Boolean.FALSE, result.getReadonlyFlag());
+        assertNotNull(result.getUpdateTime());
+        verify(mapper).updateById(result);
+    }
+
+    /**
+     * 校验启用模板时写入 ACTIVE 状态。
+     */
+    @Test
+    void enableTeachingDataTemplateShouldSetActiveStatus() {
+        TeachingDataTemplate existing = buildValidTemplate();
+        existing.setStatus(RecordStatus.DISABLED.getValue());
+        when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(existing);
+
+        TeachingDataTemplate result = service.enableTeachingDataTemplate("tpl_001");
+
+        assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
+        verify(mapper).updateById(result);
+    }
+
+    /**
+     * 校验停用模板时写入 DISABLED 状态。
+     */
+    @Test
+    void disableTeachingDataTemplateShouldSetDisabledStatus() {
+        TeachingDataTemplate existing = buildValidTemplate();
+        existing.setStatus(RecordStatus.ACTIVE.getValue());
+        when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(existing);
+
+        TeachingDataTemplate result = service.disableTeachingDataTemplate("tpl_001");
+
+        assertEquals(RecordStatus.DISABLED.getValue(), result.getStatus());
+        verify(mapper).updateById(result);
+    }
+
+    /**
+     * 校验查询不存在模板详情时返回业务异常。
+     */
+    @Test
+    void getTeachingDataTemplateByIdShouldRejectMissingRecord() {
+        when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(null);
+
+        assertThrows(BusinessException.class, () -> service.getTeachingDataTemplateById("tpl_missing"));
+    }
+
+    /**
      * 构造最小有效教学业务数据模板。
      *
      * @return 教学业务数据模板实体。
@@ -110,6 +183,7 @@ class TeachingDataTemplateServiceImplTests {
         template.setTemplateCode("record_apply_default");
         template.setTemplateName("标准备案申请默认数据");
         template.setSceneType("RECORD");
+        template.setModuleCode("record_apply");
         return template;
     }
 }

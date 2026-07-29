@@ -28,6 +28,8 @@ public class TeachingDataInstance {
 
     private String connectorSystemId;
 
+    private String poolId;
+
     private String ownerUserId;
 
     private String classId;
@@ -42,11 +44,49 @@ public class TeachingDataInstance {
 
     private String sceneType;
 
+    private String moduleCode;
+
+    private String requirementId;
+
+    private String requirementItemId;
+
+    private String prepareJobId;
+
+    private String requestBatchId;
+
+    private String requestItemId;
+
     private String externalBusinessId;
 
     private String externalBusinessNo;
 
     private String externalStatus;
+
+    private String ownerExternalOrgId;
+
+    private String ownerExternalOrgName;
+
+    private String requiredExternalOrgId;
+
+    private String requiredExternalOrgName;
+
+    private String requiredExternalRoleId;
+
+    private String requiredExternalRoleName;
+
+    private String actorType;
+
+    private String targetUrl;
+
+    private String requirementSnapshotJson;
+
+    private String validationStatus;
+
+    private LocalDateTime validationTime;
+
+    private String validationResultJson;
+
+    private String failureReason;
 
     private String instanceStatus;
 
@@ -57,6 +97,8 @@ public class TeachingDataInstance {
     private LocalDateTime expireTime;
 
     private String metadataJson;
+
+    private Long lockVersion;
 
     private String createBy;
 
@@ -100,6 +142,14 @@ public class TeachingDataInstance {
 
     public void setConnectorSystemId(String connectorSystemId) {
         this.connectorSystemId = connectorSystemId;
+    }
+
+    public String getPoolId() {
+        return poolId;
+    }
+
+    public void setPoolId(String poolId) {
+        this.poolId = poolId;
     }
 
     public String getOwnerUserId() {
@@ -158,6 +208,54 @@ public class TeachingDataInstance {
         this.sceneType = sceneType;
     }
 
+    public String getModuleCode() {
+        return moduleCode;
+    }
+
+    public void setModuleCode(String moduleCode) {
+        this.moduleCode = moduleCode;
+    }
+
+    public String getRequirementId() {
+        return requirementId;
+    }
+
+    public void setRequirementId(String requirementId) {
+        this.requirementId = requirementId;
+    }
+
+    public String getRequirementItemId() {
+        return requirementItemId;
+    }
+
+    public void setRequirementItemId(String requirementItemId) {
+        this.requirementItemId = requirementItemId;
+    }
+
+    public String getPrepareJobId() {
+        return prepareJobId;
+    }
+
+    public void setPrepareJobId(String prepareJobId) {
+        this.prepareJobId = prepareJobId;
+    }
+
+    public String getRequestBatchId() {
+        return requestBatchId;
+    }
+
+    public void setRequestBatchId(String requestBatchId) {
+        this.requestBatchId = requestBatchId;
+    }
+
+    public String getRequestItemId() {
+        return requestItemId;
+    }
+
+    public void setRequestItemId(String requestItemId) {
+        this.requestItemId = requestItemId;
+    }
+
     public String getExternalBusinessId() {
         return externalBusinessId;
     }
@@ -180,6 +278,110 @@ public class TeachingDataInstance {
 
     public void setExternalStatus(String externalStatus) {
         this.externalStatus = externalStatus;
+    }
+
+    public String getOwnerExternalOrgId() {
+        return ownerExternalOrgId;
+    }
+
+    public void setOwnerExternalOrgId(String ownerExternalOrgId) {
+        this.ownerExternalOrgId = ownerExternalOrgId;
+    }
+
+    public String getOwnerExternalOrgName() {
+        return ownerExternalOrgName;
+    }
+
+    public void setOwnerExternalOrgName(String ownerExternalOrgName) {
+        this.ownerExternalOrgName = ownerExternalOrgName;
+    }
+
+    public String getRequiredExternalOrgId() {
+        return requiredExternalOrgId;
+    }
+
+    public void setRequiredExternalOrgId(String requiredExternalOrgId) {
+        this.requiredExternalOrgId = requiredExternalOrgId;
+    }
+
+    public String getRequiredExternalOrgName() {
+        return requiredExternalOrgName;
+    }
+
+    public void setRequiredExternalOrgName(String requiredExternalOrgName) {
+        this.requiredExternalOrgName = requiredExternalOrgName;
+    }
+
+    public String getRequiredExternalRoleId() {
+        return requiredExternalRoleId;
+    }
+
+    public void setRequiredExternalRoleId(String requiredExternalRoleId) {
+        this.requiredExternalRoleId = requiredExternalRoleId;
+    }
+
+    public String getRequiredExternalRoleName() {
+        return requiredExternalRoleName;
+    }
+
+    public void setRequiredExternalRoleName(String requiredExternalRoleName) {
+        this.requiredExternalRoleName = requiredExternalRoleName;
+    }
+
+    public String getActorType() {
+        return actorType;
+    }
+
+    public void setActorType(String actorType) {
+        this.actorType = actorType;
+    }
+
+    public String getTargetUrl() {
+        return targetUrl;
+    }
+
+    public void setTargetUrl(String targetUrl) {
+        this.targetUrl = targetUrl;
+    }
+
+    public String getRequirementSnapshotJson() {
+        return requirementSnapshotJson;
+    }
+
+    public void setRequirementSnapshotJson(String requirementSnapshotJson) {
+        this.requirementSnapshotJson = requirementSnapshotJson;
+    }
+
+    public String getValidationStatus() {
+        return validationStatus;
+    }
+
+    public void setValidationStatus(String validationStatus) {
+        this.validationStatus = validationStatus;
+    }
+
+    public LocalDateTime getValidationTime() {
+        return validationTime;
+    }
+
+    public void setValidationTime(LocalDateTime validationTime) {
+        this.validationTime = validationTime;
+    }
+
+    public String getValidationResultJson() {
+        return validationResultJson;
+    }
+
+    public void setValidationResultJson(String validationResultJson) {
+        this.validationResultJson = validationResultJson;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public void setFailureReason(String failureReason) {
+        this.failureReason = failureReason;
     }
 
     public String getInstanceStatus() {
@@ -220,6 +422,14 @@ public class TeachingDataInstance {
 
     public void setMetadataJson(String metadataJson) {
         this.metadataJson = metadataJson;
+    }
+
+    public Long getLockVersion() {
+        return lockVersion;
+    }
+
+    public void setLockVersion(Long lockVersion) {
+        this.lockVersion = lockVersion;
     }
 
     public String getCreateBy() {

@@ -1,8 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import type { RouteLocationRaw } from 'vue-router';
 import type { PortalRole } from '../domain/models';
 import { useTrainingStore } from '../stores/trainingStore';
+
+interface NavigationItem {
+  label: string;
+  icon: string;
+  to: RouteLocationRaw;
+  group?: 'data-prepare';
+}
 
 const route = useRoute();
 const store = useTrainingStore();
@@ -12,53 +20,84 @@ const immersiveRoute = computed(() =>
   )
 );
 
-const identityProfiles: Record<
-  PortalRole,
-  {
-    label: string;
-    shortLabel: string;
-    name: string;
-    accountLabel: string;
-  }
-> = {
-  admin: {
-    label: '后台管理',
-    shortLabel: '管',
-    name: '薛管理员',
-    accountLabel: '平台管理员'
-  },
-  teacher: {
-    label: '教师端',
-    shortLabel: '教',
-    name: '薛老师',
-    accountLabel: '授课教师'
-  },
-  student: {
-    label: '学生端',
-    shortLabel: '学',
-    name: '林同学',
-    accountLabel: '参训学员'
-  }
-};
+const roleOptions: Array<{
+  key: PortalRole;
+  label: string;
+  shortLabel: string;
+  home: string;
+}> = [
+  { key: 'admin', label: '后台管理', shortLabel: '管', home: '/admin/overview' },
+  { key: 'teacher', label: '教师端', shortLabel: '师', home: '/teacher/dashboard' },
+  { key: 'student', label: '学生端', shortLabel: '学', home: '/student/tasks' }
+];
 
-const navigation = computed(() => {
+const activeLessonId = computed(() => {
+  const routeLessonId = String(route.params.lessonId ?? '');
+  return (
+    store.state.lessons.find((lesson) => lesson.id === routeLessonId)?.id ??
+    store.state.lessons[0]?.id ??
+    ''
+  );
+});
+
+const navigation = computed<NavigationItem[]>(() => {
+  const lessonId = activeLessonId.value;
   if (store.state.currentRole === 'teacher') {
     return [
-      { label: '教学工作台', icon: '⌂', to: '/teacher/dashboard' },
-      { label: '录制教案', icon: '⌘', to: '/admin/lessons' },
-      { label: '评阅与反馈', icon: '✓', to: '/teacher/review' }
+      { label: '教学工作台', icon: '01', to: '/teacher/dashboard' },
+      { label: '评阅反馈', icon: '02', to: '/teacher/review' },
+      { label: '批次准备', icon: '03', to: '/teacher/data-prepare', group: 'data-prepare' }
     ];
   }
   if (store.state.currentRole === 'student') {
     return [
-      { label: '我的任务', icon: '▣', to: '/student/tasks' },
-      { label: '成绩反馈', icon: '★', to: '/student/results' }
+      { label: '我的任务', icon: '01', to: '/student/tasks' },
+      { label: '成绩反馈', icon: '02', to: '/student/results' }
     ];
   }
   return [
-    { label: '运营总览', icon: '⌂', to: '/admin/overview' },
-    { label: '教案管理', icon: '▤', to: '/admin/lessons' },
-    { label: '业务平台', icon: '◎', to: '/admin/business-platforms' }
+    { label: '运营总览', icon: '01', to: '/admin/overview' },
+    { label: '教案管理', icon: '02', to: '/admin/lessons' },
+    {
+      label: '教案编排',
+      icon: '03',
+      to: lessonId
+        ? `/admin/lessons/${encodeURIComponent(lessonId)}/editor`
+        : '/admin/lessons'
+    },
+    {
+      label: '考试设置',
+      icon: '04',
+      to: lessonId
+        ? `/admin/lessons/${encodeURIComponent(lessonId)}/exam`
+        : '/admin/lessons'
+    },
+    {
+      label: '分组设置',
+      icon: '05',
+      to: lessonId
+        ? `/admin/lessons/${encodeURIComponent(lessonId)}/groups`
+        : '/admin/lessons'
+    },
+    {
+      label: '考试数据',
+      icon: '06',
+      to: lessonId
+        ? `/admin/lessons/${encodeURIComponent(lessonId)}/data`
+        : '/admin/lessons'
+    },
+    { label: '平台接入', icon: '07', to: '/admin/data-prepare/systems', group: 'data-prepare' },
+    { label: '业务模块', icon: '08', to: '/admin/data-prepare/modules', group: 'data-prepare' },
+    { label: '模板管理', icon: '09', to: '/admin/data-prepare/templates', group: 'data-prepare' },
+    { label: '策略管理', icon: '10', to: '/admin/data-prepare/strategies', group: 'data-prepare' },
+    { label: '批次准备', icon: '11', to: '/admin/data-prepare', group: 'data-prepare' },
+    {
+      label: '发布中心',
+      icon: '12',
+      to: lessonId
+        ? `/admin/lessons/${encodeURIComponent(lessonId)}/publish`
+        : '/admin/lessons'
+    }
   ];
 });
 
@@ -96,6 +135,7 @@ const currentRole = computed(
           v-for="item in navigation"
           :key="item.label"
           :to="item.to"
+          :class="{ 'data-prepare-nav': item.group === 'data-prepare' }"
         >
           <span class="nav-icon">{{ item.icon }}</span>
           <span>{{ item.label }}</span>
@@ -108,31 +148,26 @@ const currentRole = computed(
         <div class="mini-progress">
           <span style="width: 72%"></span>
         </div>
-        <small>教案 → 考试 → 分组 → 数据 → 发布</small>
+        <small>教案 / 考试 / 分组 / 数据 / 发布</small>
       </section>
 
       <footer class="sidebar-footer">
-        <span class="avatar">{{ currentRole.name.slice(0, 1) }}</span>
-        <span>
-          <strong>{{ currentRole.name }}</strong>
-          <small>{{ currentRole.accountLabel }}</small>
-        </span>
-        <button type="button" aria-label="更多账号操作">•••</button>
+        <span class="avatar">师</span>
+        <span><strong>教师账号</strong><small>平台管理员</small></span>
+        <button type="button" aria-label="更多账号操作">···</button>
       </footer>
     </aside>
 
     <section class="app-workspace">
-      <header class="topbar">
         <div>
           <span class="breadcrumb">业务实训平台 / {{ currentRole.label }}</span>
           <strong>{{ String(route.meta.title ?? '工作台') }}</strong>
         </div>
         <div class="topbar-actions">
-          <RouterLink class="platform-home-link" to="/platforms">平台首页</RouterLink>
-          <span class="environment-badge"><i></i> 实训环境</span>
-          <button class="icon-button" type="button" aria-label="搜索">⌕</button>
-          <button class="icon-button" type="button" aria-label="通知">♢</button>
-          <span class="today">2026 · 秋季学期</span>
+          <span class="environment-badge"><i></i> 本地联调环境</span>
+          <button class="icon-button" type="button" aria-label="搜索">S</button>
+          <button class="icon-button" type="button" aria-label="通知">N</button>
+          <span class="today">2026 秋季学期</span>
         </div>
       </header>
       <main

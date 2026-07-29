@@ -6,6 +6,7 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.ConnectorResource;
 import com.sxpt.module.connector.mapper.ConnectorResourceMapper;
 import com.sxpt.module.connector.service.ConnectorResourceService;
+import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +29,6 @@ import java.util.List;
 @Service
 @Profile("!test")
 public class ConnectorResourceServiceImpl implements ConnectorResourceService {
-
-    private static final String DEFAULT_STATUS = "ACTIVE";
 
     private final ConnectorResourceMapper connectorResourceMapper;
 
@@ -123,7 +122,7 @@ public class ConnectorResourceServiceImpl implements ConnectorResourceService {
             connectorResource.setUpdateBy(connectorResource.getCreateBy());
         }
         if (!StringUtils.hasText(connectorResource.getStatus())) {
-            connectorResource.setStatus(DEFAULT_STATUS);
+            connectorResource.setStatus(RecordStatus.ACTIVE.getValue());
         }
         if (connectorResource.getDeleted() == null) {
             connectorResource.setDeleted(Boolean.FALSE);

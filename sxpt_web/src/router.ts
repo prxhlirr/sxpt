@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router';
+import type { PortalRole } from './domain/models';
 import AppShell from './layouts/AppShell.vue';
 import type { PortalRole } from './domain/models';
 import { useTrainingStore } from './stores/trainingStore';
+import { authApi } from './services/trainingApi';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -16,10 +18,20 @@ export const router = createRouter({
       meta: { title: '选择平台' }
     },
     {
+      path: '/login',
+      name: 'login',
+      component: () => import('./views/LoginView.vue'),
+      meta: { title: '登录', public: true }
+    },
+    {
       path: '/',
       component: AppShell,
       children: [
         { path: '', redirect: '/platforms' },
+        {
+          path: '',
+          redirect: () => (authApi.getSession() ? authApi.getHomePath() : '/login')
+        },
         {
           path: 'admin/overview',
           name: 'admin-overview',
@@ -69,6 +81,36 @@ export const router = createRouter({
           meta: { title: '考试数据', roles: ['admin', 'teacher'] }
         },
         {
+          path: 'admin/data-prepare',
+          name: 'data-prepare',
+          component: () => import('./views/admin/DataPrepareView.vue'),
+          meta: { title: '批次准备', roles: ['admin', 'teacher'] }
+        },
+        {
+          path: 'admin/data-prepare/systems',
+          name: 'data-prepare-systems',
+          component: () => import('./views/admin/DataPrepareSystemsView.vue'),
+          meta: { title: '平台接入', roles: ['admin', 'teacher'] }
+        },
+        {
+          path: 'admin/data-prepare/modules',
+          name: 'data-prepare-modules',
+          component: () => import('./views/admin/DataPrepareModulesView.vue'),
+          meta: { title: '业务模块', roles: ['admin', 'teacher'] }
+        },
+        {
+          path: 'admin/data-prepare/templates',
+          name: 'data-prepare-templates',
+          component: () => import('./views/admin/DataPrepareTemplatesView.vue'),
+          meta: { title: '模板管理', roles: ['admin', 'teacher'] }
+        },
+        {
+          path: 'admin/data-prepare/strategies',
+          name: 'data-prepare-strategies',
+          component: () => import('./views/admin/DataPrepareStrategiesView.vue'),
+          meta: { title: '策略管理', roles: ['admin', 'teacher'] }
+        },
+        {
           path: 'admin/lessons/:lessonId/publish',
           name: 'publish-center',
           component: () => import('./views/admin/PublishCenterView.vue'),
@@ -84,7 +126,13 @@ export const router = createRouter({
           path: 'teacher/review',
           name: 'teacher-review',
           component: () => import('./views/teacher/TeacherReviewView.vue'),
-          meta: { title: '评阅与反馈', role: 'teacher' }
+          meta: { title: '评阅反馈', role: 'teacher' }
+        },
+        {
+          path: 'teacher/data-prepare',
+          name: 'teacher-data-prepare',
+          component: () => import('./views/admin/DataPrepareView.vue'),
+          meta: { title: '批次准备', role: 'teacher' }
         },
         {
           path: 'student/tasks',
@@ -131,7 +179,28 @@ router.beforeEach((to) => {
   return true;
 });
 
+router.beforeEach((to) => {
+  const session = authApi.getSession();
+  if (to.meta.public) {
+    return session && to.path === '/login' ? authApi.getHomePath(session) : true;
+  }
+  if (!session) {
+    return {
+      path: '/login',
+      query: { redirect: to.fullPath }
+    };
+  }
+  const requiredRole = (to.meta.roles ?? to.meta.role) as
+    | PortalRole
+    | PortalRole[]
+    | undefined;
+  if (!authApi.canAccess(requiredRole)) {
+    return authApi.getHomePath(session);
+  }
+  return true;
+});
+
 router.afterEach((to) => {
   const pageTitle = String(to.meta.title ?? '业务实训平台');
-  document.title = `${pageTitle} · 业务实训平台`;
+  document.title = `${pageTitle} - 业务实训平台`;
 });
