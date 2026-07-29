@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
@@ -34,7 +34,13 @@ const moduleOptions = computed(() =>
   [...new Set(store.state.lessons.map((lesson) => lesson.moduleName))].sort()
 );
 const enabledBusinessPlatforms = computed(() =>
-  store.state.businessPlatforms.filter((platform) => platform.status === 'ENABLED')
+  store.state.businessPlatforms.filter(
+    (platform) =>
+      platform.status === 'ENABLED' &&
+      platform.modules.some(
+        (businessModule) => businessModule.status === 'ENABLED'
+      )
+  )
 );
 const selectedCreatePlatform = computed(() =>
   store.getBusinessPlatform(createForm.businessPlatformId)
@@ -91,6 +97,17 @@ const metrics = computed(() => ({
   published: store.state.lessons.filter((lesson) => lesson.status === 'PUBLISHED').length,
   stages: store.state.lessons.reduce((sum, lesson) => sum + lesson.stages.length, 0)
 }));
+
+onMounted(async () => {
+  if (!store.remote.enabled) return;
+  try {
+    await store.syncBusinessPlatforms();
+  } catch (error) {
+    feedbackTone.value = 'danger';
+    feedback.value =
+      error instanceof Error ? error.message : '业务平台同步失败';
+  }
+});
 
 function dateLabel(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {

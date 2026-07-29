@@ -1,0 +1,56 @@
+server:
+  port: "${SXPT_SERVER_PORT:8080}"
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: sxpt_api
+  profiles:
+    # The development profile exposes /api/v1/auth/token for the simulated
+    # frontend identity. Override this with SPRING_PROFILES_ACTIVE in deployment.
+    active: "${SPRING_PROFILES_ACTIVE:dev}"
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    driver-class-name: org.postgresql.Driver
+    url: "${SXPT_DB_URL:jdbc:postgresql://127.0.0.1:55433/sxpt_dev?stringtype=unspecified}"
+    username: "${SXPT_DB_USERNAME:postgres}"
+    password: "${SXPT_DB_PASSWORD:liyz}"
+    druid:
+      initial-size: 1
+      min-idle: 1
+      max-active: 20
+      max-wait: 60000
+      validation-query: SELECT 1
+      test-while-idle: true
+      test-on-borrow: false
+      test-on-return: false
+  redis:
+    host: "${SXPT_REDIS_HOST:127.0.0.1}"
+    port: "${SXPT_REDIS_PORT:6379}"
+    password: "${SXPT_REDIS_PASSWORD:}"
+    timeout: 3000
+
+jwt:
+  # Development-only fallback. Production must provide SXPT_JWT_SECRET.
+  secret: "${SXPT_JWT_SECRET:sxpt_dev_jwt_secret}"
+  expire-seconds: "${SXPT_JWT_EXPIRE_SECONDS:7200}"
+
+mybatis-plus:
+  mapper-locations: classpath:/mapper/**/*.xml
+  type-aliases-package: com.sxpt.module.*.entity
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    root: info
+    com.sxpt: info
+
+sxpt:
+  cors:
+    allowed-origins: "${SXPT_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}"
+  demo-identity:
+    # The frontend currently simulates login and uses fixed teacher/student IDs.
+    # Disable this bootstrap when the formal user system is connected.
+    enabled: "${SXPT_DEMO_IDENTITY_ENABLED:true}"

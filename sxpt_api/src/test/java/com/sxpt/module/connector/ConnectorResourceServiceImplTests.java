@@ -18,6 +18,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.when;
 
 /**
@@ -43,6 +44,7 @@ class ConnectorResourceServiceImplTests {
     @Test
     void createConnectorResourceShouldInsertAndFillDefaults() {
         ConnectorResource resource = buildValidResource();
+        when(mapper.selectOne(any())).thenReturn(resource);
 
         ConnectorResource saved = service.createConnectorResource(resource);
 
@@ -51,7 +53,29 @@ class ConnectorResourceServiceImplTests {
         assertEquals(Boolean.FALSE, saved.getDeleted());
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
-        verify(mapper).insert(saved);
+        assertEquals("teacher_001", saved.getUpdateBy());
+        verify(mapper).upsertByBusinessKey(saved);
+        verify(mapper, never()).insert(any());
+    }
+
+    /**
+     * 校验相同业务键重复提交时返回数据库中原有资源 ID。
+     */
+    @Test
+    void createConnectorResourceShouldReuseExistingBusinessKey() {
+        ConnectorResource request = buildValidResource();
+        request.setId("retry_generated_id");
+        ConnectorResource existing = buildValidResource();
+        existing.setId("existing_resource_id");
+        existing.setResourceName("重试后的资源名称");
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        ConnectorResource saved = service.createConnectorResource(request);
+
+        assertSame(existing, saved);
+        assertEquals("existing_resource_id", saved.getId());
+        verify(mapper).upsertByBusinessKey(request);
+        verify(mapper, never()).insert(any());
     }
 
     /**
@@ -100,6 +124,7 @@ class ConnectorResourceServiceImplTests {
         resource.setStableKey("submit_button");
         resource.setMetadataJson("{\"text\":\"提交\"}");
         resource.setSourceCaptureId("cap_001");
+        resource.setCreateBy("teacher_001");
         return resource;
     }
 }

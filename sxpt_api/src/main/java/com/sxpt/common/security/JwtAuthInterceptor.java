@@ -38,6 +38,9 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            return true;
+        }
         String token = resolveToken(request);
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(ApiResultCode.UNAUTHORIZED);

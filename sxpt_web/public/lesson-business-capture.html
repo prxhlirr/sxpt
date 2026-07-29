@@ -636,6 +636,12 @@
       let picking = false;
       let recording = false;
       let highlightedElement;
+      let parentOrigin = window.location.origin;
+      try {
+        if (document.referrer) parentOrigin = new URL(document.referrer).origin;
+      } catch {
+        parentOrigin = window.location.origin;
+      }
 
       function pageTemplate(page) {
         if (page === "applications") {
@@ -824,7 +830,7 @@
       }
 
       function post(type, payload) {
-        window.parent.postMessage({ type, payload }, window.location.origin);
+        window.parent.postMessage({ type, payload }, parentOrigin);
       }
 
       function currentMeta() {
@@ -903,11 +909,94 @@
         };
       }
 
-      function navigateFrom(element) {
+      function copyFormState(source, clone) {
+        const sourceControls = source.querySelectorAll("input, textarea, select");
+        const clonedControls = clone.querySelectorAll("input, textarea, select");
+        sourceControls.forEach((control, index) => {
+          const clonedControl = clonedControls[index];
+          if (!clonedControl) return;
+          if (control.matches("input")) {
+            clonedControl.value =
+              control.type === "password" && control.value ? "••••••••" : control.value;
+            clonedControl.setAttribute("value", clonedControl.value);
+            clonedControl.toggleAttribute("checked", control.checked);
+          } else if (control.matches("textarea")) {
+            clonedControl.value = control.value;
+            clonedControl.textContent = control.value;
+          } else {
+            Array.from(clonedControl.options).forEach((option, optionIndex) => {
+              option.toggleAttribute("selected", optionIndex === control.selectedIndex);
+            });
+          }
+        });
+      }
+
+      function collectCssText() {
+        return Array.from(document.styleSheets)
+          .flatMap((styleSheet) => {
+            try {
+              return Array.from(styleSheet.cssRules).map((rule) => rule.cssText);
+            } catch {
+              return [];
+            }
+          })
+          .join("\n")
+          .slice(0, 400000);
+      }
+
+      function createPageSnapshot() {
+        const clone = document.body.cloneNode(true);
+        copyFormState(document.body, clone);
+        clone
+          .querySelectorAll("script, noscript, iframe, object, embed")
+          .forEach((element) => element.remove());
+        clone.querySelectorAll("*").forEach((element) => {
+          Array.from(element.attributes).forEach((attribute) => {
+            if (attribute.name.toLowerCase().startsWith("on")) {
+              element.removeAttribute(attribute.name);
+            }
+          });
+          if (element.matches("input, textarea, select, button")) {
+            element.setAttribute("disabled", "");
+          }
+          element.classList.remove("runtime-target");
+        });
+        return {
+          version: 1,
+          format: "DOM",
+          pageUrl: currentMeta().path,
+          pageTitle: currentMeta().title,
+          capturedAt: new Date().toISOString(),
+          html: clone.outerHTML.slice(0, 700000),
+          cssText: collectCssText(),
+          viewport: {
+            width: window.innerWidth,
+            height: window.innerHeight
+          }
+        };
+      }
+
+      function postActionAfterRender(payload, nextPage) {
+        if (nextPage) render(nextPage, false);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            post("SXPT_BUSINESS_ACTION", {
+              ...payload,
+              pageSnapshot: createPageSnapshot()
+            });
+            postReady();
+          });
+        });
+      }
+
+      function reportBusinessAction(element, eventType) {
+        const payload = payloadFor(element, eventType);
         const nextPage = element.dataset.navigate;
         if (nextPage) {
-          window.setTimeout(() => render(nextPage), 40);
+          window.setTimeout(() => postActionAfterRender(payload, nextPage), 40);
+          return;
         }
+        postActionAfterRender(payload);
       }
 
       document.addEventListener("click", (event) => {
@@ -923,14 +1012,13 @@
           return;
         }
 
-        post("SXPT_BUSINESS_ACTION", payloadFor(element, "click"));
-        navigateFrom(element);
+        reportBusinessAction(element, "click");
       });
 
       document.addEventListener("change", (event) => {
         const element = getActionElement(event.target);
         if (!element) return;
-        post("SXPT_BUSINESS_ACTION", payloadFor(element, "change"));
+        reportBusinessAction(element, "change");
       });
 
       function targetPageFor(selector, requestedUrl) {
@@ -986,7 +1074,7 @@
       }
 
       window.addEventListener("message", (event) => {
-        if (event.source !== window.parent || event.origin !== window.location.origin) return;
+        if (event.source !== window.parent || event.origin !== parentOrigin) return;
         const message = event.data || {};
         if (message.type === "SXPT_SET_RECORDING") {
           recording = Boolean(message.enabled);

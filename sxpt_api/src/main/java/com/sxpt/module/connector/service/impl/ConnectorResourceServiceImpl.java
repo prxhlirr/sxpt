@@ -48,8 +48,13 @@ public class ConnectorResourceServiceImpl implements ConnectorResourceService {
     public ConnectorResource createConnectorResource(ConnectorResource connectorResource) {
         validateCreateFields(connectorResource);
         fillCreateDefaults(connectorResource);
-        connectorResourceMapper.insert(connectorResource);
-        return connectorResource;
+        connectorResourceMapper.upsertByBusinessKey(connectorResource);
+        ConnectorResource saved = connectorResourceMapper.selectOne(
+                businessKeyQuery(connectorResource));
+        if (saved == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return saved;
     }
 
     /**
@@ -114,12 +119,30 @@ public class ConnectorResourceServiceImpl implements ConnectorResourceService {
         if (connectorResource.getUpdateTime() == null) {
             connectorResource.setUpdateTime(now);
         }
+        if (!StringUtils.hasText(connectorResource.getUpdateBy())) {
+            connectorResource.setUpdateBy(connectorResource.getCreateBy());
+        }
         if (!StringUtils.hasText(connectorResource.getStatus())) {
             connectorResource.setStatus(DEFAULT_STATUS);
         }
         if (connectorResource.getDeleted() == null) {
             connectorResource.setDeleted(Boolean.FALSE);
         }
+    }
+
+    /**
+     * 构造与数据库唯一索引一致的资源业务键查询。
+     *
+     * @param connectorResource 原平台正式资源。
+     * @return 业务键查询条件。
+     */
+    private QueryWrapper<ConnectorResource> businessKeyQuery(
+            ConnectorResource connectorResource) {
+        return new QueryWrapper<ConnectorResource>()
+                .eq("tenant_id", connectorResource.getTenantId())
+                .eq("connector_system_id", connectorResource.getConnectorSystemId())
+                .eq("resource_code", connectorResource.getResourceCode())
+                .eq("deleted", Boolean.FALSE);
     }
 }
 

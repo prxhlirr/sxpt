@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
+import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import { useTrainingStore } from '../../stores/trainingStore';
 
@@ -11,6 +12,9 @@ const message = ref('');
 const errorMessage = ref('');
 const attemptMessage = ref('');
 const showHelp = ref(true);
+const showRunnerMenu = ref(true);
+const syncing = ref(false);
+const learningStepIndex = ref(0);
 const checks = reactive({
   entered: false,
   located: false,
@@ -44,6 +48,14 @@ const visibleStages = computed(
     lesson.value?.stages.filter(
       (stage) => task.value && stage.visibility[task.value.mode]
     ) ?? []
+);
+const learningSteps = computed(() =>
+  visibleStages.value.flatMap((stage) =>
+    stage.recordedSteps.map((step) => ({ stage, step }))
+  )
+);
+const currentLearningStep = computed(
+  () => learningSteps.value[learningStepIndex.value]
 );
 const assignedStageIds = computed(() => {
   if (!task.value) return new Set<string>();
@@ -108,16 +120,45 @@ const collaborationSubmitted = computed(
 );
 const canRestartAttempt = computed(
   () =>
+    task.value?.mode === 'EXAM' &&
     Boolean(examSettings.value?.allowRetry) &&
     !collaborationSubmitted.value &&
     (task.value?.attemptNumber ?? 1) <
       (examSettings.value?.maxAttempts ?? 1)
 );
 const requiredSubmissionComplete = computed(() =>
-  (examSettings.value?.submissionFields ?? []).every(
+  (task.value?.mode === 'EXAM'
+    ? examSettings.value?.submissionFields ?? []
+    : []
+  ).every(
     (field) => !field.required || submissionValues[field.key]?.trim()
   )
 );
+const modeLabel = computed(() =>
+  task.value?.mode === 'LEARNING'
+    ? '流程学习'
+    : task.value?.mode === 'PRACTICE'
+      ? '流程练习'
+      : '正式考试'
+);
+const isExam = computed(() => task.value?.mode === 'EXAM');
+const activeOperationTarget = computed<
+  'start' | 'search' | 'open' | 'submit' | undefined
+>(() => {
+  if (
+    task.value?.mode === 'EXAM' ||
+    task.value?.mode === 'LEARNING' ||
+    task.value?.status === 'SUBMITTED' ||
+    task.value?.status === 'GRADED'
+  ) {
+    return undefined;
+  }
+  if (task.value?.status === 'TODO') return 'start';
+  if (!checks.located) return 'search';
+  if (!checks.reviewed) return 'open';
+  if (nextStage.value) return 'submit';
+  return undefined;
+});
 
 function syncSubmissionValues() {
   Object.keys(submissionValues).forEach((key) => {
@@ -139,27 +180,34 @@ watch(
 
 watch(
   () => task.value?.id,
-  syncSubmissionValues,
+  () => {
+    learningStepIndex.value = 0;
+    syncSubmissionValues();
+  },
   { immediate: true }
 );
 
-function startTask() {
+async function startTask() {
   if (!task.value) return;
   try {
-    store.startStudentTask(task.value.id);
+    syncing.value = true;
+    await store.startStudentTaskRemote(task.value.id);
     message.value = '任务已开始。请按右侧提示完成本阶段的流程性操作。';
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '任务启动失败。';
+  } finally {
+    syncing.value = false;
   }
 }
 
-function completeStage() {
+async function completeStage() {
   if (!task.value || !nextStage.value) return;
   message.value = '';
   errorMessage.value = '';
   try {
-    store.completeStudentStage(task.value.id, nextStage.value.id);
+    syncing.value = true;
+    await store.completeStudentStageRemote(task.value.id, nextStage.value.id);
     message.value =
       '平台已记录本阶段的页面访问与流程操作。若有下一阶段，请继续办理。';
   } catch (error) {
@@ -167,20 +215,27 @@ function completeStage() {
       error instanceof Error
         ? error.message
         : '本阶段暂不能完成，请确认前序角色是否已提交。';
+  } finally {
+    syncing.value = false;
   }
 }
 
-function submitTask() {
+async function submitTask() {
   if (!task.value) return;
   message.value = '';
   errorMessage.value = '';
   try {
-    store.submitStudentTask(task.value.id, { ...submissionValues });
+    syncing.value = true;
+    await store.submitStudentTaskRemote(task.value.id, {
+      ...submissionValues
+    });
     message.value =
       '答卷已提交，系统客观分已经生成；教师完成主观评分后会推送完整结果。';
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '提交失败，请检查阶段完成情况。';
+  } finally {
+    syncing.value = false;
   }
 }
 
@@ -215,15 +270,66 @@ function restartAttempt() {
       error instanceof Error ? error.message : '重新作答失败，请稍后重试。';
   }
 }
+
+function moveLearningStep(direction: -1 | 1) {
+  learningStepIndex.value = Math.max(
+    0,
+    Math.min(
+      learningStepIndex.value + direction,
+      learningSteps.value.length - 1
+    )
+  );
+}
+
+async function finishLearning() {
+  if (!task.value || task.value.mode !== 'LEARNING') return;
+  message.value = '';
+  errorMessage.value = '';
+  try {
+    syncing.value = true;
+    const assignedStages = visibleStages.value.filter((stage) =>
+      assignedStageIds.value.has(stage.id)
+    );
+    for (const stage of assignedStages) {
+      if (!task.value.completedStageIds.includes(stage.id)) {
+        await store.completeStudentStageRemote(task.value.id, stage.id);
+      }
+    }
+    await store.submitStudentTaskRemote(task.value.id, {});
+    message.value = '已完整看完录制流程，本次学习轨迹已提交。';
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : '流程学习提交失败。';
+  } finally {
+    syncing.value = false;
+  }
+}
 </script>
 
 <template>
-  <section v-if="task && lesson" class="runner-page">
-    <header class="runner-header">
+  <section
+    v-if="task && lesson"
+    class="runner-page"
+    :class="{
+      'runner-page--exam': isExam,
+      'runner-menu-hidden': !showRunnerMenu
+    }"
+  >
+    <button
+      v-if="!isExam"
+      class="runner-menu-toggle"
+      type="button"
+      @click="showRunnerMenu = !showRunnerMenu"
+    >
+      {{ showRunnerMenu ? '隐藏上层菜单' : '显示上层菜单' }}
+    </button>
+
+    <header v-if="!isExam" v-show="showRunnerMenu" class="runner-header">
       <div>
         <RouterLink to="/student/tasks">← 返回任务中心</RouterLink>
         <span class="runner-divider"></span>
         <strong>{{ task.title }}</strong>
+        <span class="mode-badge">{{ modeLabel }}</span>
         <StatusPill
           :status="task.status"
           :label="
@@ -240,7 +346,7 @@ function restartAttempt() {
       <div>
         <span>学员 {{ task.studentName }}</span>
         <span>角色 {{ roleNames?.join(' / ') }}</span>
-        <span>
+        <span v-if="task.mode === 'EXAM'">
           第 {{ task.attemptNumber }} /
           {{ examSettings?.maxAttempts ?? 1 }} 次作答
         </span>
@@ -258,8 +364,14 @@ function restartAttempt() {
       </div>
     </header>
 
-    <div class="runner-layout" :class="{ 'help-hidden': !showHelp }">
-      <aside class="stage-sidebar">
+    <div
+      class="runner-layout"
+      :class="{
+        'help-hidden': !showHelp,
+        'exam-mode': isExam
+      }"
+    >
+      <aside v-if="!isExam" class="stage-sidebar">
         <span class="runner-kicker">BUSINESS WORKFLOW</span>
         <h1>业务阶段</h1>
         <p>
@@ -303,7 +415,64 @@ function restartAttempt() {
       </aside>
 
       <main class="business-canvas">
-        <div class="mock-browser">
+        <div
+          v-if="
+            task.mode === 'LEARNING' &&
+            task.status === 'DOING' &&
+            currentLearningStep
+          "
+          class="learning-playback"
+        >
+          <BusinessSnapshotFrame
+            :snapshot="currentLearningStep.step.pageSnapshot"
+            :fallback-url="currentLearningStep.step.url"
+            :selector="currentLearningStep.step.selector"
+            :selector-candidates="currentLearningStep.step.selectorCandidates"
+            :rect="currentLearningStep.step.rect"
+            :recorded-viewport="currentLearningStep.step.recordedViewport"
+            :title="`${currentLearningStep.step.pageTitle}学习快照`"
+          />
+          <div class="learning-controls">
+            <span>
+              流程学习 {{ learningStepIndex + 1 }} / {{ learningSteps.length }}
+            </span>
+            <strong>{{ currentLearningStep.step.title }}</strong>
+            <p>
+              {{
+                currentLearningStep.step.teachingText ||
+                currentLearningStep.step.note ||
+                '观察录制时的完整业务页面状态。'
+              }}
+            </p>
+            <div>
+              <button
+                type="button"
+                :disabled="learningStepIndex === 0"
+                @click="moveLearningStep(-1)"
+              >
+                ← 上一步
+              </button>
+              <button
+                v-if="learningStepIndex < learningSteps.length - 1"
+                class="primary"
+                type="button"
+                @click="moveLearningStep(1)"
+              >
+                下一步 →
+              </button>
+              <button
+                v-else
+                class="primary"
+                type="button"
+                :disabled="syncing"
+                @click="finishLearning"
+              >
+                {{ syncing ? '正在提交…' : '完成流程学习' }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="mock-browser">
           <div class="browser-bar">
             <div><i></i><i></i><i></i></div>
             <span>业务系统演示窗口 · 非真实业务提交</span>
@@ -333,8 +502,14 @@ function restartAttempt() {
                 <p>
                   点击开始后，平台将创建本次学员会话轨迹并展示录制好的操作指引。
                 </p>
-                <button class="primary" type="button" @click="startTask">
-                  开始本次任务
+                <button
+                  class="primary"
+                  :class="{ 'operation-target': activeOperationTarget === 'start' }"
+                  type="button"
+                  :disabled="syncing"
+                  @click="startTask"
+                >
+                  {{ syncing ? '正在创建会话…' : '开始本次任务' }}
                 </button>
               </div>
 
@@ -343,12 +518,20 @@ function restartAttempt() {
                 class="business-start success"
               >
                 <span>✓</span>
-                <h3>本次答卷已经提交</h3>
+                <h3>本次{{ modeLabel }}任务已经完成</h3>
                 <p>
-                  客观分 {{ task.objectiveScore ?? 0 }} 分。教师评分后，可在成绩反馈中查看主观分和批语。
+                  <template v-if="task.mode === 'EXAM'">
+                    客观分 {{ task.objectiveScore ?? 0 }} 分。教师评分后，可在成绩反馈中查看主观分和批语。
+                  </template>
+                  <template v-else>
+                    系统已保存学习轨迹与阶段完成记录，可以返回任务中心继续下一项任务。
+                  </template>
                 </p>
-                <RouterLink class="button primary" to="/student/results">
+                <RouterLink v-if="task.mode === 'EXAM'" class="button primary" to="/student/results">
                   查看成绩反馈
+                </RouterLink>
+                <RouterLink v-else class="button primary" to="/student/tasks">
+                  返回任务中心
                 </RouterLink>
                 <button
                   v-if="canRestartAttempt"
@@ -367,10 +550,14 @@ function restartAttempt() {
                 <span>✓</span>
                 <h3>你负责的业务阶段已全部完成</h3>
                 <p>
-                  提交答卷后系统将固化客观操作成绩；提交前仍可检查本次流程记录。
+                  {{
+                    task.mode === 'EXAM'
+                      ? '提交答卷后系统将固化客观操作成绩；提交前仍可检查本次流程记录。'
+                      : '完成任务后系统将固化本次学习轨迹和客观操作结果。'
+                  }}
                 </p>
                 <div
-                  v-if="examSettings?.submissionFields.length"
+                  v-if="task.mode === 'EXAM' && examSettings?.submissionFields.length"
                   class="submission-fields"
                 >
                   <label
@@ -390,10 +577,16 @@ function restartAttempt() {
                 <button
                   class="primary"
                   type="button"
-                  :disabled="!requiredSubmissionComplete"
+                  :disabled="!requiredSubmissionComplete || syncing"
                   @click="submitTask"
                 >
-                  提交本次答卷
+                  {{
+                    syncing
+                      ? '正在提交…'
+                      : task.mode === 'EXAM'
+                        ? '提交本次答卷'
+                        : '完成本次任务'
+                  }}
                 </button>
               </div>
 
@@ -416,6 +609,7 @@ function restartAttempt() {
                   </label>
                   <button
                     class="business-search-button"
+                    :class="{ 'operation-target': activeOperationTarget === 'search' }"
                     type="button"
                     @click="
                       checks.entered = true;
@@ -449,6 +643,7 @@ function restartAttempt() {
                     <span>第一事业部</span>
                     <span>{{ nextStage?.name }}</span>
                     <button
+                      :class="{ 'operation-target': activeOperationTarget === 'open' }"
                       type="button"
                       :disabled="!checks.located"
                       @click="checks.reviewed = true"
@@ -488,7 +683,8 @@ function restartAttempt() {
                     <button
                       type="button"
                       class="primary"
-                      :disabled="!canRecordCompletion"
+                      :class="{ 'operation-target': activeOperationTarget === 'submit' }"
+                      :disabled="!canRecordCompletion || syncing"
                       @click="completeStage"
                     >
                       {{ nextStage?.recordedSteps.at(-1)?.actionLabel || '提交办理' }}
@@ -501,7 +697,7 @@ function restartAttempt() {
         </div>
       </main>
 
-      <aside v-if="showHelp" class="guide-panel">
+      <aside v-if="showHelp && !isExam" class="guide-panel">
         <span class="runner-kicker">RECORDED GUIDE</span>
         <h2>{{ nextStage?.name ?? '阶段完成' }}</h2>
         <p>{{ nextStage?.description || '按照录制路径完成当前业务阶段。' }}</p>
@@ -562,6 +758,42 @@ function restartAttempt() {
           <small>不包含业务系统具体数据关联证明</small>
         </div>
       </aside>
+
+      <aside v-if="isExam && showHelp" class="exam-task-panel">
+        <div>
+          <span>考试任务说明</span>
+          <strong>{{ task.title }}</strong>
+          <small>
+            第 {{ task.attemptNumber }} / {{ examSettings?.maxAttempts ?? 1 }} 次作答
+          </small>
+        </div>
+        <p>
+          {{
+            nextStage?.description ||
+            '请在业务系统中独立完成分配给你的考试流程，系统将记录操作轨迹。'
+          }}
+        </p>
+        <span v-if="message" class="exam-message success">{{ message }}</span>
+        <span v-if="errorMessage" class="exam-message danger">{{ errorMessage }}</span>
+        <button
+          v-if="canRestartAttempt"
+          class="secondary"
+          type="button"
+          @click="restartAttempt"
+        >
+          重新作答
+        </button>
+        <button type="button" @click="showHelp = false">隐藏说明</button>
+      </aside>
+
+      <button
+        v-if="isExam && !showHelp"
+        class="exam-task-toggle"
+        type="button"
+        @click="showHelp = true"
+      >
+        显示考试说明
+      </button>
     </div>
   </section>
 
@@ -801,6 +1033,55 @@ function restartAttempt() {
   border-radius: 12px;
   background: #fff;
   box-shadow: 0 15px 35px rgb(32 39 74 / 10%);
+}
+
+.learning-playback {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 600px;
+  overflow: hidden;
+  background: #eef2f7;
+}
+
+.learning-controls {
+  position: absolute;
+  z-index: 5;
+  right: 330px;
+  bottom: 16px;
+  display: grid;
+  width: min(520px, calc(100vw - 590px));
+  gap: 6px;
+  border: 1px solid rgb(221 225 235 / 92%);
+  border-radius: 14px;
+  padding: 13px 15px;
+  color: #2f3a50;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 16px 42px rgb(21 28 55 / 18%);
+  backdrop-filter: blur(14px);
+}
+
+.learning-controls > span {
+  color: #6758dd;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.learning-controls > strong {
+  font-size: 15px;
+}
+
+.learning-controls > p {
+  margin: 0;
+  color: #68758a;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.learning-controls > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .browser-bar {
@@ -1280,6 +1561,301 @@ function restartAttempt() {
   }
 
   .business-app > nav {
+    display: none;
+  }
+}
+
+/* 沉浸式任务：业务界面使用完整视口，阶段与操作引导作为上层浮窗。 */
+.runner-page {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background: #eef1f6;
+}
+
+.runner-header {
+  position: absolute;
+  z-index: 30;
+  top: 12px;
+  right: 12px;
+  left: 12px;
+  margin: 0;
+  border-color: rgb(220 224 233 / 88%);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 16px 42px rgb(21 27 52 / 17%);
+  backdrop-filter: blur(14px);
+}
+
+.mode-badge {
+  border-radius: 999px;
+  padding: 5px 8px;
+  color: #5f50cf !important;
+  background: #efedff;
+  font-size: 8px !important;
+  font-weight: 900;
+}
+
+.runner-layout,
+.runner-layout.help-hidden {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: block;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.business-canvas {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  padding: 0;
+}
+
+.mock-browser {
+  height: 100vh;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.learning-playback {
+  height: 100vh;
+  min-height: 0;
+}
+
+.business-app {
+  min-height: calc(100vh - 37px);
+}
+
+.stage-sidebar,
+.guide-panel {
+  position: absolute;
+  z-index: 20;
+  top: 76px;
+  bottom: 14px;
+  overflow-y: auto;
+  border: 1px solid rgb(220 224 233 / 90%);
+  border-radius: 14px;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 18px 46px rgb(21 27 52 / 18%);
+  backdrop-filter: blur(14px);
+}
+
+.stage-sidebar {
+  left: 14px;
+  width: 230px;
+}
+
+.guide-panel {
+  right: 14px;
+  width: 300px;
+}
+
+.runner-layout.help-hidden .business-canvas {
+  inset: 0;
+}
+
+.runner-menu-toggle,
+.exam-task-toggle {
+  position: absolute;
+  z-index: 45;
+  top: 78px;
+  right: 14px;
+  min-height: 33px;
+  border: 1px solid rgb(255 255 255 / 78%);
+  border-radius: 999px;
+  padding: 0 13px;
+  color: #fff;
+  background: rgb(31 39 58 / 80%);
+  box-shadow: 0 10px 28px rgb(15 20 40 / 22%);
+  backdrop-filter: blur(12px);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.runner-menu-hidden .runner-menu-toggle {
+  top: 14px;
+}
+
+.runner-layout.exam-mode {
+  display: block;
+}
+
+.exam-task-panel {
+  position: absolute;
+  z-index: 35;
+  top: 14px;
+  left: 50%;
+  display: flex;
+  width: min(920px, calc(100vw - 28px));
+  min-height: 58px;
+  align-items: center;
+  gap: 14px;
+  transform: translateX(-50%);
+  border: 1px solid rgb(222 226 235 / 92%);
+  border-radius: 14px;
+  padding: 10px 12px 10px 16px;
+  color: #39455a;
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 16px 42px rgb(21 27 52 / 18%);
+  backdrop-filter: blur(14px);
+}
+
+.exam-task-panel > div {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.exam-task-panel > div span {
+  color: #6b5cdf;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.exam-task-panel > div strong {
+  font-size: 12px;
+}
+
+.exam-task-panel > div small {
+  color: #8893a5;
+  font-size: 8px;
+}
+
+.exam-task-panel > p {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  color: #68758a;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.exam-task-panel > button {
+  flex: 0 0 auto;
+  min-height: 31px;
+  font-size: 8px;
+}
+
+.exam-message {
+  max-width: 180px;
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 8px;
+}
+
+.exam-message.success {
+  color: #087b59;
+  background: #eaf8f2;
+}
+
+.exam-message.danger {
+  color: #a43d48;
+  background: #fff0f1;
+}
+
+.exam-task-toggle {
+  top: 14px;
+}
+
+.operation-target {
+  position: relative;
+  z-index: 6;
+  outline: 4px solid #ff9f1c !important;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 8px rgb(255 159 28 / 22%), 0 0 28px rgb(255 93 46 / 64%) !important;
+  animation: operation-target-pulse 1.1s ease-in-out infinite alternate;
+}
+
+.operation-target::after {
+  position: absolute;
+  z-index: 7;
+  top: -32px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #fff;
+  background: #e66b00;
+  box-shadow: 0 8px 20px rgb(116 50 0 / 26%);
+  content: "当前操作";
+  font-size: 8px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+@keyframes operation-target-pulse {
+  from {
+    outline-color: #ff9f1c;
+    box-shadow: 0 0 0 5px rgb(255 159 28 / 18%), 0 0 18px rgb(255 159 28 / 48%);
+  }
+  to {
+    outline-color: #ff5d2e;
+    box-shadow: 0 0 0 11px rgb(255 93 46 / 20%), 0 0 34px rgb(255 93 46 / 76%);
+  }
+}
+
+@media (max-width: 980px) {
+  .runner-header > div:last-child > span {
+    display: none;
+  }
+
+  .stage-sidebar {
+    display: none;
+  }
+
+  .guide-panel {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 42vh;
+  }
+
+  .learning-controls {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+  }
+
+  .guide-checks {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .exam-task-panel {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .exam-task-panel > p {
+    flex-basis: calc(100% - 190px);
+  }
+}
+
+@media (max-width: 620px) {
+  .runner-header {
+    align-items: stretch;
+    padding: 9px;
+  }
+
+  .runner-header > div:last-child {
+    display: none;
+  }
+
+  .guide-checks {
+    grid-template-columns: 1fr;
+  }
+
+  .recorded-steps,
+  .session-info {
     display: none;
   }
 }

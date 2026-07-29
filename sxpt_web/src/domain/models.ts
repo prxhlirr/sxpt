@@ -42,6 +42,20 @@ export interface CaptureRect {
   height: number;
 }
 
+export interface BusinessPageSnapshot {
+  version: 1;
+  format: 'DOM';
+  pageUrl: string;
+  pageTitle: string;
+  capturedAt: string;
+  html: string;
+  cssText?: string;
+  viewport?: {
+    width: number;
+    height: number;
+  };
+}
+
 export interface RecordedStep {
   id: string;
   title: string;
@@ -61,6 +75,13 @@ export interface RecordedStep {
   examGoal?: string;
   required?: boolean;
   failurePolicy?: 'stop' | 'retry' | 'skip';
+  syncStatus?: 'LOCAL' | 'SYNCING' | 'SYNCED' | 'FAILED';
+  syncError?: string;
+  remoteEventId?: string;
+  remoteResourceSnapshotId?: string;
+  remoteDraftId?: string;
+  remoteResourceId?: string;
+  pageSnapshot?: BusinessPageSnapshot;
   recordedViewport?: {
     width: number;
     height: number;
@@ -97,6 +118,11 @@ export interface LessonPlan {
   stages: LessonStage[];
   updatedAt: string;
   publishedAt?: string;
+  captureSessionId?: string;
+  captureSessionFinished?: boolean;
+  teachingPointId?: string;
+  remoteCourseId?: string;
+  lectureCompletedAt?: string;
 }
 
 export interface ExamSettings {
@@ -185,6 +211,13 @@ export interface PublishedTask {
   groupCount: number;
   dataCount: number;
   completedCount: number;
+  remoteCourseId?: string;
+  remoteTaskId?: string;
+  remoteTeachingPointId?: string;
+  remoteEvaluationRuleId?: string;
+  remoteTaskStepIdsByStepId?: Record<string, string>;
+  syncStatus?: 'LOCAL' | 'SYNCING' | 'SYNCED' | 'FAILED';
+  syncError?: string;
 }
 
 export interface StudentTask {
@@ -211,6 +244,12 @@ export interface StudentTask {
   startedAt?: string;
   submittedAt?: string;
   gradedAt?: string;
+  remoteExecutionId?: string;
+  remoteExecutionStatus?: string;
+  remoteScore?: number;
+  remoteContextLoaded?: boolean;
+  syncStatus?: 'LOCAL' | 'SYNCING' | 'SYNCED' | 'FAILED';
+  syncError?: string;
 }
 
 export interface ActivityEvent {

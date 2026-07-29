@@ -12,6 +12,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static com.sxpt.module.capture.dto.ReportCaptureResourceSnapshotRequest.MAX_ELEMENT_SNAPSHOT_JSON_LENGTH;
 
 /**
  * 采集资源快照 DTO 和 VO 契约测试。
@@ -54,12 +55,25 @@ class CaptureResourceSnapshotDtoVoContractTests {
     }
 
     /**
-     * 校验元素摘要 JSON 超长时参数校验失败，避免保存全量 DOM。
+     * 校验真实页面快照超过旧版 32 KB 边界后仍可通过参数校验。
      */
     @Test
-    void reportCaptureResourceSnapshotRequestShouldRejectTooLongElementSnapshotJson() {
+    void reportCaptureResourceSnapshotRequestShouldAcceptRecordedFullPageSnapshot() {
         ReportCaptureResourceSnapshotRequest request = buildValidRequest();
         request.setElementSnapshotJson(repeat("a", 32769));
+
+        Set<ConstraintViolation<ReportCaptureResourceSnapshotRequest>> violations = validator.validate(request);
+
+        assertEquals(0, violations.size());
+    }
+
+    /**
+     * 校验超过录制快照安全上限的 JSON 仍会被拒绝。
+     */
+    @Test
+    void reportCaptureResourceSnapshotRequestShouldRejectSnapshotBeyondSafeLimit() {
+        ReportCaptureResourceSnapshotRequest request = buildValidRequest();
+        request.setElementSnapshotJson(repeat("a", MAX_ELEMENT_SNAPSHOT_JSON_LENGTH + 1));
 
         Set<ConstraintViolation<ReportCaptureResourceSnapshotRequest>> violations = validator.validate(request);
 

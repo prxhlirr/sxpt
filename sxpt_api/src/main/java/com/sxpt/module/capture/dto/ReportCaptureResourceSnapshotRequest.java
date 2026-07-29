@@ -18,6 +18,15 @@ import java.time.LocalDateTime;
  */
 public class ReportCaptureResourceSnapshotRequest {
 
+    /**
+     * 真实业务页面快照的最大字符数。
+     *
+     * 前端录制会保存经过清理和裁剪的 DOM、CSS 及视口信息。JSON 转义后可能
+     * 超过旧版元素摘要的 32 KB，因此单独使用 4 MB 上限；普通元数据仍保持
+     * 32 KB 限制。
+     */
+    public static final int MAX_ELEMENT_SNAPSHOT_JSON_LENGTH = 4 * 1024 * 1024;
+
     @NotBlank(message = "租户 ID 不能为空")
     @Size(max = 64, message = "租户 ID 长度不能超过 64")
     private String tenantId;
@@ -48,7 +57,10 @@ public class ReportCaptureResourceSnapshotRequest {
     private String resourceLocator;
 
     @NotBlank(message = "元素摘要 JSON 不能为空")
-    @Size(max = 32768, message = "元素摘要 JSON 长度不能超过 32768")
+    @Size(
+            max = MAX_ELEMENT_SNAPSHOT_JSON_LENGTH,
+            message = "元素摘要 JSON 长度不能超过 4194304"
+    )
     private String elementSnapshotJson;
 
     @Size(max = 32768, message = "元数据 JSON 长度不能超过 32768")

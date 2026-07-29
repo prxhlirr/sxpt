@@ -6,6 +6,11 @@ import { useTrainingStore } from '../stores/trainingStore';
 
 const route = useRoute();
 const store = useTrainingStore();
+const immersiveRoute = computed(() =>
+  ['lesson-editor', 'lesson-recording', 'student-task-runner'].includes(
+    String(route.name ?? '')
+  )
+);
 
 const identityProfiles: Record<
   PortalRole,
@@ -65,7 +70,7 @@ const currentRole = computed(
 <template>
   <div
     class="app-shell"
-    :class="{ 'app-shell--immersive': route.name === 'lesson-editor' }"
+    :class="{ 'app-shell--immersive': immersiveRoute }"
   >
     <aside class="app-sidebar">
       <RouterLink class="brand" to="/platforms">
@@ -132,7 +137,7 @@ const currentRole = computed(
       </header>
       <main
         class="app-content"
-        :class="{ 'app-content--immersive': route.name === 'lesson-editor' }"
+        :class="{ 'app-content--immersive': immersiveRoute }"
       >
         <RouterView :key="route.fullPath" />
       </main>

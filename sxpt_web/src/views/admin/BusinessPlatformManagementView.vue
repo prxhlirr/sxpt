@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import type {
   BusinessPlatform,
@@ -131,7 +131,7 @@ function editModule(
   feedback.value = '';
 }
 
-function savePlatform() {
+async function savePlatform() {
   try {
     const payload = {
       code: platformForm.code,
@@ -141,8 +141,11 @@ function savePlatform() {
       status: platformForm.status
     };
     const saved = selectedPlatform.value
-      ? store.updateBusinessPlatform(selectedPlatform.value.id, payload)
-      : store.createBusinessPlatform(payload);
+      ? await store.updateBusinessPlatformRemote(
+          selectedPlatform.value.id,
+          payload
+        )
+      : await store.createBusinessPlatformRemote(payload);
     editPlatform(saved);
     ensureExpanded(saved.id);
     feedbackTone.value = 'success';
@@ -154,7 +157,7 @@ function savePlatform() {
   }
 }
 
-function saveModule() {
+async function saveModule() {
   const platform = selectedPlatform.value;
   if (!platform) {
     feedbackTone.value = 'danger';
@@ -170,12 +173,12 @@ function saveModule() {
       status: moduleForm.status
     };
     const saved = selectedModule.value
-      ? store.updateBusinessPlatformModule(
+      ? await store.updateBusinessPlatformModuleRemote(
           platform.id,
           selectedModule.value.id,
           payload
         )
-      : store.createBusinessPlatformModule(platform.id, payload);
+      : await store.createBusinessPlatformModuleRemote(platform.id, payload);
     editModule(platform, saved);
     feedbackTone.value = 'success';
     feedback.value = `“${platform.name} / ${saved.name}”已保存。`;
@@ -185,10 +188,10 @@ function saveModule() {
   }
 }
 
-function togglePlatform(platform: BusinessPlatform) {
+async function togglePlatform(platform: BusinessPlatform) {
   try {
     const status = platform.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
-    store.updateBusinessPlatform(platform.id, { status });
+    await store.setBusinessPlatformStatusRemote(platform.id, status);
     feedbackTone.value = 'success';
     feedback.value = `“${platform.name}”已${status === 'ENABLED' ? '启用' : '停用'}。`;
     if (
@@ -203,16 +206,18 @@ function togglePlatform(platform: BusinessPlatform) {
   }
 }
 
-function toggleModule(
+async function toggleModule(
   platform: BusinessPlatform,
   businessModule: BusinessPlatformModule
 ) {
   try {
     const status =
       businessModule.status === 'ENABLED' ? 'DISABLED' : 'ENABLED';
-    store.updateBusinessPlatformModule(platform.id, businessModule.id, {
-      status
-    });
+    await store.updateBusinessPlatformModuleRemote(
+      platform.id,
+      businessModule.id,
+      { status }
+    );
     feedbackTone.value = 'success';
     feedback.value = `“${businessModule.name}”已${status === 'ENABLED' ? '启用' : '停用'}。`;
     if (selectedModuleId.value === businessModule.id) {
@@ -224,9 +229,17 @@ function toggleModule(
   }
 }
 
-function removePlatform(platform: BusinessPlatform) {
+async function removePlatform(platform: BusinessPlatform) {
   if (!window.confirm(`确认删除业务平台“${platform.name}”及其模块吗？`)) return;
   try {
+    if (store.remote.enabled) {
+      await store.setBusinessPlatformStatusRemote(platform.id, 'DISABLED');
+      feedbackTone.value = 'success';
+      feedback.value =
+        `后端暂未提供业务平台删除接口，“${platform.name}”已改为停用。`;
+      editPlatform(platform);
+      return;
+    }
     store.removeBusinessPlatform(platform.id);
     if (selectedPlatformId.value === platform.id) newPlatform();
     feedbackTone.value = 'success';
@@ -237,7 +250,7 @@ function removePlatform(platform: BusinessPlatform) {
   }
 }
 
-function removeModule(
+async function removeModule(
   platform: BusinessPlatform,
   businessModule: BusinessPlatformModule
 ) {
@@ -249,7 +262,10 @@ function removeModule(
     return;
   }
   try {
-    store.removeBusinessPlatformModule(platform.id, businessModule.id);
+    await store.removeBusinessPlatformModuleRemote(
+      platform.id,
+      businessModule.id
+    );
     if (selectedModuleId.value === businessModule.id) newModule(platform);
     feedbackTone.value = 'success';
     feedback.value = `“${businessModule.name}”已删除。`;
@@ -284,6 +300,23 @@ function dateLabel(value: string) {
     minute: '2-digit'
   }).format(new Date(value));
 }
+
+onMounted(async () => {
+  if (!store.remote.enabled) return;
+  try {
+    await store.syncBusinessPlatforms();
+    expandedPlatformIds.value = store.state.businessPlatforms.map(
+      (platform) => platform.id
+    );
+    feedbackTone.value = 'success';
+    feedback.value = '业务平台已从后端同步。';
+  } catch (error) {
+    feedbackTone.value = 'danger';
+    feedback.value = `后端同步失败，当前保留本地缓存：${
+      error instanceof Error ? error.message : '未知错误'
+    }`;
+  }
+});
 </script>
 
 <template>
@@ -312,6 +345,18 @@ function dateLabel(value: string) {
             (lesson) =>
               lesson.businessPlatformId && lesson.businessPlatformModuleId
           ).length
+        }}</strong></span
+      >
+      <span
+        ><small>接口状态</small
+        ><strong>{{
+          store.remote.loading
+            ? '同步中'
+            : store.remote.enabled
+              ? store.remote.lastError
+                ? '异常'
+                : '已启用'
+              : '本地模式'
         }}</strong></span
       >
     </section>
@@ -521,7 +566,12 @@ function dateLabel(value: string) {
           </label>
           <label>
             <span>平台编码 *</span>
-            <input v-model="platformForm.code" placeholder="例如：PURCHASE" />
+            <input
+              v-model="platformForm.code"
+              :disabled="Boolean(selectedPlatform)"
+              placeholder="例如：PURCHASE"
+            />
+            <small v-if="selectedPlatform">平台编码由后端作为稳定标识，保存后不可修改。</small>
           </label>
           <label>
             <span>访问地址 *</span>

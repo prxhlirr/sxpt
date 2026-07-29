@@ -166,7 +166,38 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(editor).toContain('configured-business-frame');
     expect(editor).toContain('useEmbeddedBusinessSimulation');
     expect(editor).toContain('单独打开业务模块');
-    expect(editor).toContain("payload.type !== 'BUSINESS_ACTION'");
+    expect(editor).toContain(
+      "['BUSINESS_ACTION', 'SXPT_BUSINESS_ACTION'].includes(messageType)"
+    );
+    expect(editor).toContain('normalizeBusinessPageSnapshot(payload.pageSnapshot');
     expect(editor).toContain("window.addEventListener('message'");
+  });
+
+  it('讲解学习高亮录制操作位置，并允许隐藏上层菜单', () => {
+    const snapshot = source('src/utils/businessSnapshot.ts');
+    const snapshotFrame = source(
+      'src/components/lesson/BusinessSnapshotFrame.vue'
+    );
+    const recording = source('src/views/admin/RecordingPreviewView.vue');
+    const runner = source('src/views/student/StudentTaskRunnerView.vue');
+
+    expect(snapshot).toContain('sxpt-recorded-operation-target');
+    expect(snapshot).toContain("target.classList.add('sxpt-recorded-operation-target')");
+    expect(snapshotFrame).toContain('recorded-rect-highlight');
+    expect(recording).toContain(':selector-candidates="currentStep.selectorCandidates"');
+    expect(recording).toContain('隐藏讲解浮窗');
+    expect(runner).toContain(':selector-candidates="currentLearningStep.step.selectorCandidates"');
+    expect(runner).toContain("'operation-target': activeOperationTarget === 'search'");
+    expect(runner).toContain('隐藏上层菜单');
+  });
+
+  it('考试界面仅保留可隐藏的任务说明浮栏', () => {
+    const runner = source('src/views/student/StudentTaskRunnerView.vue');
+
+    expect(runner).toContain('v-if="!isExam" class="stage-sidebar"');
+    expect(runner).toContain('v-if="showHelp && !isExam" class="guide-panel"');
+    expect(runner).toContain('v-if="isExam && showHelp" class="exam-task-panel"');
+    expect(runner).toContain('显示考试说明');
+    expect(runner).toContain("task.value?.mode === 'EXAM'");
   });
 });

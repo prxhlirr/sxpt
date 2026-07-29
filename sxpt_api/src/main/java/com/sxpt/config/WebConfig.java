@@ -4,10 +4,14 @@ import com.sxpt.common.trace.TraceIdInterceptor;
 import com.sxpt.common.idempotent.IdempotentInterceptor;
 import com.sxpt.common.security.JwtAuthInterceptor;
 import org.apache.shiro.mgt.SecurityManager;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+
+import java.util.Arrays;
 
 /**
  * Web 层通用配置。
@@ -27,9 +31,29 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final StringRedisTemplate stringRedisTemplate;
 
-    public WebConfig(SecurityManager securityManager, StringRedisTemplate stringRedisTemplate) {
+    private final String[] allowedOrigins;
+
+    public WebConfig(SecurityManager securityManager,
+                     StringRedisTemplate stringRedisTemplate,
+                     @Value("${sxpt.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+                     String allowedOrigins) {
         this.securityManager = securityManager;
         this.stringRedisTemplate = stringRedisTemplate;
+        this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toArray(String[]::new);
+    }
+
+    @Override
+    public void addCorsMappings(CorsRegistry registry) {
+        registry.addMapping("/api/**")
+                .allowedOrigins(allowedOrigins)
+                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                .allowedHeaders("*")
+                .exposedHeaders("X-Trace-Id")
+                .allowCredentials(true)
+                .maxAge(3600);
     }
 
     @Override
