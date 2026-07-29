@@ -68,8 +68,7 @@ public class WebConfig implements WebMvcConfigurer {
      * 2. Spring MVC 在进入 Controller 前返回 CORS 响应头。
      * 3. 预检通过后浏览器才会发送真实登录或业务请求。
      */
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
+    private void addLegacyLocalDevCorsMappings(CorsRegistry registry) {
         registry.addMapping("/**")
                 .allowedOrigins(
                         "http://127.0.0.1:5173",
