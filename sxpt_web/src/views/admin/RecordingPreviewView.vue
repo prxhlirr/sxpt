@@ -20,6 +20,7 @@ const currentIndex = ref(0);
 const lectureFeedback = ref('');
 const lectureFeedbackSuccess = ref(false);
 const showLectureOverlay = ref(true);
+const showStageIntroduction = ref(true);
 
 const previewSteps = computed<PreviewStep[]>(() =>
   (lesson.value?.stages ?? []).flatMap((stage, stageIndex) =>
@@ -33,6 +34,16 @@ const previewSteps = computed<PreviewStep[]>(() =>
 );
 const current = computed(() => previewSteps.value[currentIndex.value]);
 const currentStep = computed(() => current.value?.step);
+const canMovePrevious = computed(
+  () =>
+    currentIndex.value > 0 ||
+    (!showStageIntroduction.value && current.value?.stepIndex === 0)
+);
+const canMoveNext = computed(
+  () =>
+    showStageIntroduction.value ||
+    currentIndex.value < previewSteps.value.length - 1
+);
 const totalDuration = computed(() =>
   previewSteps.value.reduce((total, item) => total + item.step.durationSeconds, 0)
 );
@@ -58,11 +69,33 @@ function formatDuration(seconds: number) {
 }
 
 function selectStep(index: number) {
+  const previousStageId = current.value?.stage.id;
   currentIndex.value = Math.max(0, Math.min(index, previewSteps.value.length - 1));
+  showStageIntroduction.value =
+    Boolean(previousStageId) && current.value?.stage.id !== previousStageId;
 }
 
 function move(direction: -1 | 1) {
-  selectStep(currentIndex.value + direction);
+  if (direction === 1) {
+    if (showStageIntroduction.value) {
+      showStageIntroduction.value = false;
+      return;
+    }
+    const following = previewSteps.value[currentIndex.value + 1];
+    if (!following) return;
+    const stageChanged = following.stage.id !== current.value?.stage.id;
+    currentIndex.value += 1;
+    showStageIntroduction.value = stageChanged;
+    return;
+  }
+
+  if (!showStageIntroduction.value && current.value?.stepIndex === 0) {
+    showStageIntroduction.value = true;
+    return;
+  }
+  if (currentIndex.value <= 0) return;
+  currentIndex.value -= 1;
+  showStageIntroduction.value = false;
 }
 
 function finishLecture() {
@@ -90,7 +123,7 @@ function finishLecture() {
       type="button"
       @click="showLectureOverlay = !showLectureOverlay"
     >
-      {{ showLectureOverlay ? '隐藏讲解浮窗' : '显示讲解浮窗' }}
+      {{ showLectureOverlay ? '隐藏其他讲解菜单' : '显示完整讲解菜单' }}
     </button>
 
     <header v-show="showLectureOverlay" class="preview-header">
@@ -132,10 +165,14 @@ function finishLecture() {
           class="snapshot-business-view"
           :snapshot="currentStep.pageSnapshot"
           :fallback-url="currentStep.url"
-          :selector="currentStep.selector"
-          :selector-candidates="currentStep.selectorCandidates"
-          :rect="currentStep.rect"
-          :recorded-viewport="currentStep.recordedViewport"
+          :selector="showStageIntroduction ? undefined : currentStep.selector"
+          :selector-candidates="
+            showStageIntroduction ? undefined : currentStep.selectorCandidates
+          "
+          :rect="showStageIntroduction ? undefined : currentStep.rect"
+          :recorded-viewport="
+            showStageIntroduction ? undefined : currentStep.recordedViewport
+          "
           :title="`${currentStep.pageTitle}录制页面快照`"
         />
 
@@ -143,7 +180,7 @@ function finishLecture() {
           <button
             class="icon-button"
             type="button"
-            :disabled="currentIndex === 0"
+            :disabled="!canMovePrevious"
             aria-label="上一步"
             @click="move(-1)"
           >
@@ -155,7 +192,7 @@ function finishLecture() {
           <button
             class="icon-button"
             type="button"
-            :disabled="currentIndex === previewSteps.length - 1"
+            :disabled="!canMoveNext"
             aria-label="下一步"
             @click="move(1)"
           >
@@ -164,30 +201,70 @@ function finishLecture() {
         </div>
       </main>
 
-      <aside v-show="showLectureOverlay" class="explanation-panel">
-        <div class="explanation-heading">
-          <span>步骤 {{ currentIndex + 1 }} / {{ previewSteps.length }}</span>
-          <strong>{{ currentStep.title }}</strong>
-          <small>{{ current.stage.name }} · {{ current.stage.groupKey }}</small>
-        </div>
-        <div class="instruction">
-          <span>逐步讲解</span>
-          <p>{{ currentStep.note || '请观察页面变化，并理解该动作在业务流程中的作用。' }}</p>
-        </div>
-        <dl>
-          <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
-          <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
-          <div><dt>selector</dt><dd><code>{{ currentStep.selector }}</code></dd></div>
-          <div><dt>durationSeconds</dt><dd>{{ currentStep.durationSeconds }} 秒</dd></div>
-          <div>
-            <dt>完成依据</dt>
-            <dd>{{ current.stage.completionMethod }}</dd>
+      <aside class="explanation-panel">
+        <template v-if="showStageIntroduction">
+          <div class="explanation-heading stage-introduction-heading">
+            <span>
+              本阶段说明 · 阶段 {{ current.stageIndex + 1 }} /
+              {{ lesson.stages.length }}
+            </span>
+            <strong>{{ current.stage.name }}</strong>
+            <small>{{ current.stage.groupKey || '未指定业务角色' }}</small>
           </div>
-        </dl>
+          <div class="instruction stage-introduction">
+            <span>阶段目标与注意事项</span>
+            <p>
+              {{
+                current.stage.description ||
+                '本阶段暂无补充说明，请按照录制节点顺序完成业务操作。'
+              }}
+            </p>
+          </div>
+          <dl>
+            <div><dt>阶段节点</dt><dd>{{ current.stage.recordedSteps.length }} 个</dd></div>
+            <div><dt>负责角色</dt><dd>{{ current.stage.groupKey || '未指定' }}</dd></div>
+            <div><dt>阶段分值</dt><dd>{{ current.stage.score }} 分</dd></div>
+            <div>
+              <dt>完成依据</dt>
+              <dd>{{ current.stage.completionMethod }}</dd>
+            </div>
+          </dl>
+        </template>
+        <template v-else>
+          <div class="explanation-heading">
+            <span>本节点说明 · 步骤 {{ currentIndex + 1 }} / {{ previewSteps.length }}</span>
+            <strong>{{ currentStep.title }}</strong>
+            <small>{{ current.stage.name }} · {{ current.stage.groupKey }}</small>
+          </div>
+          <div class="instruction">
+            <span>逐步讲解</span>
+            <p>{{ currentStep.note || '请观察页面变化，并理解该动作在业务流程中的作用。' }}</p>
+          </div>
+          <dl>
+            <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
+            <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
+            <div><dt>selector</dt><dd><code>{{ currentStep.selector }}</code></dd></div>
+            <div><dt>durationSeconds</dt><dd>{{ currentStep.durationSeconds }} 秒</dd></div>
+            <div>
+              <dt>完成依据</dt>
+              <dd>{{ current.stage.completionMethod }}</dd>
+            </div>
+          </dl>
+        </template>
         <div class="step-controls">
-          <button type="button" :disabled="currentIndex === 0" @click="move(-1)">← 上一步</button>
+          <button type="button" :disabled="!canMovePrevious" @click="move(-1)">
+            ← 上一步
+          </button>
           <button
-            v-if="currentIndex < previewSteps.length - 1"
+            v-if="showStageIntroduction"
+            class="primary"
+            type="button"
+            @click="move(1)"
+          >
+            进入本阶段 →
+          </button>
+          <button
+            v-else-if="currentIndex < previewSteps.length - 1"
             class="primary"
             type="button"
             @click="move(1)"
@@ -398,10 +475,6 @@ function finishLecture() {
   backdrop-filter: blur(12px);
   font-size: 9px;
   font-weight: 800;
-}
-
-.lecture-overlay-hidden .lecture-overlay-toggle {
-  right: 14px;
 }
 
 .lecture-overlay-hidden .business-stage {
@@ -688,6 +761,15 @@ function finishLecture() {
   border-radius: 11px;
   padding: 14px;
   background: #f7f5ff;
+}
+
+.stage-introduction-heading {
+  background: linear-gradient(135deg, #f7f5ff, #fff);
+}
+
+.stage-introduction {
+  border-color: #cfc8ff;
+  background: linear-gradient(145deg, #f3f0ff, #fbfaff);
 }
 
 .instruction span {

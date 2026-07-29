@@ -81,6 +81,10 @@ function sanitizeElementTree(root: Element) {
       element instanceof HTMLSelectElement ||
       element instanceof HTMLButtonElement
     ) {
+      element.setAttribute(
+        'data-sxpt-original-disabled',
+        String(element.disabled)
+      );
       element.disabled = true;
       element.setAttribute('disabled', '');
     }
@@ -187,7 +191,8 @@ function escapeHtml(value: string) {
 function sanitizeSnapshotHtml(
   html: string,
   selectors: string[] = [],
-  interactive = false
+  interactive = false,
+  clearFormValues = false
 ) {
   const parsed = new DOMParser().parseFromString(
     `<body>${html}</body>`,
@@ -211,9 +216,63 @@ function sanitizeSnapshotHtml(
         element instanceof HTMLSelectElement ||
         element instanceof HTMLButtonElement)
     ) {
-      element.disabled = false;
-      element.removeAttribute('disabled');
-      element.removeAttribute('aria-disabled');
+      if (element.dataset.sxptOriginalDisabled !== 'true') {
+        element.disabled = false;
+        element.removeAttribute('disabled');
+        element.removeAttribute('aria-disabled');
+      }
+    }
+    if (
+      clearFormValues &&
+      (element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement)
+    ) {
+      const isRecordedBusinessField =
+        element.hasAttribute('data-business-field') ||
+        element.hasAttribute('data-training-id') ||
+        element.hasAttribute('name') ||
+        element.hasAttribute('id') ||
+        selectors.some((selector) => {
+          try {
+            return element.matches(selector);
+          } catch {
+            return false;
+          }
+        });
+      if (
+        !isRecordedBusinessField ||
+        element.dataset.sxptOriginalDisabled === 'true' ||
+        element.hasAttribute('readonly') ||
+        (element instanceof HTMLInputElement &&
+          ['hidden', 'button', 'submit', 'reset'].includes(element.type))
+      ) {
+        return;
+      }
+      if (element instanceof HTMLSelectElement) {
+        Array.from(element.options).forEach((option) => {
+          option.selected = false;
+          option.removeAttribute('selected');
+        });
+        const placeholder = element.ownerDocument.createElement('option');
+        placeholder.value = '';
+        placeholder.textContent = '请选择';
+        placeholder.selected = true;
+        placeholder.setAttribute('selected', '');
+        element.prepend(placeholder);
+        element.selectedIndex = 0;
+      } else if (element instanceof HTMLInputElement) {
+        if (element.type === 'checkbox' || element.type === 'radio') {
+          element.checked = false;
+          element.removeAttribute('checked');
+        } else {
+          element.value = '';
+          element.removeAttribute('value');
+        }
+      } else {
+        element.value = '';
+        element.textContent = '';
+      }
     }
   });
   for (const selector of selectors) {
@@ -234,12 +293,14 @@ function sanitizeSnapshotHtml(
 export function createBusinessSnapshotDocument(
   snapshot: BusinessPageSnapshot,
   selectors: string[] = [],
-  interactive = false
+  interactive = false,
+  clearFormValues = false
 ) {
   const safeHtml = sanitizeSnapshotHtml(
     snapshot.html,
     selectors,
-    interactive
+    interactive,
+    clearFormValues
   );
   const safeCss = (snapshot.cssText ?? '').replace(/<\/style/gi, '<\\/style');
   const baseUrl = /^https?:\/\//i.test(snapshot.pageUrl)
@@ -297,6 +358,7 @@ export function createBusinessSnapshotDocument(
       interactive
         ? `<script>
       (() => {
+        let composing = false;
         const selectorFor = (element) => {
           if (element.dataset.action) {
             return '[data-action="' + element.dataset.action + '"]';
@@ -356,10 +418,43 @@ export function createBusinessSnapshotDocument(
         document.addEventListener('change', (event) => {
           const element = actionElement(event.target);
           if (!element) return;
+          if (
+            element.matches('input, textarea') &&
+            !String(element.value || '').trim()
+          ) {
+            return;
+          }
           report(
             element,
             element.matches('select') ? 'select' : 'input'
           );
+        });
+        document.addEventListener('compositionstart', () => {
+          composing = true;
+        });
+        document.addEventListener('compositionend', (event) => {
+          composing = false;
+          const element = actionElement(event.target);
+          if (
+            element &&
+            element.matches('input, textarea') &&
+            String(element.value || '').trim()
+          ) {
+            report(element, 'input');
+          }
+        });
+        document.addEventListener('input', (event) => {
+          const element = actionElement(event.target);
+          if (
+            composing ||
+            event.isComposing ||
+            !element ||
+            !element.matches('input, textarea') ||
+            !String(element.value || '').trim()
+          ) {
+            return;
+          }
+          report(element, 'input');
         });
         document.addEventListener('submit', (event) => event.preventDefault());
       })();

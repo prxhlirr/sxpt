@@ -184,18 +184,65 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(snapshot).toContain('sxpt-recorded-operation-target');
     expect(snapshot).toContain("target.classList.add('sxpt-recorded-operation-target')");
     expect(snapshotFrame).toContain('recorded-rect-highlight');
-    expect(recording).toContain(':selector-candidates="currentStep.selectorCandidates"');
-    expect(recording).toContain('隐藏讲解浮窗');
-    expect(runner).toContain(':selector-candidates="currentLearningStep.step.selectorCandidates"');
-    expect(runner).toContain("'operation-target': activeOperationTarget === 'search'");
-    expect(runner).toContain('隐藏上层菜单');
+    expect(recording).toContain('currentStep.selectorCandidates');
+    expect(recording).toContain(
+      ':selector="showStageIntroduction ? undefined : currentStep.selector"'
+    );
+    expect(recording).toContain('本节点说明');
+    expect(recording).toContain('本阶段说明');
+    expect(recording).toContain('showStageIntroduction');
+    expect(recording).toContain('进入本阶段');
+    expect(recording).toContain('隐藏其他讲解菜单');
+    expect(recording).toContain('<aside class="explanation-panel">');
+    expect(recording).not.toContain(
+      '<aside v-show="showLectureOverlay" class="explanation-panel">'
+    );
+    expect(runner).toContain('currentLearningStep?.step.selectorCandidates');
+    expect(runner).toContain('!showStageIntroduction &&');
+    expect(runner).toContain('@business-action="handleRecordedBusinessAction"');
+    expect(runner).toContain(':interactive=');
+    expect(runner).toContain('隐藏全部菜单');
+    expect(runner).toContain('stage-introduction-overlay');
+    expect(runner).toContain('本阶段说明');
+    expect(runner).toContain('@click="enterCurrentStage"');
+    expect(runner).toContain(
+      "() => [task.value?.id, task.value?.status] as const"
+    );
+    expect(runner).toContain('正在初始化任务');
+  });
+
+  it('练习清空备案表单值，并在点击或录入后按节点自动推进', () => {
+    const snapshot = source('src/utils/businessSnapshot.ts');
+    const snapshotFrame = source(
+      'src/components/lesson/BusinessSnapshotFrame.vue'
+    );
+    const businessPage = source('public/lesson-business-capture.html');
+    const runner = source('src/views/student/StudentTaskRunnerView.vue');
+
+    expect(runner).toContain(
+      ':clear-form-values="task.mode === \'PRACTICE\'"'
+    );
+    expect(snapshotFrame).toContain('SXPT_SET_STUDENT_MODE');
+    expect(snapshotFrame).toContain('snapshotFrameKey');
+    expect(snapshotFrame).toContain("'is-interactive': interactive && frameReady");
+    expect(snapshotFrame).toContain('@load="handleFrameLoad"');
+    expect(snapshotFrame).toContain("message.type === 'SXPT_TARGET_RECT'");
+    expect(snapshotFrame).toContain('window.setTimeout(markFrameReady, 300)');
+    expect(snapshotFrame).toContain('正在初始化当前操作');
+    expect(snapshot).toContain('clearFormValues');
+    expect(snapshot).toContain("document.addEventListener('input'");
+    expect(businessPage).toContain('message.type === "SXPT_SET_STUDENT_MODE"');
+    expect(businessPage).toContain('studentMode !== "PRACTICE"');
+    expect(businessPage).toContain('composingStudentInput');
   });
 
   it('考试界面仅保留可隐藏的任务说明浮栏', () => {
     const runner = source('src/views/student/StudentTaskRunnerView.vue');
 
-    expect(runner).toContain('v-if="!isExam" class="stage-sidebar"');
-    expect(runner).toContain('v-if="showHelp && !isExam" class="guide-panel"');
+    expect(runner).toContain('v-if="!isExam && showRunnerMenu" class="stage-sidebar"');
+    expect(runner).toContain(
+      'v-if="showRunnerMenu && !isExam && !showStageIntroduction"'
+    );
     expect(runner).toContain('v-if="isExam && showHelp" class="exam-task-panel"');
     expect(runner).toContain('显示考试说明');
     expect(runner).toContain("task.value?.mode === 'EXAM'");

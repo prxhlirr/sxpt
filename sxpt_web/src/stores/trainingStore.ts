@@ -1888,6 +1888,52 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     }
   }
 
+  function restartLearningOrPractice(taskId: string): StudentTask {
+    const task = requireStudentTask(taskId);
+    if (task.mode === 'EXAM') {
+      throw new Error('考试任务请使用考试重新作答流程');
+    }
+    if (task.status !== 'SUBMITTED' && task.status !== 'GRADED') {
+      throw new Error('只有已完成的学习或练习任务可以重新开始');
+    }
+
+    task.attemptNumber += 1;
+    task.status = 'TODO';
+    task.currentStageIndex = 0;
+    task.completedStageIds = [];
+    task.submissionValues = {};
+    delete task.objectiveScore;
+    delete task.subjectiveScore;
+    delete task.comment;
+    delete task.startedAt;
+    delete task.submittedAt;
+    delete task.gradedAt;
+    delete task.remoteExecutionId;
+    delete task.remoteExecutionStatus;
+    delete task.remoteScore;
+    delete task.remoteContextLoaded;
+    delete task.syncError;
+    task.syncStatus = backend.isEnabled() ? 'SYNCED' : 'LOCAL';
+
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    if (published) {
+      published.completedCount = state.studentTasks.filter(
+        (candidate) =>
+          candidate.publishedTaskId === published.id &&
+          (candidate.status === 'SUBMITTED' || candidate.status === 'GRADED')
+      ).length;
+    }
+    addActivity(
+      'TRAINING_TASK_RESTARTED',
+      `${task.studentName}${task.mode === 'LEARNING' ? '重新学习' : '重新练习'}`,
+      `从教案录制流程第一步开始，第 ${task.attemptNumber} 次`
+    );
+    persist();
+    return task;
+  }
+
   function restartStudentAttempt(taskId: string): StudentTask {
     const requestedTask = requireStudentTask(taskId);
     requireRunningExam(requestedTask);
@@ -2206,6 +2252,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     completeStudentStageRemote,
     submitStudentTask,
     submitStudentTaskRemote,
+    restartLearningOrPractice,
     restartStudentAttempt,
     gradeStudentTask,
     resetDemo

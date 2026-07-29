@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import { useTrainingStore } from '../../stores/trainingStore';
 
 const store = useTrainingStore();
+const router = useRouter();
 store.refreshPublishedTaskStatuses();
 const statusFilter = ref('ALL');
 
@@ -63,6 +64,23 @@ const statusLabel: Record<string, string> = {
   GRADED: '已出成绩'
 };
 
+function modeLabel(mode: 'LEARNING' | 'PRACTICE' | 'EXAM') {
+  return mode === 'LEARNING' ? '学习' : mode === 'PRACTICE' ? '练习' : '考试';
+}
+
+function taskStatusLabel(task: {
+  mode: 'LEARNING' | 'PRACTICE' | 'EXAM';
+  status: string;
+}) {
+  if (
+    task.mode !== 'EXAM' &&
+    (task.status === 'SUBMITTED' || task.status === 'GRADED')
+  ) {
+    return '已完成';
+  }
+  return statusLabel[task.status];
+}
+
 function lessonFor(lessonId: string) {
   return store.state.lessons.find((lesson) => lesson.id === lessonId);
 }
@@ -81,6 +99,11 @@ function taskDataLabel(taskId: string) {
     (item) => item.id === task.dataItemId
   );
   return data?.maskedReference ?? '已分配业务数据';
+}
+
+async function restartTrainingTask(taskId: string) {
+  store.restartLearningOrPractice(taskId);
+  await router.push(`/student/tasks/${taskId}`);
 }
 </script>
 
@@ -164,8 +187,8 @@ function taskDataLabel(taskId: string) {
     <div v-if="visibleTasks.length" class="student-task-grid">
       <article v-for="task in visibleTasks" :key="task.id" class="task-card">
         <header>
-          <span class="mode-badge">{{ task.mode === 'EXAM' ? '考试' : '练习' }}</span>
-          <StatusPill :status="task.status" :label="statusLabel[task.status]" />
+          <span class="mode-badge">{{ modeLabel(task.mode) }}</span>
+          <StatusPill :status="task.status" :label="taskStatusLabel(task)" />
         </header>
         <div class="task-title">
           <span>{{ lessonFor(task.lessonId)?.moduleName.slice(0, 1) }}</span>
@@ -204,10 +227,13 @@ function taskDataLabel(taskId: string) {
             <dd>{{ taskDataLabel(task.id) }}</dd>
           </div>
           <div>
-            <dt>作答次数</dt>
+            <dt>{{ task.mode === 'EXAM' ? '作答次数' : '完成次数' }}</dt>
             <dd>
-              第 {{ task.attemptNumber }} /
-              {{ store.state.examSettings[task.lessonId]?.maxAttempts ?? 1 }} 次
+              <template v-if="task.mode === 'EXAM'">
+                第 {{ task.attemptNumber }} /
+                {{ store.state.examSettings[task.lessonId]?.maxAttempts ?? 1 }} 次
+              </template>
+              <template v-else>第 {{ task.attemptNumber }} 次</template>
             </dd>
           </div>
           <div>
@@ -229,6 +255,23 @@ function taskDataLabel(taskId: string) {
           >
             {{ task.status === 'TODO' ? '开始办理' : '继续办理' }}
           </RouterLink>
+          <template
+            v-else-if="task.mode === 'LEARNING' || task.mode === 'PRACTICE'"
+          >
+            <RouterLink
+              class="button secondary"
+              :to="`/student/tasks/${task.id}`"
+            >
+              查看完成记录
+            </RouterLink>
+            <button
+              class="primary"
+              type="button"
+              @click="restartTrainingTask(task.id)"
+            >
+              {{ task.mode === 'LEARNING' ? '重新学习' : '重新练习' }}
+            </button>
+          </template>
           <RouterLink
             v-else
             class="button secondary"

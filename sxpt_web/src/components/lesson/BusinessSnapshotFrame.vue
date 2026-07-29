@@ -17,6 +17,7 @@ const props = defineProps<{
     height: number;
   };
   interactive?: boolean;
+  clearFormValues?: boolean;
   title: string;
 }>();
 
@@ -32,21 +33,42 @@ const emit = defineEmits<{
 }>();
 
 const frameRef = ref<HTMLIFrameElement | null>(null);
+const frameReady = ref(false);
+const lastImmediateAction = ref<{ selector: string; at: number }>();
+let frameReadyTimer: number | undefined;
 const selectors = computed(() =>
   [props.selector, ...(props.selectorCandidates ?? [])].filter(
     (selector): selector is string => Boolean(selector)
   )
 );
+const snapshotHasTarget = computed(() => {
+  if (!props.snapshot || !props.interactive || !selectors.value.length) {
+    return Boolean(props.snapshot);
+  }
+  const body = new DOMParser().parseFromString(
+    `<body>${props.snapshot.html}</body>`,
+    'text/html'
+  ).body;
+  return selectors.value.some((selector) => {
+    try {
+      return Boolean(body.querySelector(selector));
+    } catch {
+      return false;
+    }
+  });
+});
 const snapshotDocument = computed(() =>
-  props.snapshot
+  props.snapshot && snapshotHasTarget.value
     ? createBusinessSnapshotDocument(
         props.snapshot,
         selectors.value,
-        props.interactive
+        props.interactive,
+        props.clearFormValues
       )
     : undefined
 );
 const recordedRectStyle = computed(() => {
+  if (!snapshotDocument.value) return undefined;
   const viewport = props.recordedViewport ?? props.snapshot?.viewport;
   if (!props.rect || !viewport?.width || !viewport.height) return undefined;
   return {
@@ -57,15 +79,34 @@ const recordedRectStyle = computed(() => {
   };
 });
 const replayUrl = computed(() => {
-  if (props.snapshot) return undefined;
+  if (snapshotDocument.value) return undefined;
   if (!props.fallbackUrl || props.fallbackUrl.startsWith('internal://')) {
     return '/lesson-business-capture.html';
   }
   return props.fallbackUrl;
 });
+const selectorSignature = computed(() => selectors.value.join('|'));
+const snapshotFrameKey = computed(
+  () =>
+    [
+      props.snapshot?.capturedAt ?? 'snapshot',
+      props.interactive ? 'interactive' : 'readonly',
+      props.clearFormValues ? 'empty-form' : 'recorded-form',
+      selectorSignature.value
+    ].join(':')
+);
+const fallbackFrameKey = computed(
+  () =>
+    [
+      replayUrl.value ?? 'fallback',
+      props.interactive ? 'interactive' : 'readonly',
+      props.clearFormValues ? 'empty-form' : 'recorded-form',
+      selectorSignature.value
+    ].join(':')
+);
 
 function previewFallbackPage() {
-  if (props.snapshot || !frameRef.value?.contentWindow) return;
+  if (snapshotDocument.value || !frameRef.value?.contentWindow) return;
   let targetOrigin = window.location.origin;
   try {
     targetOrigin = new URL(replayUrl.value ?? '/', window.location.origin).origin;
@@ -74,12 +115,36 @@ function previewFallbackPage() {
   }
   frameRef.value.contentWindow.postMessage(
     {
+      type: 'SXPT_SET_STUDENT_MODE',
+      mode: props.clearFormValues ? 'PRACTICE' : 'LEARNING'
+    },
+    targetOrigin
+  );
+  frameRef.value.contentWindow.postMessage(
+    {
       type: 'SXPT_PREVIEW_STEP',
       selector: props.selector ?? '',
       url: props.fallbackUrl
     },
     targetOrigin
   );
+}
+
+function markFrameReady() {
+  if (frameReadyTimer !== undefined) {
+    window.clearTimeout(frameReadyTimer);
+    frameReadyTimer = undefined;
+  }
+  frameReady.value = true;
+}
+
+function handleFrameLoad() {
+  if (snapshotDocument.value) {
+    markFrameReady();
+    return;
+  }
+  previewFallbackPage();
+  frameReadyTimer = window.setTimeout(markFrameReady, 300);
 }
 
 function handleMessage(event: MessageEvent) {
@@ -91,47 +156,86 @@ function handleMessage(event: MessageEvent) {
     return;
   }
   const message = event.data as { type?: string; payload?: unknown };
+  if (message.type === 'SXPT_TARGET_RECT') {
+    markFrameReady();
+    return;
+  }
+  if (message.type === 'SXPT_BUSINESS_INTERACTION') {
+    const payload = message.payload as BusinessActionPayload;
+    lastImmediateAction.value = {
+      selector: payload.selector,
+      at: Date.now()
+    };
+    emit('business-action', payload);
+    return;
+  }
   if (
     message.type === 'SXPT_SNAPSHOT_ACTION' ||
     message.type === 'SXPT_BUSINESS_ACTION'
   ) {
-    emit('business-action', message.payload as BusinessActionPayload);
+    const payload = message.payload as BusinessActionPayload;
+    if (
+      message.type === 'SXPT_BUSINESS_ACTION' &&
+      lastImmediateAction.value?.selector === payload.selector &&
+      Date.now() - lastImmediateAction.value.at < 2_000
+    ) {
+      lastImmediateAction.value = undefined;
+      return;
+    }
+    emit('business-action', payload);
   }
 }
 
 watch(
-  () => [props.fallbackUrl, props.selector, props.interactive],
-  () => previewFallbackPage()
+  () => [snapshotFrameKey.value, fallbackFrameKey.value],
+  () => {
+    if (frameReadyTimer !== undefined) {
+      window.clearTimeout(frameReadyTimer);
+      frameReadyTimer = undefined;
+    }
+    frameReady.value = false;
+    lastImmediateAction.value = undefined;
+  }
 );
 
 onMounted(() => window.addEventListener('message', handleMessage));
-onBeforeUnmount(() => window.removeEventListener('message', handleMessage));
+onBeforeUnmount(() => {
+  if (frameReadyTimer !== undefined) window.clearTimeout(frameReadyTimer);
+  window.removeEventListener('message', handleMessage);
+});
 </script>
 
 <template>
   <div
     class="business-snapshot-frame"
-    :class="{ 'is-interactive': interactive }"
+    :class="{
+      'is-interactive': interactive && frameReady,
+      'is-loading': interactive && !frameReady
+    }"
   >
     <iframe
       v-if="snapshotDocument"
-      :key="snapshot?.capturedAt"
+      :key="snapshotFrameKey"
       ref="frameRef"
       :srcdoc="snapshotDocument"
       :title="title"
       :sandbox="interactive ? 'allow-scripts' : ''"
       referrerpolicy="no-referrer"
+      @load="handleFrameLoad"
     />
     <iframe
       v-else
-      :key="`${replayUrl}:${selector}`"
+      :key="fallbackFrameKey"
       ref="frameRef"
       :src="replayUrl"
       :title="title"
       sandbox="allow-scripts allow-same-origin"
       referrerpolicy="no-referrer"
-      @load="previewFallbackPage"
+      @load="handleFrameLoad"
     />
+    <span v-if="interactive && !frameReady" class="frame-loading-state">
+      正在初始化当前操作…
+    </span>
     <span
       v-if="recordedRectStyle"
       class="recorded-rect-highlight"
@@ -143,7 +247,9 @@ onBeforeUnmount(() => window.removeEventListener('message', handleMessage));
     <span class="snapshot-status">
       {{
         snapshot
-          ? `录制页面快照 · ${new Date(snapshot.capturedAt).toLocaleString()}`
+          ? snapshotDocument
+            ? `录制页面快照 · ${new Date(snapshot.capturedAt).toLocaleString()}`
+            : '录制快照缺少目标元素 · 已切换到同一业务系统操作页'
           : '旧节点无页面快照 · 正在按录制地址重建页面'
       }}
     </span>
@@ -170,6 +276,20 @@ onBeforeUnmount(() => window.removeEventListener('message', handleMessage));
 }
 
 .business-snapshot-frame.is-interactive iframe {
+  pointer-events: auto;
+}
+
+.frame-loading-state {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #6253d5;
+  background: rgb(244 246 251 / 72%);
+  backdrop-filter: blur(2px);
+  font-size: 11px;
+  font-weight: 800;
   pointer-events: auto;
 }
 
