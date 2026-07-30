@@ -82,6 +82,7 @@ const businessModules = ref<BusinessModule[]>([]);
 const strategies = ref<ModuleDataStrategy[]>([]);
 const templates = ref<TeachingDataTemplate[]>([]);
 const selectedRequirementId = ref('');
+const selectedJobId = ref('');
 const activeTab = ref<DetailTab>('overview');
 const advancedOpen = ref(false);
 const loading = ref(false);
@@ -143,6 +144,10 @@ const visibleJobs = computed(() => {
   if (!selectedRequirement.value) return jobs.value;
   return jobs.value.filter((job) => job.taskId === selectedRequirement.value?.taskId);
 });
+
+const selectedJob = computed(() =>
+  visibleJobs.value.find((job) => job.id === selectedJobId.value)
+);
 
 const selectedPoolReadyCount = computed(() =>
   pools.value.reduce((sum, item) => sum + Number(item.readyCount || 0), 0)
@@ -220,7 +225,7 @@ const diagnostics = computed<DiagnosticItem[]>(() => {
       level: 'warning',
       title: '批次尚未生成明细',
       target: selectedRequirement.value.id,
-      suggestion: '触发准备后会生成学生、题目、单位和角色维度的需求明细'
+      suggestion: '触发准备后会为学生和题目生成初始数据创建明细，并记录进入原平台所需的初始单位和角色'
     });
   }
   if (
@@ -287,8 +292,8 @@ const chainSteps = computed<ChainStep[]>(() => [
       : selectedRequirement.value
         ? 'blocked'
         : 'pending',
-    summary: latestJob.value?.jobStatus ? statusText(latestJob.value.jobStatus) : '尚未触发准备',
-    actionLabel: latestJob.value ? undefined : '触发准备',
+    summary: latestJob.value?.jobStatus ? statusText(latestJob.value.jobStatus) : '尚未创建初始数据',
+    actionLabel: latestJob.value ? undefined : '创建初始数据',
     actionKey: latestJob.value ? undefined : 'prepare'
   },
   {
@@ -329,8 +334,8 @@ const primaryAction = computed<PrimaryAction>(() => {
   }
   return {
     key: 'prepare',
-    label: '重新触发准备',
-    summary: '链路完整，可重新生成一个 attempt 进行验证'
+    label: '重新创建初始数据',
+    summary: '链路完整，可为新的 attempt 创建一条新的初始数据'
   };
 });
 
@@ -426,7 +431,7 @@ async function loadConnectorSystems() {
 async function loadBusinessModules() {
   businessModules.value = [];
   if (!filters.connectorSystemId) return;
-  businessModules.value = await dataPrepareApi.listBusinessModules({
+  businessModules.value = await dataPrepareApi.listActiveBusinessModules({
     tenantId: filters.tenantId,
     connectorSystemId: filters.connectorSystemId
   });
@@ -438,7 +443,7 @@ async function loadBusinessModules() {
 async function loadTemplates() {
   templates.value = [];
   if (!filters.connectorSystemId || !filters.moduleCode) return;
-  templates.value = await dataPrepareApi.listTemplates({
+  templates.value = await dataPrepareApi.listActiveTemplatesByModuleScene({
     tenantId: filters.tenantId,
     connectorSystemId: filters.connectorSystemId,
     moduleCode: filters.moduleCode,
@@ -460,8 +465,8 @@ async function loadStrategies() {
 }
 
 /**
- * 业务功能：为当前班级和模块创建数据准备批次。
- * 关键流程：校验平台、模块和启用策略后创建批次，避免生成无法执行的孤立批次。
+ * 业务功能：为当前班级和模块创建初始数据准备批次。
+ * 关键流程：校验平台、模块和启用策略后创建批次，避免生成无法创建原平台初始数据的孤立批次。
  */
 async function createRequirement() {
   if (!filters.connectorSystemId) {
@@ -499,8 +504,8 @@ async function createRequirement() {
 }
 
 /**
- * 业务功能：触发当前批次的数据准备任务，为学生生成并校验可分配的数据实例。
- * 关键流程：将学生、题目、单位、角色信息作为参与者提交，确保生成数据能满足原平台角色约束。
+ * 业务功能：触发当前批次的初始数据创建任务，为学生生成并校验可分配的数据实例。
+ * 关键流程：将学生、题目和初始单位角色作为参与者提交，确保学生从原平台第一步真实开始练习或考试。
  */
 async function prepareAndExecute() {
   if (!prepareForm.requirementId && selectedRequirementId.value) {
@@ -549,7 +554,7 @@ async function prepareAndExecute() {
       }
     });
     await refreshAll();
-  }, '已触发数据准备');
+  }, '已触发初始数据创建');
 }
 
 function selectRequirement(requirementId: string) {
@@ -583,8 +588,8 @@ async function loadAllocations(requirementId: string) {
 }
 
 /**
- * 业务功能：模拟学生进入练习或考试时领取数据实例，验证数据池能否正确分配。
- * 关键流程：从可用数据池领取一条实例，并记录学生、attempt 和题目维度的分配关系。
+ * 业务功能：模拟学生进入练习或考试时领取初始数据实例，验证数据池能否正确分配。
+ * 关键流程：从可用初始数据池领取一条实例，并记录学生、attempt 和题目维度的分配关系。
  */
 async function acquirePool(pool: TeachingDataPool) {
   await run(async () => {
@@ -669,12 +674,83 @@ function showRequirementDetail(requirement: DataRequirement) {
 }
 
 /**
- * 业务功能：触发指定批次的数据准备。
+ * 业务功能：触发指定批次的初始数据创建。
  * 关键流程：先选中批次并同步准备表单，再复用统一触发逻辑，保证证据链视图和执行目标一致。
  */
 async function prepareRequirement(requirement: DataRequirement) {
   selectRequirement(requirement.id);
   await prepareAndExecute();
+}
+
+/**
+ * 业务功能：判断准备任务是否允许人工补偿。
+ * 关键流程：只开放 FAILED/PARTIAL_FAILED，成功、运行中和取消任务不允许重复调用原平台。
+ */
+function canRetryJob(job: DataPrepareJob) {
+  return ['FAILED', 'PARTIAL_FAILED'].includes(job.jobStatus || '');
+}
+
+/**
+ * 业务功能：重试失败的数据准备任务。
+ * 关键流程：调用后台受控补偿接口；全失败批次整批重试，部分失败批次只重试失败明细。
+ */
+async function retryJob(job: DataPrepareJob) {
+  await run(async () => {
+    await dataPrepareApi.retryFailedJob(job.id, {
+      tenantId: filters.tenantId,
+      updateBy: session?.user.userId || session?.user.username || 'admin'
+    });
+    await refreshAll();
+    activeTab.value = 'jobs';
+  }, job.jobStatus === 'PARTIAL_FAILED' ? '已触发失败明细补偿' : '已触发失败任务重试');
+}
+
+/**
+ * 业务功能：选中准备任务并展示证据链详情。
+ * 关键流程：只保存任务 ID，详情始终从当前任务列表计算，刷新后不会引用过期对象。
+ */
+function showJobEvidence(job: DataPrepareJob) {
+  selectedJobId.value = job.id;
+}
+
+/**
+ * 业务功能：从任务证据字段里提取管理员最需要看到的失败摘要。
+ * 关键流程：优先展示错误消息；没有错误消息时展示原平台状态和失败数。
+ */
+function jobEvidenceSummary(job: DataPrepareJob) {
+  if (job.errorMessage) return job.errorMessage;
+  const result = parseJsonObject(job.resultJson);
+  const adapterStatus = typeof result.adapterStatus === 'string' ? result.adapterStatus : '';
+  const failedCount = typeof result.failedCount === 'number' ? result.failedCount : job.failedCount;
+  if (adapterStatus || failedCount) {
+    return `原平台状态：${adapterStatus || '-'} / 失败：${failedCount || 0}`;
+  }
+  return '暂无失败证据';
+}
+
+/**
+ * 业务功能：格式化 JSON 证据，方便管理员排查请求和响应。
+ * 关键流程：能解析则缩进展示，不能解析则原样展示，避免证据字段因为格式问题丢失。
+ */
+function formatEvidenceJson(value?: string) {
+  if (!value) return '暂无证据';
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+function parseJsonObject(value?: string) {
+  if (!value) return {} as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function statusText(status?: string) {
@@ -756,9 +832,9 @@ function formatTime(value?: string) {
 
     <header class="page-heading">
       <div>
-        <p>数据准备 / 批次准备</p>
-        <h1>给班级生成可练习的数据</h1>
-        <span>选择原平台业务模块，创建批次，触发准备，然后验证学生是否能领取到正确的数据实例。</span>
+        <p>数据准备 / 初始数据批次</p>
+        <h1>为学生创建初始数据并绑定</h1>
+        <span>选择原平台业务模块，创建批次，调用原平台生成初始数据，然后验证学生是否能领取到自己的数据实例。</span>
       </div>
       <div class="heading-actions">
         <button type="button" class="button ghost" :disabled="loading" @click="nextAttempt">
@@ -834,11 +910,11 @@ function formatTime(value?: string) {
         <strong>{{ requirements.length }}</strong>
       </article>
       <article>
-        <span>预计数据</span>
+        <span>预计初始数据</span>
         <strong>{{ summary.expected }}</strong>
       </article>
       <article>
-        <span>准备成功</span>
+        <span>创建成功</span>
         <strong>{{ summary.success }}</strong>
       </article>
       <article>
@@ -884,7 +960,7 @@ function formatTime(value?: string) {
         <label>
           <span>模板</span>
           <select v-model="filters.templateId">
-            <option value="">自动使用策略模板</option>
+            <option value="">自动使用初始数据策略模板</option>
             <option v-for="template in templates" :key="template.id" :value="template.id">
               {{ template.templateName }}
             </option>
@@ -925,7 +1001,7 @@ function formatTime(value?: string) {
           创建批次
         </button>
         <button type="button" class="button primary" :disabled="loading" @click="prepareAndExecute">
-          触发准备
+          创建初始数据
         </button>
       </div>
     </section>
@@ -954,14 +1030,14 @@ function formatTime(value?: string) {
           <div class="requirement-actions">
             <button type="button" @click="showRequirementDetail(requirement)">详情</button>
             <button type="button" :disabled="loading" @click="prepareRequirement(requirement)">
-              触发准备
+              创建初始数据
             </button>
           </div>
         </article>
 
         <div v-if="requirements.length === 0" class="empty-state">
           <strong>暂无批次</strong>
-          <p>当前模块策略完整后，可以创建第一批数据准备需求。</p>
+          <p>当前模块策略完整后，可以创建第一批初始数据准备需求。</p>
         </div>
 
         <footer v-if="requirements.length > PAGE_SIZE" class="requirement-pagination">
@@ -1079,7 +1155,7 @@ function formatTime(value?: string) {
           </table>
           <div v-if="items.length === 0" class="empty-state">
             <strong>暂无明细</strong>
-            <p>触发准备后会生成学生和题目维度的数据需求。</p>
+            <p>创建初始数据后会生成学生和题目维度的数据需求。</p>
           </div>
         </div>
 
@@ -1125,7 +1201,7 @@ function formatTime(value?: string) {
           </table>
           <div v-if="pools.length === 0" class="empty-state">
             <strong>暂无数据池</strong>
-            <p>准备成功并校验后，实例会进入题目维度的数据池。</p>
+            <p>初始数据创建成功并校验后，实例会进入题目维度的数据池。</p>
           </div>
         </div>
 
@@ -1139,6 +1215,8 @@ function formatTime(value?: string) {
                 <th>成功</th>
                 <th>失败</th>
                 <th>幂等键</th>
+                <th>失败证据</th>
+                <th>操作</th>
               </tr>
             </thead>
             <tbody>
@@ -1153,12 +1231,84 @@ function formatTime(value?: string) {
                 <td>{{ job.successCount || 0 }}</td>
                 <td>{{ job.failedCount || 0 }}</td>
                 <td>{{ shortId(job.idempotencyKey) }}</td>
+                <td>
+                  <span class="evidence-text" :title="jobEvidenceSummary(job)">
+                    {{ jobEvidenceSummary(job) }}
+                  </span>
+                </td>
+                <td>
+                  <button
+                    type="button"
+                    class="button tiny"
+                    @click="showJobEvidence(job)"
+                  >
+                    详情
+                  </button>
+                  <button
+                    type="button"
+                    class="button tiny"
+                    :disabled="loading || !canRetryJob(job)"
+                    @click="retryJob(job)"
+                  >
+                    重试
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
+          <section v-if="selectedJob" class="job-evidence-panel">
+            <header>
+              <div>
+                <span>准备任务证据链</span>
+                <strong>{{ shortId(selectedJob.id) }} / {{ statusText(selectedJob.jobStatus) }}</strong>
+              </div>
+              <button type="button" class="button tiny" @click="selectedJobId = ''">
+                关闭
+              </button>
+            </header>
+            <div class="job-evidence-meta">
+              <article>
+                <span>批次号</span>
+                <strong>{{ selectedJob.requestBatchId }}</strong>
+              </article>
+              <article>
+                <span>原平台请求</span>
+                <strong>{{ selectedJob.externalRequestId || '-' }}</strong>
+              </article>
+              <article>
+                <span>重试次数</span>
+                <strong>{{ selectedJob.retryCount || 0 }}</strong>
+              </article>
+              <article>
+                <span>Trace</span>
+                <strong>{{ selectedJob.traceId || '-' }}</strong>
+              </article>
+              <article>
+                <span>开始时间</span>
+                <strong>{{ formatTime(selectedJob.startTime) }}</strong>
+              </article>
+              <article>
+                <span>结束时间</span>
+                <strong>{{ formatTime(selectedJob.endTime) }}</strong>
+              </article>
+            </div>
+            <div v-if="selectedJob.errorMessage" class="job-error">
+              {{ selectedJob.errorMessage }}
+            </div>
+            <div class="job-evidence-grid">
+              <article>
+                <h3>请求证据</h3>
+                <pre>{{ formatEvidenceJson(selectedJob.requestJson) }}</pre>
+              </article>
+              <article>
+                <h3>响应证据</h3>
+                <pre>{{ formatEvidenceJson(selectedJob.resultJson) }}</pre>
+              </article>
+            </div>
+          </section>
           <div v-if="visibleJobs.length === 0" class="empty-state">
-            <strong>暂无准备任务</strong>
-            <p>点击触发准备后会生成任务记录。</p>
+            <strong>暂无初始数据创建任务</strong>
+            <p>点击创建初始数据后会生成任务记录。</p>
           </div>
         </div>
 
@@ -1212,7 +1362,7 @@ function formatTime(value?: string) {
           </table>
           <div v-if="allocations.length === 0" class="empty-state">
             <strong>暂无领取记录</strong>
-            <p>数据池 READY 后，可以领取一个实例验证学生分配链路。</p>
+            <p>初始数据池 READY 后，可以领取一个实例验证学生分配链路。</p>
           </div>
         </div>
 
@@ -1689,6 +1839,18 @@ tbody tr:hover {
   line-height: 1.45;
 }
 
+.evidence-text {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
 td small {
   display: block;
   margin-top: 3px;
@@ -1739,6 +1901,99 @@ td small {
 
 .badge.soft {
   opacity: 0.85;
+}
+
+.job-evidence-panel {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 14px;
+}
+
+.job-evidence-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.job-evidence-panel header div {
+  display: grid;
+  gap: 3px;
+}
+
+.job-evidence-panel header span,
+.job-evidence-meta span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.job-evidence-panel header strong,
+.job-evidence-meta strong {
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.job-evidence-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.job-evidence-meta article {
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.job-error {
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: var(--red-soft);
+  color: var(--red);
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+
+.job-evidence-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.job-evidence-grid article {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.job-evidence-grid h3 {
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.job-evidence-grid pre {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .empty-state {
@@ -1799,6 +2054,11 @@ td small {
 
   .chain-section {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .job-evidence-meta,
+  .job-evidence-grid {
+    grid-template-columns: 1fr;
   }
 
   .chain-step {

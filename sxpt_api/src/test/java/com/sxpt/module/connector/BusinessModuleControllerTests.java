@@ -3,7 +3,12 @@ package com.sxpt.module.connector;
 import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.service.BusinessModuleProcessChainService;
 import com.sxpt.module.connector.service.BusinessModuleService;
+import com.sxpt.module.user.mapper.TeachRoleMapper;
+import com.sxpt.module.user.mapper.TeachUserMapper;
+import com.sxpt.module.user.mapper.TeachUserOrgMapper;
+import com.sxpt.module.user.mapper.TeachUserRoleMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,6 +57,21 @@ class BusinessModuleControllerTests {
 
     @MockBean
     private BusinessModuleService businessModuleService;
+
+    @MockBean
+    private BusinessModuleProcessChainService businessModuleProcessChainService;
+
+    @MockBean
+    private TeachUserMapper teachUserMapper;
+
+    @MockBean
+    private TeachUserRoleMapper teachUserRoleMapper;
+
+    @MockBean
+    private TeachRoleMapper teachRoleMapper;
+
+    @MockBean
+    private TeachUserOrgMapper teachUserOrgMapper;
 
     /**
      * 校验创建业务模块成功返回统一响应，并将创建请求转换为业务模块实体。

@@ -4,7 +4,11 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
+import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
 import com.sxpt.module.connector.service.BusinessModuleService;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.springframework.context.annotation.Profile;
@@ -33,8 +37,16 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
 
     private final BusinessModuleMapper businessModuleMapper;
 
-    public BusinessModuleServiceImpl(BusinessModuleMapper businessModuleMapper) {
+    private final BusinessModuleProcessStepMapper processStepMapper;
+
+    private final BusinessModuleProcessActorMapper processActorMapper;
+
+    public BusinessModuleServiceImpl(BusinessModuleMapper businessModuleMapper,
+                                     BusinessModuleProcessStepMapper processStepMapper,
+                                     BusinessModuleProcessActorMapper processActorMapper) {
         this.businessModuleMapper = businessModuleMapper;
+        this.processStepMapper = processStepMapper;
+        this.processActorMapper = processActorMapper;
     }
 
     /**
@@ -48,6 +60,9 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
     public BusinessModule createBusinessModule(BusinessModule businessModule) {
         validateCreateFields(businessModule);
         fillCreateDefaults(businessModule);
+        if (RecordStatus.ACTIVE.getValue().equals(businessModule.getStatus())) {
+            validateActiveProcessChain(businessModule);
+        }
         businessModuleMapper.insert(businessModule);
         return businessModule;
     }
@@ -170,6 +185,9 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
     private BusinessModule changeStatus(String id, String status) {
         requireText(id);
         BusinessModule existing = getBusinessModuleById(id);
+        if (RecordStatus.ACTIVE.getValue().equals(status)) {
+            validateActiveProcessChain(existing);
+        }
         existing.setStatus(status);
         existing.setUpdateTime(LocalDateTime.now());
         existing.setLockVersion(nextLockVersion(existing.getLockVersion()));
@@ -222,6 +240,36 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
     }
 
     /**
+     * 校验业务模块启用前的标准办理链，避免教师发布任务时才发现无法确定原平台单位和角色。
+     *
+     * @param businessModule 业务模块实体。
+     */
+    private void validateActiveProcessChain(BusinessModule businessModule) {
+        if (Boolean.FALSE.equals(businessModule.getNeedPreData())) {
+            return;
+        }
+        List<BusinessModuleProcessStep> activeSteps = processStepMapper.selectList(new QueryWrapper<BusinessModuleProcessStep>()
+                .eq("tenant_id", businessModule.getTenantId())
+                .eq("business_module_id", businessModule.getId())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE)
+                .orderByAsc("step_no"));
+        if (activeSteps == null || activeSteps.isEmpty()) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+        for (BusinessModuleProcessStep step : activeSteps) {
+            Integer activeActorCount = processActorMapper.selectCount(new QueryWrapper<BusinessModuleProcessActor>()
+                    .eq("tenant_id", businessModule.getTenantId())
+                    .eq("process_step_id", step.getId())
+                    .eq("status", RecordStatus.ACTIVE.getValue())
+                    .eq("deleted", Boolean.FALSE));
+            if (activeActorCount == null || activeActorCount <= 0) {
+                throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+            }
+        }
+    }
+
+    /**
      * 补齐创建时默认字段。
      *
      * @param businessModule 业务模块实体。
@@ -241,7 +289,7 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
             businessModule.setNeedPreData(Boolean.TRUE);
         }
         if (!StringUtils.hasText(businessModule.getStatus())) {
-            businessModule.setStatus(RecordStatus.ACTIVE.getValue());
+            businessModule.setStatus(RecordStatus.DISABLED.getValue());
         }
         if (!StringUtils.hasText(businessModule.getCreateBy())) {
             businessModule.setCreateBy(resolveOperator(businessModule));

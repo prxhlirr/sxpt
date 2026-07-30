@@ -4,6 +4,7 @@ import type { RecordedStep } from '../domain/models';
 import {
   MAX_RECORDED_STEP_SNAPSHOT_JSON_LENGTH,
   backendTrainingApi,
+  buildPublishedDataPrepareSnapshot,
   distributedScore,
   mapConnectorSystem,
   mapStepActionType,
@@ -19,8 +20,24 @@ const connectorApiMock = vi.hoisted(() => ({
   enableSystem: vi.fn()
 }));
 
+const dataPrepareApiMock = vi.hoisted(() => ({
+  listActiveBusinessModules: vi.fn(),
+  listBusinessModules: vi.fn(),
+  listActiveStrategies: vi.fn(),
+  listTemplates: vi.fn(),
+  listActiveTemplatesByModuleScene: vi.fn(),
+  createRequirement: vi.fn(),
+  prepareAndExecute: vi.fn(),
+  listPools: vi.fn(),
+  acquireDataInstance: vi.fn()
+}));
+
 vi.mock('../api/connector', () => ({
   connectorApi: connectorApiMock
+}));
+
+vi.mock('./trainingApi', () => ({
+  dataPrepareApi: dataPrepareApiMock
 }));
 
 describe('后端训练接口映射', () => {
@@ -130,6 +147,152 @@ describe('后端训练接口映射', () => {
     expect(JSON.parse(snapshotJson).pageSnapshot.html).toContain('业务内容');
   });
 
+  it('发布数据准备快照应冻结系统模块模板策略和学生范围', () => {
+    const snapshot = buildPublishedDataPrepareSnapshot(
+      'tenant-1',
+      'teacher-1',
+      {
+        id: 'lesson-1',
+        code: 'lesson-code',
+        title: '采购审批',
+        moduleName: '采购模块',
+        businessPlatformId: 'platform-1',
+        businessPlatformModuleId: 'module-1',
+        description: '',
+        version: 3,
+        status: 'PUBLISHED',
+        teacherName: '王老师',
+        tags: [],
+        objectiveMaxScore: 80,
+        subjectiveMaxScore: 20,
+        updatedAt: '2026-07-30T00:00:00',
+        teachingPointId: 'point-1',
+        stages: [
+          {
+            id: 'stage-1',
+            stageKey: 'submit',
+            name: '提交申请',
+            groupKey: 'buyer',
+            description: '提交采购申请',
+            required: true,
+            score: 10,
+            completionMethod: 'business_check',
+            visibility: {
+              LEARNING: true,
+              PRACTICE: true,
+              EXAM: true
+            },
+            recordedSteps: []
+          }
+        ]
+      },
+      {
+        id: 'platform-1',
+        code: 'PURCHASE',
+        name: '采购平台',
+        baseUrl: 'https://purchase.example.com',
+        description: '',
+        status: 'ENABLED',
+        modules: [],
+        updatedAt: '2026-07-30T00:00:00'
+      },
+      {
+        id: 'module-1',
+        tenantId: 'tenant-1',
+        connectorSystemId: 'platform-1',
+        moduleCode: 'purchase_apply',
+        moduleName: '采购申请',
+        entryUrl: '/apply',
+        moduleType: 'BUSINESS',
+        status: 'ACTIVE'
+      },
+      {
+        id: 'template-1',
+        tenantId: 'tenant-1',
+        connectorSystemId: 'platform-1',
+        templateCode: 'TPL_PURCHASE_PRACTICE',
+        templateName: '采购练习初始数据',
+        sceneType: 'PRACTICE',
+        moduleCode: 'purchase_apply',
+        initState: 'DRAFT',
+        supportMode: 'INITIAL_ONLY',
+        configJson: '{"mode":"initial"}',
+        updateTime: '2026-07-30T00:00:00'
+      },
+      {
+        id: 'strategy-1',
+        tenantId: 'tenant-1',
+        connectorSystemId: 'platform-1',
+        businessModuleId: 'module-1',
+        moduleCode: 'purchase_apply',
+        moduleName: '采购申请',
+        sceneType: 'PRACTICE',
+        templateId: 'template-1',
+        dataSourceStrategy: 'CREATE',
+        sharePolicy: 'ATTEMPT_EXCLUSIVE',
+        regeneratePolicy: 'ON_ATTEMPT',
+        lockPolicy: 'NONE',
+        strategyCode: 'STRATEGY_PURCHASE_PRACTICE',
+        strategyVersion: 2
+      },
+      {
+        id: 'published-1',
+        lessonId: 'lesson-1',
+        title: '采购练习',
+        mode: 'PRACTICE',
+        status: 'RUNNING',
+        startAt: '2026-07-30T09:00:00',
+        endAt: '2026-07-30T10:00:00',
+        assignedCount: 1,
+        groupCount: 1,
+        dataCount: 0,
+        completedCount: 0,
+        remoteTaskId: 'task-1'
+      },
+      [
+        {
+          id: 'student-task-1',
+          publishedTaskId: 'published-1',
+          lessonId: 'lesson-1',
+          studentId: 'student-1',
+          studentName: '学生一',
+          title: '采购练习',
+          mode: 'PRACTICE',
+          groupKey: 'buyer',
+          groupKeys: ['buyer'],
+          unitId: 'unit-1',
+          unitName: '采购科',
+          dataItemId: 'question-1',
+          attemptNumber: 1,
+          submissionValues: {},
+          status: 'TODO',
+          currentStageIndex: 0,
+          completedStageIds: []
+        }
+      ]
+    );
+
+    expect(snapshot).toMatchObject({
+      source: 'publishTeachingTask',
+      snapshotVersion: 1,
+      platform: { id: 'platform-1', code: 'PURCHASE' },
+      module: { id: 'module-1', code: 'purchase_apply' },
+      template: { id: 'template-1', code: 'TPL_PURCHASE_PRACTICE' },
+      strategy: { id: 'strategy-1', version: 2 },
+      publishedTask: { remoteTaskId: 'task-1', mode: 'PRACTICE' },
+      studentScope: {
+        totalTaskCount: 1,
+        uniqueStudentCount: 1,
+        unitCount: 1,
+        groupKeys: ['buyer']
+      }
+    });
+    expect(snapshot.studentScope.students[0]).toMatchObject({
+      studentId: 'student-1',
+      unitName: '采购科'
+    });
+  });
+
   it('同步时自动在后端补齐缺失的内置业务平台并保留模块', async () => {
     const purchase = createDefaultBusinessPlatforms()[0];
     connectorApiMock.listSystems.mockResolvedValue([
@@ -179,6 +342,165 @@ describe('后端训练接口映射', () => {
         id: 'purchase-server',
         modules: purchase.modules
       }
+    );
+  });
+
+  it('发布任务自动准备数据时只读取已启用模板', async () => {
+    dataPrepareApiMock.listActiveBusinessModules.mockResolvedValue([
+      {
+        id: 'server-module-1',
+        tenantId: 'demo-tenant',
+        connectorSystemId: 'platform-1',
+        moduleCode: 'PURCHASE_APPLY',
+        moduleName: '采购申请',
+        entryUrl: '/apply',
+        moduleType: 'BUSINESS',
+        status: 'ACTIVE'
+      }
+    ]);
+    dataPrepareApiMock.listActiveStrategies.mockResolvedValue([
+      {
+        id: 'strategy-1',
+        tenantId: 'demo-tenant',
+        connectorSystemId: 'platform-1',
+        businessModuleId: 'server-module-1',
+        moduleCode: 'PURCHASE_APPLY',
+        moduleName: '采购申请',
+        sceneType: 'PRACTICE',
+        templateId: 'template-active-1',
+        dataSourceStrategy: 'CREATE',
+        sharePolicy: 'ATTEMPT_EXCLUSIVE',
+        regeneratePolicy: 'ON_ATTEMPT',
+        lockPolicy: 'NONE',
+        strategyCode: 'STRATEGY_PURCHASE_PRACTICE',
+        strategyVersion: 1
+      }
+    ]);
+    dataPrepareApiMock.listActiveTemplatesByModuleScene.mockResolvedValue([
+      {
+        id: 'template-active-1',
+        tenantId: 'demo-tenant',
+        connectorSystemId: 'platform-1',
+        templateCode: 'TPL_PURCHASE_PRACTICE',
+        templateName: '采购练习初始数据',
+        sceneType: 'PRACTICE',
+        moduleCode: 'PURCHASE_APPLY',
+        initState: 'DRAFT',
+        supportMode: 'INITIAL_ONLY',
+        configJson: '{"mode":"initial"}',
+        status: 'ACTIVE'
+      }
+    ]);
+    dataPrepareApiMock.createRequirement.mockResolvedValue({
+      id: 'requirement-1'
+    });
+    dataPrepareApiMock.prepareAndExecute.mockResolvedValue({
+      id: 'job-1',
+      jobStatus: 'SUCCESS'
+    });
+    dataPrepareApiMock.listPools.mockResolvedValue([
+      {
+        id: 'pool-1',
+        questionId: 'question-1',
+        poolStatus: 'READY',
+        readyCount: 1
+      }
+    ]);
+    dataPrepareApiMock.acquireDataInstance.mockResolvedValue({
+      id: 'allocation-1'
+    });
+
+    const allocatedCount =
+      await backendTrainingApi.prepareInitialDataForPublishedTask(
+        {
+          id: 'lesson-1',
+          code: 'lesson-code',
+          title: '采购申请练习',
+          moduleName: '采购申请',
+          businessPlatformId: 'platform-1',
+          businessPlatformModuleId: 'local-module-1',
+          description: '',
+          version: 1,
+          status: 'PUBLISHED',
+          teacherName: 'teacher',
+          tags: [],
+          objectiveMaxScore: 80,
+          subjectiveMaxScore: 20,
+          updatedAt: '2026-07-30T00:00:00',
+          teachingPointId: 'point-1',
+          stages: []
+        } as any,
+        {
+          id: 'platform-1',
+          code: 'PURCHASE',
+          name: '采购平台',
+          baseUrl: 'https://purchase.example.com',
+          description: '',
+          status: 'ENABLED',
+          modules: [
+            {
+              id: 'local-module-1',
+              code: 'PURCHASE_APPLY',
+              name: '采购申请',
+              path: '/apply',
+              description: '',
+              status: 'ENABLED',
+              updatedAt: '2026-07-30T00:00:00'
+            }
+          ],
+          updatedAt: '2026-07-30T00:00:00'
+        },
+        {
+          id: 'published-1',
+          lessonId: 'lesson-1',
+          title: '采购申请练习',
+          mode: 'PRACTICE',
+          status: 'RUNNING',
+          startAt: '2026-07-30T09:00:00',
+          endAt: '2026-07-30T10:00:00',
+          assignedCount: 1,
+          groupCount: 1,
+          dataCount: 0,
+          completedCount: 0,
+          remoteTaskId: 'task-1'
+        } as any,
+        [
+          {
+            id: 'student-task-1',
+            publishedTaskId: 'published-1',
+            lessonId: 'lesson-1',
+            studentId: 'student-1',
+            studentName: '学生一',
+            title: '采购申请练习',
+            mode: 'PRACTICE',
+            groupKey: 'buyer',
+            groupKeys: ['buyer'],
+            unitId: 'unit-1',
+            unitName: '采购科',
+            dataItemId: 'question-1',
+            attemptNumber: 1,
+            submissionValues: {},
+            status: 'TODO',
+            currentStageIndex: 0,
+            completedStageIds: []
+          }
+        ] as any
+      );
+
+    expect(allocatedCount).toBe(1);
+    expect(dataPrepareApiMock.listTemplates).not.toHaveBeenCalled();
+    expect(dataPrepareApiMock.listActiveTemplatesByModuleScene).toHaveBeenCalledWith({
+      tenantId: 'demo-tenant',
+      connectorSystemId: 'platform-1',
+      moduleCode: 'PURCHASE_APPLY',
+      sceneType: 'PRACTICE'
+    });
+    expect(dataPrepareApiMock.acquireDataInstance).toHaveBeenCalledWith(
+      expect.objectContaining({
+        poolId: 'pool-1',
+        ownerUserId: 'student-1',
+        taskId: 'task-1'
+      })
     );
   });
 });

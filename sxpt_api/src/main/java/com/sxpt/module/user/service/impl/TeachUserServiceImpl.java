@@ -1,5 +1,6 @@
 package com.sxpt.module.user.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.user.entity.TeachUser;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 教学平台用户服务实现。
@@ -49,6 +51,24 @@ public class TeachUserServiceImpl implements TeachUserService {
         fillCreateDefaults(teachUser);
         teachUserMapper.insert(teachUser);
         return teachUser;
+    }
+
+    /**
+     * 查询租户下的教学平台用户列表。
+     *
+     * 业务功能：支撑后台用户管理页面展示真实用户主数据，补齐数据准备依赖的教师、学生和管理员来源。
+     * 关键流程：先校验租户，再按软删除边界查询，按创建时间倒序方便管理员看到最近维护的数据。
+     *
+     * @param tenantId 租户 ID。
+     * @return 教学平台用户列表。
+     */
+    @Override
+    public List<TeachUser> listTeachUsersByTenantId(String tenantId) {
+        requireText(tenantId);
+        return teachUserMapper.selectList(new QueryWrapper<TeachUser>()
+                .eq("tenant_id", tenantId)
+                .eq("deleted", Boolean.FALSE)
+                .orderByDesc("create_time"));
     }
 
     /**

@@ -81,6 +81,20 @@ public interface TeachingDataTemplateService {
                                                              String sceneType);
 
     /**
+     * 查询指定平台、模块和场景下的启用模板，供教师发布和批次准备运行链路消费。
+     *
+     * @param tenantId 租户 ID。
+     * @param connectorSystemId 原平台配置 ID。
+     * @param moduleCode 业务模块编码。
+     * @param sceneType 教学场景。
+     * @return 启用模板列表。
+     */
+    List<TeachingDataTemplate> listActiveTemplatesByModuleAndScene(String tenantId,
+                                                                    String connectorSystemId,
+                                                                    String moduleCode,
+                                                                    String sceneType);
+
+    /**
      * 查询指定教学点和场景下的可用教学业务数据模板。
      *
      * @param tenantId 租户 ID。

@@ -9,13 +9,17 @@ import com.sxpt.module.user.entity.TeachUser;
 import com.sxpt.module.user.service.TeachUserService;
 import com.sxpt.module.user.vo.TeachUserVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.util.StringUtils;
 
 import javax.validation.Valid;
+import java.util.ArrayList;
+import java.util.List;
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -56,6 +60,25 @@ public class TeachUserController {
     public ApiResult<TeachUserVO> create(@Valid @RequestBody CreateTeachUserRequest request) {
         TeachUser saved = teachUserService.createTeachUser(toEntity(request));
         return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 查询教学平台用户列表。
+     *
+     * 业务功能：为管理端用户管理页面提供用户主数据列表，支撑后续角色授权、单位绑定和任务发布范围选择。
+     * 关键流程：通过 Service 按租户和软删除边界查询，再转换为 VO，避免前端依赖数据库实体细节。
+     *
+     * @param tenantId 租户 ID。
+     * @return 教学平台用户列表。
+     */
+    @GetMapping
+    public ApiResult<List<TeachUserVO>> list(@RequestParam String tenantId) {
+        List<TeachUser> teachUsers = teachUserService.listTeachUsersByTenantId(tenantId);
+        List<TeachUserVO> result = new ArrayList<>();
+        for (TeachUser teachUser : teachUsers) {
+            result.add(toVO(teachUser));
+        }
+        return ApiResult.success(result);
     }
 
     /**

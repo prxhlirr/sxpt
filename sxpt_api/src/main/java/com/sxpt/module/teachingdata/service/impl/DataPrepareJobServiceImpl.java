@@ -72,6 +72,52 @@ public class DataPrepareJobServiceImpl implements DataPrepareJobService {
     }
 
     /**
+     * 按租户和任务 ID 查询未删除的数据准备任务。
+     *
+     * @param tenantId 租户 ID。
+     * @param jobId 数据准备任务 ID。
+     * @return 命中的数据准备任务；不存在时返回 null。
+     */
+    @Override
+    public DataPrepareJob getByTenantAndId(String tenantId, String jobId) {
+        requireText(tenantId);
+        requireText(jobId);
+        return dataPrepareJobMapper.selectOne(new QueryWrapper<DataPrepareJob>()
+                .eq("tenant_id", tenantId)
+                .eq("id", jobId)
+                .eq("deleted", Boolean.FALSE)
+                .last("limit 1"));
+    }
+
+    /**
+     * 标记失败任务进入人工重试。
+     *
+     * @param tenantId 租户 ID。
+     * @param jobId 数据准备任务 ID。
+     * @param updateBy 操作人。
+     * @return 已更新的数据准备任务。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DataPrepareJob markRetrying(String tenantId, String jobId, String updateBy) {
+        DataPrepareJob job = getByTenantAndId(tenantId, jobId);
+        if (job == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        PrepareJobStatus status = PrepareJobStatus.fromValue(job.getJobStatus());
+        if (status == null || !status.isRetryable()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        job.setJobStatus(PrepareJobStatus.CREATED.getValue());
+        job.setRetryCount(defaultLong(job.getRetryCount()) + 1L);
+        job.setNextRetryTime(null);
+        job.setUpdateBy(updateBy);
+        job.setUpdateTime(LocalDateTime.now());
+        dataPrepareJobMapper.updateById(job);
+        return job;
+    }
+
+    /**
      * 查询指定任务和场景下的数据准备任务。
      *
      * @param tenantId 租户 ID。
@@ -107,7 +153,9 @@ public class DataPrepareJobServiceImpl implements DataPrepareJobService {
         }
         return dataPrepareJobMapper.selectList(new QueryWrapper<DataPrepareJob>()
                 .eq("tenant_id", tenantId)
-                .eq("job_status", PrepareJobStatus.FAILED.getValue())
+                .in("job_status",
+                        PrepareJobStatus.FAILED.getValue(),
+                        PrepareJobStatus.PARTIAL_FAILED.getValue())
                 .le("next_retry_time", now)
                 .eq("deleted", Boolean.FALSE)
                 .orderByAsc("next_retry_time")
@@ -179,5 +227,15 @@ public class DataPrepareJobServiceImpl implements DataPrepareJobService {
         if (job.getDeleted() == null) {
             job.setDeleted(Boolean.FALSE);
         }
+    }
+
+    /**
+     * 将空计数字段按 0 处理，避免历史数据重试时出现空指针。
+     *
+     * @param value 原始计数。
+     * @return 非空计数。
+     */
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
     }
 }

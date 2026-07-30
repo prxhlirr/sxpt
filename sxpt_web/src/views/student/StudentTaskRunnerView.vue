@@ -5,7 +5,6 @@ import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame
 import type { RecordedStep } from '../../domain/models';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import {
-  authApi,
   dataPrepareApi,
   type DataInstanceAllocation,
   type StudentDataLaunchResult
@@ -46,6 +45,11 @@ const submissionValues = reactive<Record<string, string>>({});
 const task = computed(() =>
   store.state.studentTasks.find(
     (item) => item.id === String(route.params.taskId)
+  )
+);
+const publishedTask = computed(() =>
+  store.state.publishedTasks.find(
+    (item) => item.id === task.value?.publishedTaskId
   )
 );
 const lesson = computed(() =>
@@ -185,6 +189,7 @@ const modeLabel = computed(() =>
       : '正式考试'
 );
 const isExam = computed(() => task.value?.mode === 'EXAM');
+const activeAllocationId = computed(() => launchAllocation.value?.id || '');
 const activeOperationTarget = computed<
   'start' | 'search' | 'open' | 'submit' | undefined
 >(() => {
@@ -202,6 +207,85 @@ const activeOperationTarget = computed<
   if (nextStage.value) return 'submit';
   return undefined;
 });
+
+/**
+ * 业务功能：解析数据准备侧使用的教学任务 ID。
+ * 关键流程：优先使用后端发布任务 ID，未同步到后端时回退到本地发布任务 ID，保证本地联调仍可查询分配记录。
+ */
+function resolveDataPrepareTaskId() {
+  return (
+    publishedTask.value?.remoteTaskId ||
+    task.value?.publishedTaskId ||
+    task.value?.id ||
+    ''
+  );
+}
+
+/**
+ * 业务功能：查询当前学生在本任务和场景下已分配的原平台数据。
+ * 关键流程：学生页只展示已由数据准备批次分配好的记录，不在前端自行决定数据池或领取策略。
+ */
+async function loadStudentAllocation() {
+  if (!task.value) return;
+  const taskId = resolveDataPrepareTaskId();
+  if (!taskId) {
+    launchAllocation.value = null;
+    launchErrorMessage.value = '无法识别当前教学任务，请刷新后再试。';
+    return;
+  }
+  allocationLoading.value = true;
+  launchMessage.value = '';
+  launchErrorMessage.value = '';
+  try {
+    const allocations = await dataPrepareApi.listCurrentStudentTaskAllocations({
+      taskId,
+      sceneType: task.value.mode,
+      executionId: task.value.remoteExecutionId
+    });
+    launchAllocation.value = allocations[0] || null;
+    if (!launchAllocation.value) {
+      launchErrorMessage.value = '暂未查询到可进入的原平台数据，请确认老师已完成数据准备并下发。';
+    }
+  } catch (error) {
+    launchAllocation.value = null;
+    launchErrorMessage.value =
+      error instanceof Error ? error.message : '原平台数据分配查询失败。';
+  } finally {
+    allocationLoading.value = false;
+  }
+}
+
+/**
+ * 业务功能：基于已分配数据生成进入原平台的一次性凭证。
+ * 关键流程：必须先查询到分配记录，再由后端创建 launchContext，避免学生端拼接不可信原平台入口。
+ */
+async function launchOriginPlatform() {
+  if (!task.value) return;
+  const taskId = resolveDataPrepareTaskId();
+  if (!taskId) {
+    launchErrorMessage.value = '无法识别当前教学任务，请刷新后再试。';
+    return;
+  }
+  launchLoading.value = true;
+  launchMessage.value = '';
+  launchErrorMessage.value = '';
+  try {
+    const result = await dataPrepareApi.createCurrentStudentTaskLaunch({
+      taskId,
+      sceneType: task.value.mode,
+      executionId: task.value.remoteExecutionId
+    });
+    launchResult.value = result;
+    launchAllocation.value = result.allocation;
+    window.open(result.launchUrl, '_blank', 'noopener,noreferrer');
+    launchMessage.value = '原平台进入凭证已生成，请在新窗口继续办理。';
+  } catch (error) {
+    launchErrorMessage.value =
+      error instanceof Error ? error.message : '原平台进入凭证生成失败。';
+  } finally {
+    launchLoading.value = false;
+  }
+}
 
 function syncSubmissionValues() {
   Object.keys(submissionValues).forEach((key) => {
@@ -307,27 +391,41 @@ function resetLocalAttempt() {
   errorMessage.value = '';
 }
 
-function restartAttempt() {
+async function restartAttempt() {
   if (!task.value) return;
   const participantCount = collaborationTasks.value.length;
   const confirmed = window.confirm(
-    `重新作答将调用 Mock 业务接口生成一条同单位的新业务数据，并重置共享该数据的 ${participantCount} 个学员任务；旧业务数据不会回滚。确认继续吗？`
+    `重新作答将重新创建一条原平台初始业务数据，并重置共享该数据的 ${participantCount} 个学员任务；旧业务数据不会回滚。确认继续吗？`
   );
   if (!confirmed) return;
   message.value = '';
   errorMessage.value = '';
   attemptMessage.value = '';
   try {
+    syncing.value = true;
+    const taskId = resolveDataPrepareTaskId();
+    if (!taskId) {
+      throw new Error('无法识别当前教学任务，请刷新后再试。');
+    }
+    const allocation = await dataPrepareApi.restartCurrentStudentTaskData({
+      taskId,
+      sceneType: task.value.mode,
+      executionId: task.value.remoteExecutionId
+    });
+    launchAllocation.value = allocation;
+    launchResult.value = null;
     store.restartStudentAttempt(task.value.id);
     checks.entered = false;
     checks.located = false;
     checks.reviewed = false;
     syncSubmissionValues();
     attemptMessage.value =
-      '已生成新的同条件业务数据，协作单元已整体进入下一次作答；旧数据仅停用，不执行回滚。';
+      '已生成新的原平台初始业务数据，协作单元已整体进入下一次作答；旧数据保留审计，不执行回滚。';
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '重新作答失败，请稍后重试。';
+  } finally {
+    syncing.value = false;
   }
 }
 
@@ -445,7 +543,7 @@ function enterCurrentStage() {
   errorMessage.value = '';
 }
 
-function restartTrainingTask() {
+async function restartTrainingTask() {
   if (
     !task.value ||
     task.value.mode === 'EXAM'
@@ -453,17 +551,33 @@ function restartTrainingTask() {
     return;
   }
   try {
+    syncing.value = true;
+    if (task.value.mode === 'PRACTICE') {
+      const taskId = resolveDataPrepareTaskId();
+      if (!taskId) {
+        throw new Error('无法识别当前教学任务，请刷新后再试。');
+      }
+      const allocation = await dataPrepareApi.restartCurrentStudentTaskData({
+        taskId,
+        sceneType: task.value.mode,
+        executionId: task.value.remoteExecutionId
+      });
+      launchAllocation.value = allocation;
+      launchResult.value = null;
+    }
     store.restartLearningOrPractice(task.value.id);
     syncLearningProgress(false);
     message.value =
       task.value.mode === 'LEARNING'
         ? '已重置学习记录，可以重新学习完整业务流程。'
-        : '已重置练习记录，可以重新练习完整业务流程。';
+        : '已生成新的原平台初始业务数据，可以重新练习完整业务流程。';
     errorMessage.value = '';
     showRunnerMenu.value = true;
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '任务重置失败。';
+  } finally {
+    syncing.value = false;
   }
 }
 </script>
@@ -810,7 +924,7 @@ function restartTrainingTask() {
                   <button
                     class="primary"
                     type="button"
-                    :disabled="launchLoading || allocationLoading || !activeAllocationId"
+                    :disabled="launchLoading || allocationLoading"
                     @click="launchOriginPlatform"
                   >
                     {{ launchLoading ? '正在生成凭证' : '进入原平台办理' }}

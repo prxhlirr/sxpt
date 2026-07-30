@@ -90,6 +90,53 @@ class DataPrepareJobServiceImplTests {
     }
 
     /**
+     * 验证按租户和任务 ID 查询任务时返回 Mapper 命中结果，避免重试入口绕过租户边界。
+     */
+    @Test
+    void getByTenantAndIdShouldReturnMapperResult() {
+        DataPrepareJob job = buildValidJob();
+        when(mapper.selectOne(any())).thenReturn(job);
+
+        DataPrepareJob result = service.getByTenantAndId("tenant_001", "job_001");
+
+        assertSame(job, result);
+        verify(mapper).selectOne(any());
+    }
+
+    /**
+     * 验证失败任务进入重试前会推进 retryCount 并恢复为 CREATED，保证重试行为可审计。
+     */
+    @Test
+    void markRetryingShouldUpdateRetryFields() {
+        DataPrepareJob job = buildValidJob();
+        job.setJobStatus(PrepareJobStatus.FAILED.getValue());
+        job.setRetryCount(2L);
+        when(mapper.selectOne(any())).thenReturn(job);
+
+        DataPrepareJob result = service.markRetrying("tenant_001", "job_001", "admin_001");
+
+        assertSame(job, result);
+        assertEquals(PrepareJobStatus.CREATED.getValue(), result.getJobStatus());
+        assertEquals(3L, result.getRetryCount());
+        assertEquals("admin_001", result.getUpdateBy());
+        verify(mapper).updateById(job);
+    }
+
+    /**
+     * 验证成功任务不能被标记为重试，避免终态成功数据被重复创建。
+     */
+    @Test
+    void markRetryingShouldRejectNonRetryableJob() {
+        DataPrepareJob job = buildValidJob();
+        job.setJobStatus(PrepareJobStatus.SUCCESS.getValue());
+        when(mapper.selectOne(any())).thenReturn(job);
+
+        assertThrows(BusinessException.class,
+                () -> service.markRetrying("tenant_001", "job_001", "admin_001"));
+        verify(mapper, times(0)).updateById(job);
+    }
+
+    /**
      * 验证按任务和场景查询任务时返回 Mapper 结果。
      */
     @Test

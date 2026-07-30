@@ -4,6 +4,7 @@ import TimedToast from '../../components/ui/TimedToast.vue';
 import {
   authApi,
   dataPrepareApi,
+  isDataPrepareConfigIncompleteError,
   type BusinessModule,
   type BusinessModuleProcessActor,
   type BusinessModuleProcessActorRequest,
@@ -15,6 +16,7 @@ import {
 
 type ModuleDialogMode = 'none' | 'detail' | 'create' | 'edit';
 type ChainDialogMode = 'none' | 'step-create' | 'step-edit' | 'actor-create' | 'actor-edit';
+type ModuleDetailTab = 'info' | 'chain';
 
 const PAGE_SIZE = 10;
 
@@ -30,6 +32,7 @@ const processActors = ref<BusinessModuleProcessActor[]>([]);
 const selectedStep = ref<BusinessModuleProcessStep | null>(null);
 const selectedActor = ref<BusinessModuleProcessActor | null>(null);
 const dialogMode = ref<ModuleDialogMode>('none');
+const detailTab = ref<ModuleDetailTab>('info');
 const chainDialogMode = ref<ChainDialogMode>('none');
 const loading = ref(false);
 const currentPage = ref(1);
@@ -122,6 +125,28 @@ const pagedModules = computed(() => {
 
 const isDialogOpen = computed(() => dialogMode.value !== 'none');
 const isChainDialogOpen = computed(() => chainDialogMode.value !== 'none');
+const moduleEnableChecklist = computed(() => {
+  const activeSteps = processSteps.value.filter((step) => step.status === 'ACTIVE');
+  const activeActors = processActors.value.filter((actor) => actor.status === 'ACTIVE');
+  return [
+    {
+      label: '至少维护 1 个启用的标准步骤',
+      done: activeSteps.length > 0
+    },
+    {
+      label: selectedStep.value
+        ? `当前步骤“${selectedStep.value.stepName}”至少维护 1 个启用参与方`
+        : '选择一个标准步骤后维护启用参与方',
+      done: Boolean(selectedStep.value) && activeActors.length > 0
+    },
+    {
+      label: activeSteps.length > 1
+        ? '逐个点击左侧启用步骤，确认每个步骤都有启用参与方'
+        : '启用多个步骤时，需要逐个确认参与方',
+      done: activeSteps.length <= 1 ? activeSteps.length === 1 && activeActors.length > 0 : false
+    }
+  ];
+});
 
 onMounted(initialize);
 
@@ -149,7 +174,7 @@ async function initialize() {
 async function loadModules() {
   modules.value = [];
   if (!connectorSystemId.value) return;
-  modules.value = await dataPrepareApi.listBusinessModules({
+  modules.value = await dataPrepareApi.listAllBusinessModules({
     tenantId: tenantId.value,
     connectorSystemId: connectorSystemId.value
   });
@@ -158,7 +183,7 @@ async function loadModules() {
 
 /**
  * 业务功能：创建本地联调业务模块。
- * 关键流程：必须先选择平台，创建后立即插入当前列表，便于继续维护模板和策略。
+ * 关键流程：必须先选择平台，创建后立即进入办理链维护，避免管理员创建模块后找不到下一步入口。
  */
 function openCreateModuleDialog() {
   if (!connectorSystemId.value) {
@@ -215,20 +240,37 @@ async function createLocalModule() {
     });
     modules.value = [created, ...modules.value];
     currentPage.value = 1;
-    closeDialog();
+    selectedModule.value = await dataPrepareApi.getBusinessModule(created.id);
+    await loadProcessSteps(selectedModule.value);
+    detailTab.value = 'chain';
+    dialogMode.value = 'detail';
   }, '已创建本地联调业务模块');
 }
 
 /**
- * 业务功能：打开业务模块详情弹窗。
- * 关键流程：从后端读取最新详情，避免列表缓存导致展示信息过期。
+ * 业务功能：打开业务模块配置弹窗。
+ * 关键流程：从后端读取最新模块详情和办理链，支撑管理员维护标准步骤及步骤参与方。
  */
 async function showModuleDetail(module: BusinessModule) {
   await run(async () => {
     selectedModule.value = await dataPrepareApi.getBusinessModule(module.id);
     await loadProcessSteps(selectedModule.value);
+    detailTab.value = 'info';
     dialogMode.value = 'detail';
   }, '模块详情已加载');
+}
+
+/**
+ * 业务功能：直接进入业务模块办理链维护。
+ * 关键流程：复用详情加载链路，但用更明确的操作入口承接“模块创建后维护标准办理链”的业务步骤。
+ */
+async function maintainProcessChain(module: BusinessModule) {
+  await run(async () => {
+    selectedModule.value = await dataPrepareApi.getBusinessModule(module.id);
+    await loadProcessSteps(selectedModule.value);
+    detailTab.value = 'chain';
+    dialogMode.value = 'detail';
+  }, '办理链路已加载');
 }
 
 /**
@@ -436,13 +478,53 @@ async function updateModule() {
  * 关键流程：调用后端真实启停用接口并替换当前行。
  */
 async function toggleModuleStatus(module: BusinessModule) {
+  if (module.status !== 'ACTIVE') {
+    loading.value = true;
+    closeNotice();
+    try {
+      const updated = await dataPrepareApi.enableBusinessModule(module.id);
+      modules.value = modules.value.map((item) => (item.id === updated.id ? updated : item));
+      notify('success', '业务模块已启用');
+    } catch (err) {
+      notify('error', moduleEnableErrorMessage(err));
+      await openModuleChainAfterEnableFailure(module);
+    } finally {
+      loading.value = false;
+    }
+    return;
+  }
   await run(async () => {
-    const updated =
-      module.status === 'ACTIVE'
-        ? await dataPrepareApi.disableBusinessModule(module.id)
-        : await dataPrepareApi.enableBusinessModule(module.id);
+    const updated = await dataPrepareApi.disableBusinessModule(module.id);
     modules.value = modules.value.map((item) => (item.id === updated.id ? updated : item));
-  }, module.status === 'ACTIVE' ? '业务模块已停用' : '业务模块已启用');
+  }, '业务模块已停用');
+}
+
+/**
+ * 业务功能：启用失败后直接定位到办理链维护页签。
+ * 关键流程：后端启用闸门已经拒绝半成品模块，前端随即加载详情并打开办理链，减少管理员排查路径。
+ */
+async function openModuleChainAfterEnableFailure(module: BusinessModule) {
+  try {
+    selectedModule.value = await dataPrepareApi.getBusinessModule(module.id);
+    await loadProcessSteps(selectedModule.value);
+    detailTab.value = 'chain';
+    dialogMode.value = 'detail';
+  } catch {
+    // 失败提示已经展示，详情加载失败不再覆盖原始启用错误。
+  }
+}
+
+/**
+ * 业务功能：把后端通用参数错误翻译成业务人员可执行的配置提示。
+ * 关键流程：启用业务模块失败大概率来自办理链不完整，因此保留原始错误并补充下一步操作。
+ */
+function moduleEnableErrorMessage(err: unknown) {
+  const rawMessage = err instanceof Error ? err.message : '操作失败';
+  const normalized = rawMessage.trim();
+  if (isDataPrepareConfigIncompleteError(err)) {
+    return '业务模块启用失败：标准办理链还不完整。请先维护至少一个启用的标准步骤，并为每个启用步骤维护至少一个启用参与方。';
+  }
+  return `${normalized}。请确认该模块已维护启用的标准步骤和步骤参与方。`;
 }
 
 function fillModuleForm(module: BusinessModuleRequest) {
@@ -530,6 +612,7 @@ function closeDialog() {
   processActors.value = [];
   selectedStep.value = null;
   selectedActor.value = null;
+  detailTab.value = 'info';
   dialogMode.value = 'none';
   chainDialogMode.value = 'none';
   closeNotice();
@@ -704,6 +787,7 @@ function relationText(value?: string) {
               <td>
                 <div class="row-actions">
                   <button type="button" @click="showModuleDetail(module)">详情</button>
+                  <button type="button" @click="maintainProcessChain(module)">办理链</button>
                   <button type="button" @click="editModule(module)">编辑</button>
                   <button type="button" :disabled="loading" @click="toggleModuleStatus(module)">
                     {{ module.status === 'ACTIVE' ? '停用' : '启用' }}
@@ -733,7 +817,13 @@ function relationText(value?: string) {
       role="presentation"
       @click.self="closeDialog"
     >
-      <section class="edit-dialog" role="dialog" aria-modal="true" aria-labelledby="module-dialog-title">
+      <section
+        class="edit-dialog"
+        :class="{ 'module-chain-dialog': dialogMode === 'detail' && detailTab === 'chain' }"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="module-dialog-title"
+      >
         <header class="dialog-header">
           <div>
             <p>业务模块</p>
@@ -743,7 +833,7 @@ function relationText(value?: string) {
                   ? '创建本地联调模块'
                   : dialogMode === 'edit'
                     ? '编辑业务模块'
-                    : '业务模块详情'
+                    : '模块配置 / 标准办理链'
               }}
             </h2>
           </div>
@@ -751,7 +841,28 @@ function relationText(value?: string) {
         </header>
 
         <template v-if="dialogMode === 'detail' && selectedModule">
-          <div class="detail-grid">
+          <div class="detail-tabs" role="tablist" aria-label="业务模块配置视图">
+            <button
+              type="button"
+              :class="{ active: detailTab === 'info' }"
+              role="tab"
+              :aria-selected="detailTab === 'info'"
+              @click="detailTab = 'info'"
+            >
+              模块信息
+            </button>
+            <button
+              type="button"
+              :class="{ active: detailTab === 'chain' }"
+              role="tab"
+              :aria-selected="detailTab === 'chain'"
+              @click="detailTab = 'chain'"
+            >
+              办理链路
+            </button>
+          </div>
+
+          <div v-if="detailTab === 'info'" class="detail-grid">
             <span>模块名称</span><strong>{{ selectedModule.moduleName }}</strong>
             <span>模块编码</span><strong>{{ selectedModule.moduleCode }}</strong>
             <span>入口地址</span><strong>{{ selectedModule.entryUrl }}</strong>
@@ -764,16 +875,29 @@ function relationText(value?: string) {
             <span>备注</span><strong>{{ selectedModule.remark || '-' }}</strong>
           </div>
 
-          <section class="process-chain">
+          <section v-if="detailTab === 'chain'" class="process-chain">
             <header class="chain-header">
               <div>
                 <span>办理链配置</span>
                 <h3>标准步骤与步骤参与方</h3>
+                <p>正式练习和考试从初始数据开始，办理链用于定义第一步进入原平台时的单位、角色，以及后续过程追踪依据。</p>
+                <p class="chain-rule">启用要求：至少 1 个启用标准步骤，且每个启用步骤至少 1 个启用参与方。</p>
               </div>
               <button type="button" class="secondary-action" @click="openCreateStepDialog">
                 新增标准步骤
               </button>
             </header>
+
+            <section class="readiness-checklist" aria-label="业务模块启用检查清单">
+              <article
+                v-for="item in moduleEnableChecklist"
+                :key="item.label"
+                :class="{ done: item.done }"
+              >
+                <span>{{ item.done ? '已满足' : '待补齐' }}</span>
+                <strong>{{ item.label }}</strong>
+              </article>
+            </section>
 
             <div class="chain-layout">
               <article class="chain-list">
@@ -1210,6 +1334,10 @@ function relationText(value?: string) {
   box-shadow: 0 18px 50px rgba(15, 23, 42, 0.16);
 }
 
+.module-chain-dialog {
+  width: min(1040px, 100%);
+}
+
 .dialog-header,
 .dialog-actions {
   display: flex;
@@ -1266,6 +1394,39 @@ function relationText(value?: string) {
 .dialog-header h2 {
   margin: 0;
   font-size: 20px;
+}
+
+.detail-tabs {
+  display: inline-flex;
+  gap: 4px;
+  margin: 16px 22px 0;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 4px;
+}
+
+.detail-tabs button {
+  min-height: 34px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 850;
+  padding: 0 14px;
+}
+
+.detail-tabs button.active {
+  background: #fff;
+  color: #2563eb;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.08);
+}
+
+.detail-tabs button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .detail-grid,
@@ -1325,6 +1486,56 @@ function relationText(value?: string) {
   margin: 4px 0 0;
   color: #172033;
   font-size: 18px;
+}
+
+.chain-rule {
+  display: inline-flex;
+  margin: 10px 0 0;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.5;
+  padding: 7px 10px;
+}
+
+.readiness-checklist {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 0 22px 16px;
+}
+
+.readiness-checklist article {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  padding: 10px 12px;
+}
+
+.readiness-checklist article.done {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.readiness-checklist span {
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.readiness-checklist article.done span {
+  color: #047857;
+}
+
+.readiness-checklist strong {
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .chain-layout {
@@ -1609,7 +1820,8 @@ function relationText(value?: string) {
 @media (max-width: 720px) {
   .context-panel,
   .detail-grid,
-  .edit-form {
+  .edit-form,
+  .readiness-checklist {
     grid-template-columns: 1fr;
   }
 

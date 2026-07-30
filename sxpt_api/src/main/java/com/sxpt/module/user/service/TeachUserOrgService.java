@@ -2,6 +2,8 @@ package com.sxpt.module.user.service;
 
 import com.sxpt.module.user.entity.TeachUserOrg;
 
+import java.util.List;
+
 /**
  * 教学用户组织关系服务。
  *
@@ -32,4 +34,15 @@ public interface TeachUserOrgService {
      * @return 已软删除的用户组织关系实体。
      */
     TeachUserOrg removeUserFromOrg(String tenantId, String orgId, String userId);
+
+    /**
+     * 查询租户下的用户教学组织关系列表。
+     *
+     * 业务功能：为后台单位绑定页面展示用户所属班级、课程班和分组关系，支撑任务发布范围和数据准备分配范围配置。
+     * 关键流程：按租户和软删除边界读取关系，保留 relationType 说明用户在单位中的身份。
+     *
+     * @param tenantId 租户 ID。
+     * @return 用户教学组织关系列表。
+     */
+    List<TeachUserOrg> listUserOrgsByTenantId(String tenantId);
 }

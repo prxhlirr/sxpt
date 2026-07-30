@@ -4,6 +4,7 @@ import TimedToast from '../../components/ui/TimedToast.vue';
 import {
   authApi,
   dataPrepareApi,
+  isDataPrepareConfigIncompleteError,
   type BusinessModule,
   type ConnectorSystem,
   type TeachingDataTemplate,
@@ -52,6 +53,15 @@ const templateForm = reactive<TeachingDataTemplateRequest>({
   updateBy: operatorId
 });
 
+const templateJsonBuilder = reactive({
+  adapter: 'local',
+  mode: 'demo',
+  requiredOrg: 'required',
+  requiredRole: 'required',
+  requiredStatus: 'DRAFT',
+  sensitiveFields: ''
+});
+
 function getDefaultTemplateForm(): TeachingDataTemplateRequest {
   return {
     templateName: '本地联调数据模板',
@@ -90,6 +100,29 @@ const totalPages = computed(() => Math.max(1, Math.ceil(templates.value.length /
 const pagedTemplates = computed(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE;
   return templates.value.slice(start, start + PAGE_SIZE);
+});
+const templateEnableChecklist = computed(() => {
+  const config = parseJsonObject(templateForm.configJson);
+  const orgRole = parseJsonObject(templateForm.requiredOrgRoleJson);
+  const resultCheck = parseJsonObject(templateForm.resultCheckSchemaJson);
+  return [
+    {
+      label: '初始数据配置 JSON 包含 adapter',
+      done: hasText(config.adapter)
+    },
+    {
+      label: '单位要求 JSON 包含 org',
+      done: hasText(orgRole.org)
+    },
+    {
+      label: '角色要求 JSON 包含 role',
+      done: hasText(orgRole.role)
+    },
+    {
+      label: '填写结果校验时包含 requiredStatus',
+      done: !templateForm.resultCheckSchemaJson?.trim() || hasText(resultCheck.requiredStatus)
+    }
+  ];
 });
 
 onMounted(initialize);
@@ -132,7 +165,7 @@ async function initialize() {
 async function loadModules() {
   modules.value = [];
   if (!connectorSystemId.value) return;
-  modules.value = await dataPrepareApi.listBusinessModules({
+  modules.value = await dataPrepareApi.listAllBusinessModules({
     tenantId: tenantId.value,
     connectorSystemId: connectorSystemId.value
   });
@@ -156,12 +189,13 @@ async function loadTemplates() {
 }
 
 /**
- * 业务功能：创建本地联调模板，用于定义当前模块在指定场景下要生成什么数据。
+ * 业务功能：创建本地联调初始数据模板，用于定义当前模块在指定场景下如何创建原平台初始业务数据。
  * 关键流程：先固定模块快照，再发起创建请求，避免异步期间选择变化导致模板错绑。
  */
 function openCreateTemplateDialog() {
   createTemplateCode.value = `LOCAL_TEMPLATE_${Date.now()}`;
   fillTemplateForm(getDefaultTemplateForm());
+  applyTemplateJsonBuilder();
   dialogMode.value = 'create';
 }
 
@@ -193,7 +227,7 @@ async function createLocalTemplate() {
     templates.value = [created, ...templates.value];
     currentPage.value = 1;
     closeDialog();
-  }, '已创建本地联调模板');
+  }, '已创建本地联调初始数据模板');
 }
 
 /**
@@ -246,13 +280,54 @@ async function updateTemplate() {
  * 关键流程：调用后端真实状态接口，再同步替换当前行，避免只改前端状态。
  */
 async function toggleTemplateStatus(template: TeachingDataTemplate) {
+  if (template.status !== 'ACTIVE') {
+    loading.value = true;
+    closeNotice();
+    try {
+      const updated = await dataPrepareApi.enableTemplate(template.id);
+      templates.value = templates.value.map((item) => (item.id === updated.id ? updated : item));
+      notify('success', '模板已启用');
+    } catch (err) {
+      notify('error', templateEnableErrorMessage(err));
+      await openTemplateEditorAfterEnableFailure(template);
+    } finally {
+      loading.value = false;
+    }
+    return;
+  }
   await run(async () => {
-    const updated =
-      template.status === 'ACTIVE'
-        ? await dataPrepareApi.disableTemplate(template.id)
-        : await dataPrepareApi.enableTemplate(template.id);
+    const updated = await dataPrepareApi.disableTemplate(template.id);
     templates.value = templates.value.map((item) => (item.id === updated.id ? updated : item));
-  }, template.status === 'ACTIVE' ? '模板已停用' : '模板已启用');
+  }, '模板已停用');
+}
+
+/**
+ * 业务功能：模板启用失败后打开编辑弹窗，方便管理员立即补齐运行配置。
+ * 关键流程：不复用通用 run，避免清空刚刚展示的启用失败提示。
+ */
+async function openTemplateEditorAfterEnableFailure(template: TeachingDataTemplate) {
+  try {
+    const detail = await dataPrepareApi.getTemplate(template.id);
+    selectedTemplate.value = detail;
+    fillTemplateForm(detail);
+    dialogMode.value = 'edit';
+  } catch {
+    // 保留启用失败提示，详情加载失败不覆盖原始原因。
+  }
+}
+
+/**
+ * 业务功能：把后端模板启用参数错误翻译成维护人员可执行的配置要求。
+ * 关键流程：模板启用依赖适配器、单位角色规则和可选状态校验，提示要直达这些字段。
+ */
+function templateEnableErrorMessage(err: unknown) {
+  const rawMessage = err instanceof Error ? err.message : '操作失败';
+  const normalized = rawMessage.trim();
+  const guide = '请在“常用配置表单”中补齐适配器、单位要求、角色要求，并生成 JSON 后保存。';
+  if (isDataPrepareConfigIncompleteError(err)) {
+    return `模板启用失败：运行配置不完整。${guide}`;
+  }
+  return `${normalized}。${guide}`;
 }
 
 /**
@@ -276,6 +351,48 @@ function fillTemplateForm(template: TeachingDataTemplate | TeachingDataTemplateR
   templateForm.resultCheckSchemaJson = template.resultCheckSchemaJson || '';
   templateForm.sensitiveFieldPolicyJson = template.sensitiveFieldPolicyJson || '';
   templateForm.updateBy = operatorId;
+  syncTemplateJsonBuilderFromForm();
+}
+
+/**
+ * 业务功能：用结构化表单生成模板 JSON，降低管理员直接维护 JSON 的理解成本。
+ * 关键流程：把常用的适配器、单位角色、结果校验和脱敏字段转换为后端兼容 JSON 字段。
+ */
+function applyTemplateJsonBuilder() {
+  templateForm.configJson = stringifyJson({
+    adapter: templateJsonBuilder.adapter.trim() || 'local',
+    mode: templateJsonBuilder.mode.trim() || 'demo'
+  });
+  templateForm.requiredOrgRoleJson = stringifyJson({
+    org: templateJsonBuilder.requiredOrg,
+    role: templateJsonBuilder.requiredRole
+  });
+  templateForm.resultCheckSchemaJson = stringifyJson({
+    requiredStatus: templateJsonBuilder.requiredStatus.trim() || 'DRAFT'
+  });
+  templateForm.sensitiveFieldPolicyJson = stringifyJson({
+    maskFields: splitCsv(templateJsonBuilder.sensitiveFields)
+  });
+  notify('success', '已根据表单生成模板 JSON');
+}
+
+/**
+ * 业务功能：编辑已有模板时反向读取 JSON，尽量回填到结构化表单。
+ * 关键流程：能识别的字段回填，不能识别的自定义 JSON 继续保留在原文本框。
+ */
+function syncTemplateJsonBuilderFromForm() {
+  const config = parseJsonObject(templateForm.configJson);
+  const orgRole = parseJsonObject(templateForm.requiredOrgRoleJson);
+  const resultCheck = parseJsonObject(templateForm.resultCheckSchemaJson);
+  const sensitive = parseJsonObject(templateForm.sensitiveFieldPolicyJson);
+  templateJsonBuilder.adapter = stringValue(config.adapter, templateJsonBuilder.adapter);
+  templateJsonBuilder.mode = stringValue(config.mode, templateJsonBuilder.mode);
+  templateJsonBuilder.requiredOrg = stringValue(orgRole.org, templateJsonBuilder.requiredOrg);
+  templateJsonBuilder.requiredRole = stringValue(orgRole.role, templateJsonBuilder.requiredRole);
+  templateJsonBuilder.requiredStatus = stringValue(resultCheck.requiredStatus, templateJsonBuilder.requiredStatus);
+  templateJsonBuilder.sensitiveFields = Array.isArray(sensitive.maskFields)
+    ? sensitive.maskFields.join(',')
+    : templateJsonBuilder.sensitiveFields;
 }
 
 /**
@@ -352,6 +469,37 @@ function closeNotice() {
   notice.value = { ...notice.value, show: false, message: '' };
 }
 
+function stringifyJson(value: Record<string, unknown>) {
+  return JSON.stringify(value, null, 2);
+}
+
+function parseJsonObject(value?: string) {
+  if (!value) return {} as Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function stringValue(value: unknown, fallback: string) {
+  return typeof value === 'string' && value.trim() ? value : fallback;
+}
+
+function hasText(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function splitCsv(value: string) {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function sceneText(value: string) {
   const map: Record<string, string> = {
     RECORD: '备课',
@@ -378,12 +526,12 @@ function statusClass(status?: string) {
 
     <header class="page-heading">
       <div>
-        <p>数据准备 / 模板管理</p>
-        <h1>系统模块数据模板</h1>
-        <p>维护每个业务模块在不同教学场景下需要生成的数据结构、初始状态和单位角色要求。</p>
+        <p>数据准备 / 初始模板</p>
+        <h1>系统模块初始数据模板</h1>
+        <p>模板只定义原平台初始业务数据的创建结构，不用于伪造中间办理步骤或审批状态。</p>
       </div>
       <button type="button" :disabled="loading || systems.length === 0" @click="openCreateTemplateDialog">
-        创建本地联调模板
+        创建初始数据模板
       </button>
     </header>
 
@@ -443,7 +591,7 @@ function statusClass(status?: string) {
 
     <section class="panel">
       <header class="panel-header">
-        <h2>模板列表</h2>
+        <h2>初始数据模板列表</h2>
         <span class="helper-text">共 {{ templates.length }} 条，每页 {{ PAGE_SIZE }} 条</span>
       </header>
       <div class="panel-body table-wrap">
@@ -486,8 +634,8 @@ function statusClass(status?: string) {
           </tbody>
         </table>
         <div v-if="templates.length === 0" class="empty-state">
-          <strong>暂无模板</strong>
-          <p>模板缺失时，老师无法为该业务模块创建有效的数据准备批次。</p>
+          <strong>暂无初始数据模板</strong>
+          <p>模板缺失时，老师无法为该业务模块创建原平台初始数据批次。</p>
         </div>
       </div>
       <footer v-if="templates.length > PAGE_SIZE" class="pagination-bar">
@@ -503,8 +651,8 @@ function statusClass(status?: string) {
       <section class="dialog-panel">
         <header class="dialog-header">
           <div>
-            <p>模板 {{ dialogMode === 'detail' ? '详情' : dialogMode === 'create' ? '创建' : '编辑' }}</p>
-            <h2>{{ dialogMode === 'create' ? '创建本地联调模板' : selectedTemplate?.templateName || selectedTemplate?.id }}</h2>
+            <p>初始数据模板 {{ dialogMode === 'detail' ? '详情' : dialogMode === 'create' ? '创建' : '编辑' }}</p>
+            <h2>{{ dialogMode === 'create' ? '创建初始数据模板' : selectedTemplate?.templateName || selectedTemplate?.id }}</h2>
           </div>
           <button type="button" class="icon-button" @click="closeDialog">×</button>
         </header>
@@ -518,8 +666,8 @@ function statusClass(status?: string) {
           <span>只读模板</span><strong>{{ selectedTemplate.readonlyFlag ? '是' : '否' }}</strong>
           <span>状态</span><strong>{{ selectedTemplate.status || '-' }}</strong>
           <span>更新时间</span><strong>{{ selectedTemplate.updateTime || '-' }}</strong>
-          <span>模板配置</span><strong>{{ selectedTemplate.configJson || '-' }}</strong>
-          <span>数据结构</span><strong>{{ selectedTemplate.dataSchemaJson || '-' }}</strong>
+          <span>初始数据配置</span><strong>{{ selectedTemplate.configJson || '-' }}</strong>
+          <span>初始数据结构</span><strong>{{ selectedTemplate.dataSchemaJson || '-' }}</strong>
           <span>单位角色要求</span><strong>{{ selectedTemplate.requiredOrgRoleJson || '-' }}</strong>
           <span>结果校验</span><strong>{{ selectedTemplate.resultCheckSchemaJson || '-' }}</strong>
         </div>
@@ -556,7 +704,7 @@ function statusClass(status?: string) {
             <input v-model="createTemplateCode" required />
           </label>
           <label>
-            <span>模板名称</span>
+            <span>初始模板名称</span>
             <input v-model="templateForm.templateName" required />
           </label>
           <label>
@@ -588,16 +736,72 @@ function statusClass(status?: string) {
             <input v-model="templateForm.readonlyFlag" type="checkbox" />
             <span>模板只读</span>
           </label>
+          <section class="json-builder wide">
+            <header>
+              <div>
+                <strong>常用配置表单</strong>
+                <span>填写后可自动生成下方 JSON，复杂场景仍可继续手动微调。</span>
+                <em>启用要求：适配器、单位要求和角色要求不能为空；结果状态校验填写后必须包含状态值。</em>
+              </div>
+              <button type="button" class="secondary" @click="applyTemplateJsonBuilder">
+                生成 JSON
+              </button>
+            </header>
+            <div class="readiness-checklist">
+              <article
+                v-for="item in templateEnableChecklist"
+                :key="item.label"
+                :class="{ done: item.done }"
+              >
+                <span>{{ item.done ? '已满足' : '待补齐' }}</span>
+                <strong>{{ item.label }}</strong>
+              </article>
+            </div>
+            <div class="json-builder-grid">
+              <label>
+                <span>适配器</span>
+                <input v-model="templateJsonBuilder.adapter" placeholder="local/http" />
+              </label>
+              <label>
+                <span>创建模式</span>
+                <input v-model="templateJsonBuilder.mode" placeholder="demo/production" />
+              </label>
+              <label>
+                <span>单位要求</span>
+                <select v-model="templateJsonBuilder.requiredOrg">
+                  <option value="required">必填</option>
+                  <option value="optional">可选</option>
+                  <option value="none">不校验</option>
+                </select>
+              </label>
+              <label>
+                <span>角色要求</span>
+                <select v-model="templateJsonBuilder.requiredRole">
+                  <option value="required">必填</option>
+                  <option value="optional">可选</option>
+                  <option value="none">不校验</option>
+                </select>
+              </label>
+              <label>
+                <span>初始状态校验</span>
+                <input v-model="templateJsonBuilder.requiredStatus" placeholder="DRAFT" />
+              </label>
+              <label>
+                <span>敏感字段</span>
+                <input v-model="templateJsonBuilder.sensitiveFields" placeholder="studentName,idCard" />
+              </label>
+            </div>
+          </section>
           <label class="wide">
-            <span>模板配置 JSON</span>
+            <span>初始数据配置 JSON</span>
             <textarea v-model="templateForm.configJson" rows="3" />
           </label>
           <label class="wide">
-            <span>数据结构 JSON</span>
+            <span>初始数据结构 JSON</span>
             <textarea v-model="templateForm.dataSchemaJson" rows="3" />
           </label>
           <label class="wide">
-            <span>模拟规则 JSON</span>
+            <span>初始数据模拟规则 JSON</span>
             <textarea v-model="templateForm.mockRuleJson" rows="3" />
           </label>
           <label class="wide">
@@ -785,6 +989,87 @@ function statusClass(status?: string) {
   grid-column: 1 / -1;
 }
 
+.json-builder {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 14px;
+}
+
+.json-builder header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.json-builder header div {
+  display: grid;
+  gap: 3px;
+}
+
+.json-builder header strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.json-builder header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.json-builder header em {
+  color: #1d4ed8;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1.5;
+}
+
+.readiness-checklist {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.readiness-checklist article {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #fed7aa;
+  border-radius: 8px;
+  background: #fff7ed;
+  padding: 10px 12px;
+}
+
+.readiness-checklist article.done {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.readiness-checklist span {
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.readiness-checklist article.done span {
+  color: #047857;
+}
+
+.readiness-checklist strong {
+  color: #172033;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.json-builder-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .edit-form textarea {
   width: 100%;
   max-width: 100%;
@@ -821,7 +1106,9 @@ function statusClass(status?: string) {
 @media (max-width: 900px) {
   .context-panel,
   .detail-grid,
-  .edit-form {
+  .edit-form,
+  .readiness-checklist,
+  .json-builder-grid {
     grid-template-columns: 1fr;
   }
 

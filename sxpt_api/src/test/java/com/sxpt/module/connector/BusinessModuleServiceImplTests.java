@@ -1,8 +1,12 @@
 package com.sxpt.module.connector;
 
+import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
 import com.sxpt.module.connector.service.BusinessModuleService;
 import com.sxpt.module.connector.service.impl.BusinessModuleServiceImpl;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
@@ -38,7 +42,14 @@ class BusinessModuleServiceImplTests {
 
     private final BusinessModuleMapper mapper = mock(BusinessModuleMapper.class);
 
-    private final BusinessModuleService service = new BusinessModuleServiceImpl(mapper);
+    private final BusinessModuleProcessStepMapper processStepMapper = mock(BusinessModuleProcessStepMapper.class);
+
+    private final BusinessModuleProcessActorMapper processActorMapper = mock(BusinessModuleProcessActorMapper.class);
+
+    private final BusinessModuleService service = new BusinessModuleServiceImpl(
+            mapper,
+            processStepMapper,
+            processActorMapper);
 
     /**
      * 校验创建业务模块时写入 Mapper 并补齐默认值。
@@ -50,7 +61,7 @@ class BusinessModuleServiceImplTests {
         BusinessModule saved = service.createBusinessModule(businessModule);
 
         assertSame(businessModule, saved);
-        assertEquals(RecordStatus.ACTIVE.getValue(), saved.getStatus());
+        assertEquals(RecordStatus.DISABLED.getValue(), saved.getStatus());
         assertEquals(0L, saved.getLockVersion());
         assertEquals(Boolean.TRUE, saved.getNeedPreData());
         assertFalse(saved.getDeleted());
@@ -139,12 +150,51 @@ class BusinessModuleServiceImplTests {
         existing.setStatus(RecordStatus.DISABLED.getValue());
         existing.setLockVersion(2L);
         when(mapper.selectOne(any())).thenReturn(existing);
+        when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
+        when(processActorMapper.selectCount(any())).thenReturn(1);
 
         BusinessModule result = service.enableBusinessModule("module_001");
 
         assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
         assertEquals(3L, result.getLockVersion());
         verify(mapper).updateById(result);
+    }
+
+    /**
+     * 校验启用需要预置数据的业务模块前必须存在启用的标准办理步骤。
+     */
+    @Test
+    void enableBusinessModuleShouldRejectMissingActiveProcessStep() {
+        BusinessModule existing = buildValidBusinessModule();
+        existing.setStatus(RecordStatus.DISABLED.getValue());
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(processStepMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableBusinessModule("module_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
+     * 校验每个启用的标准步骤必须至少存在一个启用参与方，确保原平台单位角色可以定位。
+     */
+    @Test
+    void enableBusinessModuleShouldRejectActiveStepWithoutActor() {
+        BusinessModule existing = buildValidBusinessModule();
+        existing.setStatus(RecordStatus.DISABLED.getValue());
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
+        when(processActorMapper.selectCount(any())).thenReturn(0);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableBusinessModule("module_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        verify(mapper, times(0)).updateById(existing);
     }
 
     /**
@@ -204,5 +254,20 @@ class BusinessModuleServiceImplTests {
         businessModule.setSupportScenes("[\"RECORD\",\"LEARNING\",\"PRACTICE\",\"EXAM\"]");
         businessModule.setUpdateBy("admin_001");
         return businessModule;
+    }
+
+    /**
+     * 构造启用状态的标准办理步骤，用于验证模块启用闸门。
+     *
+     * @return 标准办理步骤实体。
+     */
+    private BusinessModuleProcessStep buildActiveProcessStep() {
+        BusinessModuleProcessStep step = new BusinessModuleProcessStep();
+        step.setId("step_001");
+        step.setTenantId("tenant_001");
+        step.setBusinessModuleId("module_001");
+        step.setStatus(RecordStatus.ACTIVE.getValue());
+        step.setDeleted(Boolean.FALSE);
+        return step;
     }
 }

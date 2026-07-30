@@ -27,6 +27,24 @@ public interface DataRequirementService {
     DataRequirement createDataRequirement(DataRequirement requirement);
 
     /**
+     * 冻结数据准备批次的策略快照。
+     *
+     * 业务功能：在批次级别保存发布时使用的模板、策略、学生范围和原平台上下文，
+     * 避免后续管理员修改配置后无法还原本次数据准备依据。
+     *
+     * 关键流程：
+     * 1. 按租户和批次 ID 读取有效 DataRequirement。
+     * 2. 仅当 requirementPolicyJson 为空且调用方传入快照时写入，避免覆盖已冻结证据。
+     * 3. 返回最新批次实体，供触发链路继续审计。
+     *
+     * @param tenantId 租户 ID。
+     * @param requirementId 数据准备批次 ID。
+     * @param policySnapshotJson 批次策略快照 JSON。
+     * @return 已冻结或原样返回的数据准备批次。
+     */
+    DataRequirement freezeRequirementPolicySnapshot(String tenantId, String requirementId, String policySnapshotJson);
+
+    /**
      * 查询指定任务和场景下的数据需求批次。
      *
      * @param tenantId 租户 ID。

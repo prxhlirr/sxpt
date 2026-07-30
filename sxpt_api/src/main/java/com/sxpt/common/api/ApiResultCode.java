@@ -16,6 +16,7 @@ public enum ApiResultCode {
     SUCCESS(200, "操作成功"),
     PARAM_ERROR(400, "参数错误"),
     DATA_NOT_FOUND(404, "数据不存在"),
+    DATA_PREPARE_CONFIG_INCOMPLETE(422, "数据准备配置不完整"),
     STATE_NOT_ALLOWED(500, "状态不允许操作"),
     IDEMPOTENCY_KEY_REQUIRED(400, "缺少幂等请求头"),
     IDEMPOTENCY_CONFLICT(409, "重复请求"),

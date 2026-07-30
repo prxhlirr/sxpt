@@ -22,6 +22,13 @@ import type {
   RunMode,
   StudentTask
 } from '../domain/models';
+import {
+  dataPrepareApi,
+  type BusinessModule,
+  type ModuleDataStrategy,
+  type TeachingDataTemplate,
+  type TeachingDataPool
+} from './trainingApi';
 
 export interface ReportedStepBinding {
   eventId: string;
@@ -94,6 +101,12 @@ export interface BackendTrainingApi {
     mode: RunMode,
     options: PublishTeachingTaskOptions
   ): Promise<PublishedTeachingTaskBinding>;
+  prepareInitialDataForPublishedTask(
+    lesson: LessonPlan,
+    platform: BusinessPlatform,
+    publishedTask: PublishedTask,
+    studentTasks: StudentTask[]
+  ): Promise<number>;
   startStudentTaskExecution(
     lesson: LessonPlan,
     platform: BusinessPlatform,
@@ -435,6 +448,108 @@ export const backendTrainingApi: BackendTrainingApi = {
       evaluationRuleId: evaluationRule.id,
       taskStepIdsByStepId
     };
+  },
+
+  async prepareInitialDataForPublishedTask(
+    lesson,
+    platform,
+    publishedTask,
+    studentTasks
+  ) {
+    if (publishedTask.mode === 'LEARNING') return 0;
+    if (!publishedTask.remoteTaskId) {
+      throw new Error('后端任务尚未发布成功，不能自动准备初始数据');
+    }
+    const config = getApiConfig();
+    const module = await resolvePublishedBusinessModule(lesson, platform);
+    const strategies = await dataPrepareApi.listActiveStrategies({
+      tenantId: config.tenantId,
+      connectorSystemId: platform.id,
+      businessModuleId: module.id
+    });
+    const strategy = strategies.find(
+      (candidate) => candidate.sceneType === publishedTask.mode
+    );
+    if (!strategy) {
+      throw new Error('当前业务模块没有启用匹配发布场景的数据准备策略');
+    }
+    const templates = await dataPrepareApi.listActiveTemplatesByModuleScene({
+      tenantId: config.tenantId,
+      connectorSystemId: platform.id,
+      moduleCode: module.moduleCode,
+      sceneType: publishedTask.mode
+    });
+    const template = templates.find(
+      (candidate) => candidate.id === strategy.templateId
+    );
+    if (!template) {
+      throw new Error('当前数据准备策略引用的初始数据模板不存在或已停用');
+    }
+    const requirement = await dataPrepareApi.createRequirement({
+      tenantId: config.tenantId,
+      requirementCode: safeCode(
+        `REQ-${publishedTask.remoteTaskId}-${publishedTask.mode}`,
+        64
+      ),
+      connectorSystemId: platform.id,
+      businessModuleId: module.id,
+      moduleCode: module.moduleCode,
+      strategyId: strategy.id,
+      templateId: strategy.templateId,
+      taskId: publishedTask.remoteTaskId,
+      classId: config.simulatedOrgId,
+      sceneType: publishedTask.mode,
+      createBy: config.currentUserId,
+      updateBy: config.currentUserId
+    });
+    const requestBatchId = `publish-${publishedTask.remoteTaskId}-${Date.now()}`;
+    await dataPrepareApi.prepareAndExecute({
+      triggerType: 'PUBLISH',
+      idempotencyKey: `publish:${requirement.id}:${requestBatchId}`,
+      requestJson: JSON.stringify(
+        buildPublishedDataPrepareSnapshot(
+          config.tenantId,
+          config.currentUserId,
+          lesson,
+          platform,
+          module,
+          template,
+          strategy,
+          publishedTask,
+          studentTasks
+        )
+      ),
+      generateRequest: {
+        requirementId: requirement.id,
+        requestBatchId,
+        createBy: config.currentUserId,
+        updateBy: config.currentUserId,
+        participants: studentTasks.map((studentTask) =>
+          buildPublishDataParticipant(lesson, module, publishedTask, studentTask, requestBatchId)
+        )
+      }
+    });
+    const pools = await dataPrepareApi.listPools({
+      tenantId: config.tenantId,
+      requirementId: requirement.id
+    });
+    let allocatedCount = 0;
+    for (const studentTask of studentTasks) {
+      const pool = resolvePoolForStudentTask(pools, studentTask);
+      await dataPrepareApi.acquireDataInstance({
+        tenantId: config.tenantId,
+        poolId: pool.id,
+        ownerUserId: studentTask.studentId,
+        taskId: publishedTask.remoteTaskId,
+        allocationScene: publishedTask.mode,
+        attemptId: requestBatchId,
+        questionAttemptId: `${studentTask.dataItemId}-${requestBatchId}`,
+        createBy: config.currentUserId,
+        updateBy: config.currentUserId
+      });
+      allocatedCount += 1;
+    }
+    return allocatedCount;
   },
 
   async startStudentTaskExecution(lesson, platform, publishedTask, studentTask) {
@@ -826,6 +941,239 @@ async function ensureEvaluation(
     existingItems.push(item);
   }
   return rule;
+}
+
+/**
+ * 业务功能：构造发布时的数据准备快照。
+ * 关键流程：把原平台、业务模块、初始模板、生成策略、教学任务和学生范围固化到 requestJson，后续即使管理员修改配置，
+ * 也能解释“本批数据为什么按当时这套规则生成”。
+ */
+export function buildPublishedDataPrepareSnapshot(
+  tenantId: string,
+  operatorId: string,
+  lesson: LessonPlan,
+  platform: BusinessPlatform,
+  module: BusinessModule,
+  template: TeachingDataTemplate,
+  strategy: ModuleDataStrategy,
+  publishedTask: PublishedTask,
+  studentTasks: StudentTask[]
+) {
+  const uniqueStudents = new Map<string, StudentTask>();
+  for (const task of studentTasks) {
+    if (!uniqueStudents.has(task.studentId)) {
+      uniqueStudents.set(task.studentId, task);
+    }
+  }
+  return {
+    source: 'publishTeachingTask',
+    snapshotVersion: 1,
+    snapshotAt: new Date().toISOString(),
+    tenantId,
+    operatorId,
+    platform: {
+      id: platform.id,
+      code: platform.code,
+      name: platform.name,
+      baseUrl: platform.baseUrl,
+      status: platform.status
+    },
+    module: {
+      id: module.id,
+      code: module.moduleCode,
+      name: module.moduleName,
+      entryUrl: module.entryUrl,
+      status: module.status
+    },
+    template: {
+      id: template.id,
+      code: template.templateCode,
+      name: template.templateName,
+      sceneType: template.sceneType,
+      moduleCode: template.moduleCode,
+      initState: template.initState,
+      supportMode: template.supportMode,
+      configJson: template.configJson,
+      requestSchemaJson: template.requestSchemaJson,
+      requiredOrgRoleJson: template.requiredOrgRoleJson,
+      resultCheckSchemaJson: template.resultCheckSchemaJson,
+      sensitiveFieldPolicyJson: template.sensitiveFieldPolicyJson,
+      updateTime: template.updateTime
+    },
+    strategy: {
+      id: strategy.id,
+      code: strategy.strategyCode,
+      version: strategy.strategyVersion,
+      sceneType: strategy.sceneType,
+      templateId: strategy.templateId,
+      dataSourceStrategy: strategy.dataSourceStrategy,
+      prepareTiming: strategy.prepareTiming,
+      sharePolicy: strategy.sharePolicy,
+      regeneratePolicy: strategy.regeneratePolicy,
+      lockPolicy: strategy.lockPolicy,
+      validationPolicyJson: strategy.validationPolicyJson,
+      poolSizePolicyJson: strategy.poolSizePolicyJson,
+      defaultOrgRolePolicyJson: strategy.defaultOrgRolePolicyJson,
+      updateTime: strategy.updateTime
+    },
+    lesson: {
+      id: lesson.id,
+      code: lesson.code,
+      title: lesson.title,
+      version: lesson.version,
+      teachingPointId: lesson.teachingPointId,
+      objectiveMaxScore: lesson.objectiveMaxScore,
+      subjectiveMaxScore: lesson.subjectiveMaxScore,
+      stageCount: lesson.stages.length,
+      stageSnapshot: lesson.stages.map((stage) => ({
+        id: stage.id,
+        name: stage.name,
+        groupKey: stage.groupKey,
+        visible: stage.visibility[publishedTask.mode],
+        stepCount: stage.recordedSteps.length
+      }))
+    },
+    publishedTask: {
+      localPublishedTaskId: publishedTask.id,
+      remoteTaskId: publishedTask.remoteTaskId,
+      remoteCourseId: publishedTask.remoteCourseId,
+      remoteTeachingPointId: publishedTask.remoteTeachingPointId,
+      remoteEvaluationRuleId: publishedTask.remoteEvaluationRuleId,
+      mode: publishedTask.mode,
+      title: publishedTask.title,
+      startAt: publishedTask.startAt,
+      endAt: publishedTask.endAt,
+      assignedCount: publishedTask.assignedCount,
+      groupCount: publishedTask.groupCount
+    },
+    studentScope: {
+      totalTaskCount: studentTasks.length,
+      uniqueStudentCount: uniqueStudents.size,
+      unitCount: new Set(studentTasks.map((task) => task.unitId)).size,
+      groupKeys: Array.from(
+        new Set(studentTasks.flatMap((task) => task.groupKeys))
+      ),
+      students: Array.from(uniqueStudents.values()).map((task) => ({
+        studentId: task.studentId,
+        studentName: task.studentName,
+        unitId: task.unitId,
+        unitName: task.unitName,
+        groupKeys: task.groupKeys
+      }))
+    }
+  };
+}
+
+/**
+ * 业务功能：解析发布任务绑定的数据准备业务模块。
+ * 关键流程：优先使用教案中保存的业务模块 ID，其次按模块编码匹配，避免前端缓存 ID 与后端模块 ID 不一致时直接中断发布后自动准备。
+ */
+async function resolvePublishedBusinessModule(
+  lesson: LessonPlan,
+  platform: BusinessPlatform
+): Promise<BusinessModule> {
+  const config = getApiConfig();
+  const modules = await dataPrepareApi.listActiveBusinessModules({
+    tenantId: config.tenantId,
+    connectorSystemId: platform.id
+  });
+  const localModule = platform.modules.find(
+    (candidate) => candidate.id === lesson.businessPlatformModuleId
+  );
+  const matched = modules.find(
+    (candidate) =>
+      candidate.id === lesson.businessPlatformModuleId ||
+      candidate.moduleCode === localModule?.code
+  );
+  if (!matched) {
+    throw new Error('当前教案未绑定可用于数据准备的后端业务模块');
+  }
+  return matched;
+}
+
+/**
+ * 业务功能：构造发布后自动准备数据的单个学生参与方。
+ * 关键流程：当前阶段以前端分组信息作为单位和角色的最小映射，后续可替换为管理员维护的原平台单位/角色映射表。
+ */
+function buildPublishDataParticipant(
+  lesson: LessonPlan,
+  module: BusinessModule,
+  publishedTask: PublishedTask,
+  studentTask: StudentTask,
+  requestBatchId: string
+) {
+  const actorType = studentTask.groupKeys[0] || studentTask.groupKey || 'student';
+  const visibleStages = lesson.stages.filter(
+    (stage) => stage.visibility[publishedTask.mode] && studentTask.groupKeys.includes(stage.groupKey)
+  );
+  return {
+    studentId: studentTask.studentId,
+    questionId: studentTask.dataItemId || studentTask.id,
+    examAttemptId: requestBatchId,
+    questionAttemptId: `${studentTask.dataItemId || studentTask.id}-${requestBatchId}`,
+    actorType,
+    ownerExternalOrgId: studentTask.unitId,
+    ownerExternalOrgName: studentTask.unitName,
+    requiredExternalOrgId: studentTask.unitId,
+    requiredExternalOrgName: studentTask.unitName,
+    requiredExternalRoleId: actorType,
+    requiredExternalRoleName: actorType,
+    dataScopeJson: JSON.stringify({
+      lessonId: lesson.id,
+      publishedTaskId: publishedTask.id,
+      remoteTaskId: publishedTask.remoteTaskId,
+      moduleCode: module.moduleCode,
+      mode: publishedTask.mode
+    }),
+    requiredActionsJson: JSON.stringify(
+      visibleStages.flatMap((stage) =>
+        stage.recordedSteps.map((step) => ({
+          stageId: stage.id,
+          stageName: stage.name,
+          stepId: step.id,
+          actionType: step.actionType,
+          title: step.title
+        }))
+      )
+    ),
+    scorePointSnapshotJson: JSON.stringify({
+      objectiveMaxScore: lesson.objectiveMaxScore,
+      subjectiveMaxScore: lesson.subjectiveMaxScore,
+      taskStepIdsByStepId: publishedTask.remoteTaskStepIdsByStepId ?? {}
+    })
+  };
+}
+
+/**
+ * 业务功能：为学生任务选择本次发布生成的数据池。
+ * 关键流程：优先按 dataItemId 对应的 questionId 选择，兜底使用公共池，保证练习和单题考试都能完成领取。
+ */
+function resolvePoolForStudentTask(
+  pools: TeachingDataPool[],
+  studentTask: StudentTask
+): TeachingDataPool {
+  const pool =
+    pools.find(
+      (candidate) =>
+        candidate.questionId === studentTask.dataItemId &&
+        candidate.poolStatus === 'READY' &&
+        Number(candidate.readyCount || 0) > 0
+    ) ||
+    pools.find(
+      (candidate) =>
+        !candidate.questionId &&
+        candidate.poolStatus === 'READY' &&
+        Number(candidate.readyCount || 0) > 0
+    ) ||
+    pools.find(
+      (candidate) =>
+        candidate.poolStatus === 'READY' &&
+        Number(candidate.readyCount || 0) > 0
+    );
+  if (!pool) {
+    throw new Error('原平台初始数据已生成但没有可领取的数据池');
+  }
+  return pool;
 }
 
 export function distributedScore(

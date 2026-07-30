@@ -10,6 +10,7 @@ import com.sxpt.module.teachingdata.service.DataPrepareFacadeService;
 import com.sxpt.module.teachingdata.service.DataPrepareJobService;
 import com.sxpt.module.teachingdata.service.DataPrepareOrchestrationService;
 import com.sxpt.module.teachingdata.service.DataRequirementGenerationService;
+import com.sxpt.module.teachingdata.service.DataRequirementService;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,12 +42,16 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
 
     private final DataPrepareOrchestrationService dataPrepareOrchestrationService;
 
+    private final DataRequirementService dataRequirementService;
+
     public DataPrepareFacadeServiceImpl(DataRequirementGenerationService requirementGenerationService,
                                         DataPrepareJobService dataPrepareJobService,
-                                        DataPrepareOrchestrationService dataPrepareOrchestrationService) {
+                                        DataPrepareOrchestrationService dataPrepareOrchestrationService,
+                                        DataRequirementService dataRequirementService) {
         this.requirementGenerationService = requirementGenerationService;
         this.dataPrepareJobService = dataPrepareJobService;
         this.dataPrepareOrchestrationService = dataPrepareOrchestrationService;
+        this.dataRequirementService = dataRequirementService;
     }
 
     /**
@@ -61,6 +66,7 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
         validateRequest(request);
         DataRequirementGenerationService.GenerateResult generateResult =
                 requirementGenerationService.generateRequirementItems(request.getGenerateRequest());
+        freezeRequirementPolicySnapshot(generateResult, request);
         DataPrepareJob job = buildJob(request, generateResult);
         DataPrepareJob existingJob = dataPrepareJobService.getByIdempotencyKey(
                 job.getTenantId(), job.getIdempotencyKey());
@@ -69,6 +75,32 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
         }
         DataPrepareJob savedJob = dataPrepareJobService.createDataPrepareJob(job);
         return dataPrepareOrchestrationService.executeCreateJob(savedJob.getId());
+    }
+
+    /**
+     * 人工重试失败的数据准备任务。
+     *
+     * @param request 失败任务重试请求。
+     * @return 重试执行后的数据准备任务。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DataPrepareJob retryFailedJob(RetryFailedJobRequest request) {
+        validateRetryRequest(request);
+        DataPrepareJob job = dataPrepareJobService.getByTenantAndId(request.getTenantId(), request.getJobId());
+        if (job == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        PrepareJobStatus status = PrepareJobStatus.fromValue(job.getJobStatus());
+        if (status == null || !status.isRetryable()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        DataPrepareJob retryingJob = dataPrepareJobService.markRetrying(
+                request.getTenantId(), request.getJobId(), request.getUpdateBy());
+        if (PrepareJobStatus.PARTIAL_FAILED.equals(status) && defaultLong(job.getSuccessCount()) > 0L) {
+            return dataPrepareOrchestrationService.retryFailedItemsJob(retryingJob.getId());
+        }
+        return dataPrepareOrchestrationService.executeCreateJob(retryingJob.getId());
     }
 
     /**
@@ -83,6 +115,22 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
             return dataPrepareOrchestrationService.executeCreateJob(existingJob.getId());
         }
         return existingJob;
+    }
+
+    /**
+     * 将发布时策略快照沉淀到批次层，保证后续任务重试或证据查看不依赖单个 job。
+     *
+     * @param generateResult 需求明细生成结果。
+     * @param request 数据准备触发请求。
+     */
+    private void freezeRequirementPolicySnapshot(DataRequirementGenerationService.GenerateResult generateResult,
+                                                 PrepareAndExecuteRequest request) {
+        if (generateResult == null || generateResult.getRequirement() == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        DataRequirement requirement = generateResult.getRequirement();
+        dataRequirementService.freezeRequirementPolicySnapshot(
+                requirement.getTenantId(), requirement.getId(), request.getRequestJson());
     }
 
     /**
@@ -127,6 +175,19 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
         if (TriggerType.fromValue(request.getTriggerType()) == null) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
+    }
+
+    /**
+     * 校验失败重试请求的最小字段。
+     *
+     * @param request 失败任务重试请求。
+     */
+    private void validateRetryRequest(RetryFailedJobRequest request) {
+        if (request == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(request.getTenantId());
+        requireText(request.getJobId());
     }
 
     /**
@@ -192,5 +253,15 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
         if (!StringUtils.hasText(value)) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
+    }
+
+    /**
+     * 将空计数字段按 0 处理，避免历史任务判断部分失败时出现空指针。
+     *
+     * @param value 原始计数。
+     * @return 非空计数。
+     */
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
     }
 }

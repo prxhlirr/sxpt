@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router';
 import type { PortalRole } from './domain/models';
 import AppShell from './layouts/AppShell.vue';
+import { useRuntimeContextStore } from './stores/runtimeContextStore';
 import { useTrainingStore } from './stores/trainingStore';
 import { authApi } from './services/trainingApi';
 
@@ -35,6 +36,69 @@ export const router = createRouter({
           name: 'admin-overview',
           component: () => import('./views/admin/AdminOverviewView.vue'),
           meta: { title: '运营总览', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/users',
+          name: 'basic-users',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'users' },
+          meta: { title: '用户管理', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/roles',
+          name: 'basic-roles',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'roles' },
+          meta: { title: '角色管理', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/orgs',
+          name: 'basic-orgs',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'orgs' },
+          meta: { title: '单位管理', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/user-roles',
+          name: 'basic-user-roles',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'userRoles' },
+          meta: { title: '用户角色', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/user-orgs',
+          name: 'basic-user-orgs',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'userOrgs' },
+          meta: { title: '用户单位', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/menus',
+          name: 'basic-menus',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'menus' },
+          meta: { title: '菜单管理', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/permissions',
+          name: 'basic-permissions',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'permissions' },
+          meta: { title: '权限管理', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/role-permissions',
+          name: 'basic-role-permissions',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'rolePermissions' },
+          meta: { title: '角色权限', role: 'admin' }
+        },
+        {
+          path: 'admin/basic/dict-items',
+          name: 'basic-dict-items',
+          component: () => import('./views/admin/BasicConfigView.vue'),
+          props: { section: 'dictItems' },
+          meta: { title: '字典配置', role: 'admin' }
         },
         {
           path: 'admin/lessons',
@@ -159,7 +223,7 @@ export const router = createRouter({
   ]
 });
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const session = authApi.getSession();
   if (to.meta.public) {
     return session && to.path === '/login' ? '/platforms' : true;
@@ -171,15 +235,27 @@ router.beforeEach((to) => {
     };
   }
   const store = useTrainingStore();
+  const runtimeContextStore = useRuntimeContextStore();
   const sessionRole = authApi.getPortalRole(session);
   if (store.state.currentRole !== sessionRole) {
     store.setRole(sessionRole);
+    runtimeContextStore.resetRuntimeContext();
+  }
+  if (runtimeContextStore.state.context?.user.userId !== session.user.userId) {
+    runtimeContextStore.resetRuntimeContext();
   }
   const requiredRole = (to.meta.roles ?? to.meta.role) as
     | PortalRole
     | PortalRole[]
     | undefined;
   if (!authApi.canAccess(requiredRole, session)) {
+    return {
+      name: 'platforms',
+      query: { access: 'denied', target: to.fullPath }
+    };
+  }
+  await runtimeContextStore.loadRuntimeContext();
+  if (!runtimeContextStore.canAccessRoute(to.path)) {
     return {
       name: 'platforms',
       query: { access: 'denied', target: to.fullPath }

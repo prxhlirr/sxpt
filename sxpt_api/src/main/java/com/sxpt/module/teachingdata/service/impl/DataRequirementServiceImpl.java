@@ -88,6 +88,37 @@ public class DataRequirementServiceImpl implements DataRequirementService {
     }
 
     /**
+     * 冻结数据准备批次策略快照。
+     *
+     * @param tenantId 租户 ID。
+     * @param requirementId 数据准备批次 ID。
+     * @param policySnapshotJson 批次策略快照 JSON。
+     * @return 已冻结或原样返回的数据准备批次。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DataRequirement freezeRequirementPolicySnapshot(String tenantId,
+                                                           String requirementId,
+                                                           String policySnapshotJson) {
+        requireText(tenantId);
+        requireText(requirementId);
+        DataRequirement requirement = dataRequirementMapper.selectById(requirementId);
+        if (requirement == null
+                || Boolean.TRUE.equals(requirement.getDeleted())
+                || !tenantId.equals(requirement.getTenantId())) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        if (!StringUtils.hasText(policySnapshotJson)
+                || StringUtils.hasText(requirement.getRequirementPolicyJson())) {
+            return requirement;
+        }
+        requirement.setRequirementPolicyJson(policySnapshotJson);
+        requirement.setUpdateTime(LocalDateTime.now());
+        dataRequirementMapper.updateById(requirement);
+        return requirement;
+    }
+
+    /**
      * 校验创建数据需求批次所需的最小字段。
      *
      * @param requirement 数据需求批次实体。

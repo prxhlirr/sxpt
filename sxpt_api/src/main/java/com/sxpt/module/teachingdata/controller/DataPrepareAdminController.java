@@ -141,6 +141,21 @@ public class DataPrepareAdminController {
     }
 
     /**
+     * 人工重试失败的数据准备任务。
+     *
+     * @param jobId 数据准备任务 ID。
+     * @param request 失败任务重试请求。
+     * @return 重试执行后的数据准备任务。
+     */
+    @PostMapping("/prepare/jobs/{jobId}/retry")
+    public ApiResult<DataPrepareJob> retryFailedJob(
+            @PathVariable String jobId,
+            @RequestBody DataPrepareFacadeService.RetryFailedJobRequest request) {
+        request.setJobId(jobId);
+        return ApiResult.success(dataPrepareFacadeService.retryFailedJob(request));
+    }
+
+    /**
      * 查询指定批次下的数据池。
      *
      * @param tenantId 租户 ID。

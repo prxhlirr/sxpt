@@ -56,6 +56,7 @@ describe('训练 Store 后端同步', () => {
       reportRecordedStep: vi.fn(),
       publishLesson: vi.fn(),
       publishTeachingTask: vi.fn(),
+      prepareInitialDataForPublishedTask: vi.fn(async () => 0),
       startStudentTaskExecution: vi.fn(),
       reportStudentStageCompletion: vi.fn(),
       submitStudentTaskExecution: vi.fn()
@@ -107,6 +108,7 @@ describe('训练 Store 后端同步', () => {
       reportRecordedStep,
       publishLesson: vi.fn(),
       publishTeachingTask: vi.fn(),
+      prepareInitialDataForPublishedTask: vi.fn(async () => 0),
       startStudentTaskExecution: vi.fn(),
       reportStudentStageCompletion: vi.fn(),
       submitStudentTaskExecution: vi.fn()
@@ -170,6 +172,7 @@ describe('训练 Store 后端同步', () => {
       contextLoaded: true
     }));
     const reportStudentStageCompletion = vi.fn(async () => undefined);
+    const prepareInitialDataForPublishedTask = vi.fn(async () => 1);
     const submitStudentTaskExecution = vi.fn(async (studentTask) => ({
       id: studentTask.remoteExecutionId!,
       tenantId: 'default',
@@ -197,6 +200,7 @@ describe('训练 Store 后端同步', () => {
       reportRecordedStep: vi.fn(),
       publishLesson: vi.fn(),
       publishTeachingTask,
+      prepareInitialDataForPublishedTask,
       startStudentTaskExecution,
       reportStudentStageCompletion,
       submitStudentTaskExecution
@@ -221,6 +225,21 @@ describe('训练 Store 后端同步', () => {
     ]);
     expect(published.every((task) => task.syncStatus === 'SYNCED')).toBe(true);
     expect(publishTeachingTask).toHaveBeenCalledTimes(2);
+    expect(prepareInitialDataForPublishedTask).toHaveBeenCalledTimes(1);
+    expect(prepareInitialDataForPublishedTask).toHaveBeenCalledWith(
+      expect.objectContaining({ id: lesson.id }),
+      expect.any(Object),
+      expect.objectContaining({
+        mode: 'PRACTICE',
+        remoteTaskId: 'task-practice'
+      }),
+      expect.arrayContaining([
+        expect.objectContaining({ mode: 'PRACTICE' })
+      ])
+    );
+    expect(
+      published.find((candidate) => candidate.mode === 'PRACTICE')?.dataCount
+    ).toBe(1);
 
     const learningPublished = published.find(
       (candidate) => candidate.mode === 'LEARNING'

@@ -10,6 +10,7 @@ import com.sxpt.module.teachingdata.service.DataPrepareFacadeService;
 import com.sxpt.module.teachingdata.service.DataPrepareJobService;
 import com.sxpt.module.teachingdata.service.DataPrepareOrchestrationService;
 import com.sxpt.module.teachingdata.service.DataRequirementGenerationService;
+import com.sxpt.module.teachingdata.service.DataRequirementService;
 import com.sxpt.module.teachingdata.service.impl.DataPrepareFacadeServiceImpl;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -47,8 +48,10 @@ class DataPrepareFacadeServiceImplTests {
     private final DataPrepareOrchestrationService orchestrationService =
             mock(DataPrepareOrchestrationService.class);
 
+    private final DataRequirementService dataRequirementService = mock(DataRequirementService.class);
+
     private final DataPrepareFacadeService service = new DataPrepareFacadeServiceImpl(
-            requirementGenerationService, dataPrepareJobService, orchestrationService);
+            requirementGenerationService, dataPrepareJobService, orchestrationService, dataRequirementService);
 
     /**
      * 验证门面服务会先生成明细，再创建任务，最后执行编排任务。
@@ -56,6 +59,7 @@ class DataPrepareFacadeServiceImplTests {
     @Test
     void prepareAndExecuteShouldGenerateItemsCreateJobAndExecute() {
         DataPrepareFacadeService.PrepareAndExecuteRequest request = buildRequest();
+        request.setRequestJson("{\"snapshot\":\"published\"}");
         DataRequirement requirement = buildRequirement();
         DataRequirementItem firstItem = new DataRequirementItem();
         DataRequirementItem secondItem = new DataRequirementItem();
@@ -90,6 +94,8 @@ class DataPrepareFacadeServiceImplTests {
         assertEquals("prepare:requirement_001:batch_001:ON_DEMAND", createdJob.getIdempotencyKey());
         assertEquals(TriggerType.ON_DEMAND.getValue(), createdJob.getTriggerType());
         verify(orchestrationService).executeCreateJob("job_001");
+        verify(dataRequirementService).freezeRequirementPolicySnapshot(
+                "tenant_001", "requirement_001", "{\"snapshot\":\"published\"}");
     }
 
     /**
@@ -179,6 +185,69 @@ class DataPrepareFacadeServiceImplTests {
         request.setTriggerType("BAD_TRIGGER");
 
         assertThrows(BusinessException.class, () -> service.prepareAndExecute(request));
+    }
+
+    /**
+     * 验证全失败任务允许进入人工重试，并且会先推进 retryCount 审计字段再重新执行。
+     */
+    @Test
+    void retryFailedJobShouldMarkRetryingAndExecuteFailedJob() {
+        DataPrepareFacadeService.RetryFailedJobRequest request =
+                new DataPrepareFacadeService.RetryFailedJobRequest();
+        request.setTenantId("tenant_001");
+        request.setJobId("job_failed");
+        request.setUpdateBy("admin_001");
+        DataPrepareJob failedJob = new DataPrepareJob();
+        failedJob.setId("job_failed");
+        failedJob.setJobStatus(PrepareJobStatus.FAILED.getValue());
+        failedJob.setSuccessCount(0L);
+        DataPrepareJob retryingJob = new DataPrepareJob();
+        retryingJob.setId("job_failed");
+        DataPrepareJob executedJob = new DataPrepareJob();
+        executedJob.setId("job_failed");
+        executedJob.setJobStatus(PrepareJobStatus.SUCCESS.getValue());
+        when(dataPrepareJobService.getByTenantAndId("tenant_001", "job_failed")).thenReturn(failedJob);
+        when(dataPrepareJobService.markRetrying("tenant_001", "job_failed", "admin_001"))
+                .thenReturn(retryingJob);
+        when(orchestrationService.executeCreateJob("job_failed")).thenReturn(executedJob);
+
+        DataPrepareJob result = service.retryFailedJob(request);
+
+        assertSame(executedJob, result);
+        verify(dataPrepareJobService).markRetrying("tenant_001", "job_failed", "admin_001");
+        verify(orchestrationService).executeCreateJob("job_failed");
+    }
+
+    /**
+     * 验证部分失败且已有成功数据时只重试失败明细，避免重复创建已成功的原平台数据。
+     */
+    @Test
+    void retryFailedJobShouldRetryFailedItemsWhenPartialFailedWithSuccessfulItems() {
+        DataPrepareFacadeService.RetryFailedJobRequest request =
+                new DataPrepareFacadeService.RetryFailedJobRequest();
+        request.setTenantId("tenant_001");
+        request.setJobId("job_partial");
+        request.setUpdateBy("admin_001");
+        DataPrepareJob partialJob = new DataPrepareJob();
+        partialJob.setId("job_partial");
+        partialJob.setJobStatus(PrepareJobStatus.PARTIAL_FAILED.getValue());
+        partialJob.setSuccessCount(1L);
+        DataPrepareJob retryingJob = new DataPrepareJob();
+        retryingJob.setId("job_partial");
+        DataPrepareJob executedJob = new DataPrepareJob();
+        executedJob.setId("job_partial");
+        executedJob.setJobStatus(PrepareJobStatus.SUCCESS.getValue());
+        when(dataPrepareJobService.getByTenantAndId("tenant_001", "job_partial")).thenReturn(partialJob);
+        when(dataPrepareJobService.markRetrying("tenant_001", "job_partial", "admin_001"))
+                .thenReturn(retryingJob);
+        when(orchestrationService.retryFailedItemsJob("job_partial")).thenReturn(executedJob);
+
+        DataPrepareJob result = service.retryFailedJob(request);
+
+        assertSame(executedJob, result);
+        verify(dataPrepareJobService).markRetrying("tenant_001", "job_partial", "admin_001");
+        verify(orchestrationService).retryFailedItemsJob("job_partial");
+        verify(orchestrationService, times(0)).executeCreateJob("job_partial");
     }
 
     /**

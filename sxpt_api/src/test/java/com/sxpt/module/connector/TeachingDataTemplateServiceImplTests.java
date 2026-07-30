@@ -1,5 +1,6 @@
 package com.sxpt.module.connector;
 
+import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
@@ -48,7 +49,7 @@ class TeachingDataTemplateServiceImplTests {
         TeachingDataTemplate saved = service.createTeachingDataTemplate(template);
 
         assertSame(template, saved);
-        assertEquals(RecordStatus.ACTIVE.getValue(), saved.getStatus());
+        assertEquals(RecordStatus.DISABLED.getValue(), saved.getStatus());
         assertEquals(Boolean.FALSE, saved.getDeleted());
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
@@ -62,6 +63,31 @@ class TeachingDataTemplateServiceImplTests {
     void createTeachingDataTemplateShouldRejectMissingTemplateCode() {
         TeachingDataTemplate template = buildValidTemplate();
         template.setTemplateCode(" ");
+
+        assertThrows(BusinessException.class, () -> service.createTeachingDataTemplate(template));
+        verify(mapper, times(0)).insert(template);
+    }
+
+    /**
+     * 校验模板 JSON 配置不可解析时拒绝创建，避免脏配置进入生产运行链路。
+     */
+    @Test
+    void createTeachingDataTemplateShouldRejectInvalidConfigJson() {
+        TeachingDataTemplate template = buildValidTemplate();
+        template.setConfigJson("{invalid");
+
+        assertThrows(BusinessException.class, () -> service.createTeachingDataTemplate(template));
+        verify(mapper, times(0)).insert(template);
+    }
+
+    /**
+     * 校验调用方直接创建启用态模板时也必须满足运行配置，避免绕过启用校验。
+     */
+    @Test
+    void createActiveTeachingDataTemplateShouldRejectMissingRuntimeJson() {
+        TeachingDataTemplate template = buildValidTemplate();
+        template.setRequiredOrgRoleJson(" ");
+        template.setStatus(RecordStatus.ACTIVE.getValue());
 
         assertThrows(BusinessException.class, () -> service.createTeachingDataTemplate(template));
         verify(mapper, times(0)).insert(template);
@@ -92,6 +118,22 @@ class TeachingDataTemplateServiceImplTests {
 
         List<TeachingDataTemplate> result = service.listActiveTemplatesByTeachingPointAndScene(
                 "tenant_001", "connector_001", "tp_001", "RECORD");
+
+        assertEquals(1, result.size());
+        assertSame(template, result.get(0));
+        verify(mapper).selectList(org.mockito.ArgumentMatchers.any());
+    }
+
+    /**
+     * 校验运行链路按模块和场景查询模板时只读取启用模板。
+     */
+    @Test
+    void listActiveTemplatesByModuleAndSceneShouldReturnMapperResult() {
+        TeachingDataTemplate template = buildValidTemplate();
+        when(mapper.selectList(org.mockito.ArgumentMatchers.any())).thenReturn(Collections.singletonList(template));
+
+        List<TeachingDataTemplate> result = service.listActiveTemplatesByModuleAndScene(
+                "tenant_001", "connector_001", "record_apply", "RECORD");
 
         assertEquals(1, result.size());
         assertSame(template, result.get(0));
@@ -146,6 +188,24 @@ class TeachingDataTemplateServiceImplTests {
     }
 
     /**
+     * 校验启用模板时必须具备运行态单位和角色规则。
+     */
+    @Test
+    void enableTeachingDataTemplateShouldRejectMissingRuntimeOrgRoleJson() {
+        TeachingDataTemplate existing = buildValidTemplate();
+        existing.setRequiredOrgRoleJson(" ");
+        existing.setStatus(RecordStatus.DISABLED.getValue());
+        when(mapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(existing);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableTeachingDataTemplate("tpl_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
      * 校验停用模板时写入 DISABLED 状态。
      */
     @Test
@@ -184,6 +244,9 @@ class TeachingDataTemplateServiceImplTests {
         template.setTemplateName("标准备案申请默认数据");
         template.setSceneType("RECORD");
         template.setModuleCode("record_apply");
+        template.setConfigJson("{\"adapter\":\"local\",\"mode\":\"initial\"}");
+        template.setRequiredOrgRoleJson("{\"org\":\"required\",\"role\":\"required\"}");
+        template.setResultCheckSchemaJson("{\"requiredStatus\":\"DRAFT\"}");
         return template;
     }
 }

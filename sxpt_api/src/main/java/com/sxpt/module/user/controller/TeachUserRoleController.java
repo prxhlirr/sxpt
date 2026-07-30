@@ -6,12 +6,16 @@ import com.sxpt.module.user.entity.TeachUserRole;
 import com.sxpt.module.user.service.TeachUserRoleService;
 import com.sxpt.module.user.vo.TeachUserRoleVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -48,6 +52,25 @@ public class TeachUserRoleController {
     public ApiResult<TeachUserRoleVO> grant(@Valid @RequestBody GrantTeachUserRoleRequest request) {
         TeachUserRole saved = teachUserRoleService.grantUserRole(toEntity(request));
         return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 查询用户角色授权关系列表。
+     *
+     * 业务功能：为管理端用户角色绑定页面提供当前授权关系，支撑管理员复核老师、学生和管理员角色来源。
+     * 关键流程：按租户查询后统一转换为 VO，前端再结合用户和角色列表展示可读名称。
+     *
+     * @param tenantId 租户 ID。
+     * @return 用户角色授权关系列表。
+     */
+    @GetMapping
+    public ApiResult<List<TeachUserRoleVO>> list(@RequestParam String tenantId) {
+        List<TeachUserRole> relations = teachUserRoleService.listUserRolesByTenantId(tenantId);
+        List<TeachUserRoleVO> result = new ArrayList<>();
+        for (TeachUserRole relation : relations) {
+            result.add(toVO(relation));
+        }
+        return ApiResult.success(result);
     }
 
     /**

@@ -28,6 +28,30 @@ public interface DataPrepareJobService {
     DataPrepareJob createDataPrepareJob(DataPrepareJob job);
 
     /**
+     * 按租户和任务 ID 查询数据准备任务。
+     *
+     * 业务功能：为失败重试、证据查看和后台诊断提供租户隔离的任务读取入口。
+     *
+     * @param tenantId 租户 ID。
+     * @param jobId 数据准备任务 ID。
+     * @return 命中的数据准备任务；不存在时返回 null。
+     */
+    DataPrepareJob getByTenantAndId(String tenantId, String jobId);
+
+    /**
+     * 将失败任务置为可重新执行状态。
+     *
+     * 业务功能：在人工确认重试前推进 retryCount，并清理下一次重试时间，
+     * 避免重试行为绕过审计字段。
+     *
+     * @param tenantId 租户 ID。
+     * @param jobId 数据准备任务 ID。
+     * @param updateBy 操作人。
+     * @return 已更新的数据准备任务。
+     */
+    DataPrepareJob markRetrying(String tenantId, String jobId, String updateBy);
+
+    /**
      * 按幂等键查询数据准备任务。
      *
      * @param tenantId 租户 ID。

@@ -1,7 +1,11 @@
 package com.sxpt.module.teachingdata.service;
 
 import com.sxpt.module.teachingdata.dto.CreateStudentDataLaunchRequest;
+import com.sxpt.module.teachingdata.dto.CreateStudentTaskLaunchRequest;
+import com.sxpt.module.teachingdata.entity.DataInstanceAllocation;
 import com.sxpt.module.teachingdata.vo.StudentDataLaunchVO;
+
+import java.util.List;
 
 /**
  * 学生数据启动服务。
@@ -24,4 +28,28 @@ public interface StudentDataLaunchService {
      * @return 启动结果，包含一次性 token、跳转地址和分配记录快照。
      */
     StudentDataLaunchVO createLaunch(CreateStudentDataLaunchRequest request);
+
+    /**
+     * 查询当前登录学生在指定教学任务下已经分配的原平台数据。
+     *
+     * @param request 学生任务查询请求，前端不允许提交学生身份。
+     * @return 当前登录学生可见的数据分配记录。
+     */
+    List<DataInstanceAllocation> listCurrentStudentTaskAllocations(CreateStudentTaskLaunchRequest request);
+
+    /**
+     * 为当前登录学生重新创建一条初始业务数据并完成新的分配绑定。
+     *
+     * @param request 学生任务重练请求，前端不允许提交学生身份、单位或角色。
+     * @return 新生成并绑定给当前学生的数据分配记录。
+     */
+    DataInstanceAllocation recreateAllocationForCurrentStudentTask(CreateStudentTaskLaunchRequest request);
+
+    /**
+     * 按当前登录学生和教学任务创建原平台启动上下文。
+     *
+     * @param request 学生任务启动请求，前端只允许提交任务、场景和执行上下文。
+     * @return 启动结果，包含一次性 token、跳转地址和分配记录快照。
+     */
+    StudentDataLaunchVO createLaunchForCurrentStudentTask(CreateStudentTaskLaunchRequest request);
 }

@@ -2,6 +2,8 @@ package com.sxpt.module.user.service;
 
 import com.sxpt.module.user.entity.TeachUserRole;
 
+import java.util.List;
+
 /**
  * 教学平台用户角色关系服务。
  *
@@ -22,4 +24,15 @@ public interface TeachUserRoleService {
      * @return 已保存的用户角色关系实体。
      */
     TeachUserRole grantUserRole(TeachUserRole teachUserRole);
+
+    /**
+     * 查询租户下的用户角色授权关系列表。
+     *
+     * 业务功能：为后台角色绑定页面展示用户与角色的当前授权关系，避免授权状态只能通过数据库确认。
+     * 关键流程：按租户和软删除边界读取授权关系，保留授权来源供管理员判断数据来自人工维护还是同步。
+     *
+     * @param tenantId 租户 ID。
+     * @return 用户角色授权关系列表。
+     */
+    List<TeachUserRole> listUserRolesByTenantId(String tenantId);
 }

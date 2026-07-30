@@ -385,9 +385,21 @@ export interface DataPrepareJob {
   requestBatchId: string;
   externalRequestId?: string;
   errorMessage?: string;
+  requestJson?: string;
+  resultJson?: string;
+  retryCount?: number;
+  nextRetryTime?: string;
   triggerType?: string;
+  traceId?: string;
+  startTime?: string;
+  endTime?: string;
   createTime?: string;
   updateTime?: string;
+}
+
+export interface RetryFailedJobRequest {
+  tenantId: string;
+  updateBy?: string;
 }
 
 export interface TeachingDataPool {
@@ -456,6 +468,12 @@ export interface CreateStudentDataLaunchRequest {
   executionId?: string;
 }
 
+export interface CreateStudentTaskLaunchRequest {
+  taskId: string;
+  sceneType: string;
+  executionId?: string;
+}
+
 export interface StudentDataLaunchResult {
   launchContextId: string;
   launchToken: string;
@@ -498,6 +516,24 @@ interface ApiResult<T> {
   message: string;
   result: T;
   timestamp: number;
+}
+
+export const DATA_PREPARE_CONFIG_INCOMPLETE_CODE = 422;
+
+export class TrainingApiRequestError extends Error {
+  constructor(
+    message: string,
+    public readonly code?: number,
+    public readonly httpStatus?: number
+  ) {
+    super(message);
+    this.name = 'TrainingApiRequestError';
+  }
+}
+
+export function isDataPrepareConfigIncompleteError(error: unknown): boolean {
+  return error instanceof TrainingApiRequestError &&
+    error.code === DATA_PREPARE_CONFIG_INCOMPLETE_CODE;
 }
 
 export function createTrainingApi(
@@ -749,12 +785,28 @@ export const dataPrepareApi = {
     );
   },
 
-  async listBusinessModules(params: {
+  async listActiveBusinessModules(params: {
     tenantId: string;
     connectorSystemId: string;
   }): Promise<BusinessModule[]> {
     return requestApi<BusinessModule[]>(
       `api/v1/connector/business-modules/active?${stringifyQuery(params)}`
+    );
+  },
+
+  async listBusinessModules(params: {
+    tenantId: string;
+    connectorSystemId: string;
+  }): Promise<BusinessModule[]> {
+    return this.listActiveBusinessModules(params);
+  },
+
+  async listAllBusinessModules(params: {
+    tenantId: string;
+    connectorSystemId: string;
+  }): Promise<BusinessModule[]> {
+    return requestApi<BusinessModule[]>(
+      `api/v1/connector/business-modules?${stringifyQuery(params)}`
     );
   },
 
@@ -934,6 +986,17 @@ export const dataPrepareApi = {
     );
   },
 
+  async listActiveTemplatesByModuleScene(params: {
+    tenantId: string;
+    connectorSystemId: string;
+    moduleCode: string;
+    sceneType: string;
+  }): Promise<TeachingDataTemplate[]> {
+    return requestApi<TeachingDataTemplate[]>(
+      `api/v1/connector/data-templates/active/by-module-scene?${stringifyQuery(params)}`
+    );
+  },
+
   async createLocalTemplate(params: {
     tenantId: string;
     connectorSystemId: string;
@@ -1005,6 +1068,16 @@ export const dataPrepareApi = {
   }): Promise<ModuleDataStrategy[]> {
     return requestApi<ModuleDataStrategy[]>(
       `api/v1/connector/module-data-strategies/active?${stringifyQuery(params)}`
+    );
+  },
+
+  async listModuleDataStrategies(params: {
+    tenantId: string;
+    connectorSystemId: string;
+    businessModuleId: string;
+  }): Promise<ModuleDataStrategy[]> {
+    return requestApi<ModuleDataStrategy[]>(
+      `api/v1/connector/module-data-strategies?${stringifyQuery(params)}`
     );
   },
 
@@ -1141,6 +1214,19 @@ export const dataPrepareApi = {
     });
   },
 
+  async retryFailedJob(
+    jobId: string,
+    request: RetryFailedJobRequest
+  ): Promise<DataPrepareJob> {
+    return requestApi<DataPrepareJob>(
+      `api/v1/teaching-data/prepare/jobs/${encodeURIComponent(jobId)}/retry`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
   async listPools(params: {
     tenantId: string;
     requirementId: string;
@@ -1197,6 +1283,42 @@ export const dataPrepareApi = {
         body: JSON.stringify(request)
       }
     );
+  },
+
+  async createCurrentStudentTaskLaunch(
+    request: CreateStudentTaskLaunchRequest
+  ): Promise<StudentDataLaunchResult> {
+    return requestApi<StudentDataLaunchResult>(
+      'api/v1/teaching-data/student-launches/task-launch',
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async listCurrentStudentTaskAllocations(
+    request: CreateStudentTaskLaunchRequest
+  ): Promise<DataInstanceAllocation[]> {
+    return requestApi<DataInstanceAllocation[]>(
+      'api/v1/teaching-data/student-launches/task-allocations',
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async restartCurrentStudentTaskData(
+    request: CreateStudentTaskLaunchRequest
+  ): Promise<DataInstanceAllocation> {
+    return requestApi<DataInstanceAllocation>(
+      'api/v1/teaching-data/student-launches/task-restart',
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
   }
 };
 
@@ -1217,10 +1339,14 @@ async function requestApi<T>(
   const payload = (await response.json()) as ApiResult<T>;
   if (response.status === 401 || payload.code === 401) {
     handleUnauthorizedSession();
-    throw new Error('登录已失效，请重新登录');
+    throw new TrainingApiRequestError('登录已失效，请重新登录', 401, response.status);
   }
   if (!response.ok || !payload.success) {
-    throw new Error(payload.message || '接口请求失败');
+    throw new TrainingApiRequestError(
+      payload.message || '接口请求失败',
+      payload.code,
+      response.status
+    );
   }
   return payload.result;
 }

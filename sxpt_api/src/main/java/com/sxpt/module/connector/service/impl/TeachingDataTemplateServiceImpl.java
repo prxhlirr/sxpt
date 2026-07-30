@@ -1,6 +1,9 @@
 package com.sxpt.module.connector.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
@@ -31,6 +34,8 @@ import java.util.List;
 @Profile("!test")
 public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateService {
 
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
     private final TeachingDataTemplateMapper teachingDataTemplateMapper;
 
     public TeachingDataTemplateServiceImpl(TeachingDataTemplateMapper teachingDataTemplateMapper) {
@@ -47,7 +52,11 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
     @Transactional(rollbackFor = Exception.class)
     public TeachingDataTemplate createTeachingDataTemplate(TeachingDataTemplate template) {
         validateCreateFields(template);
+        validateTemplateJsonFields(template, false);
         fillCreateDefaults(template);
+        if (RecordStatus.ACTIVE.getValue().equals(template.getStatus())) {
+            validateTemplateJsonFields(template, true);
+        }
         teachingDataTemplateMapper.insert(template);
         return template;
     }
@@ -62,6 +71,7 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
     @Transactional(rollbackFor = Exception.class)
     public TeachingDataTemplate updateTeachingDataTemplate(TeachingDataTemplate template) {
         validateUpdateFields(template);
+        validateTemplateJsonFields(template, false);
         TeachingDataTemplate existing = getTeachingDataTemplateById(template.getId());
         existing.setTeachingPointId(template.getTeachingPointId());
         existing.setTemplateName(template.getTemplateName());
@@ -172,6 +182,34 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
     }
 
     /**
+     * 查询指定平台、模块和场景下的启用模板，运行链路不能消费停用草稿模板。
+     *
+     * @param tenantId 绉熸埛 ID銆?
+     * @param connectorSystemId 鍘熷钩鍙伴厤缃?ID銆?
+     * @param moduleCode 涓氬姟妯″潡缂栫爜銆?
+     * @param sceneType 鏁欏鍦烘櫙銆?
+     * @return 启用模板列表。
+     */
+    @Override
+    public List<TeachingDataTemplate> listActiveTemplatesByModuleAndScene(String tenantId,
+                                                                          String connectorSystemId,
+                                                                          String moduleCode,
+                                                                          String sceneType) {
+        requireText(tenantId);
+        requireText(connectorSystemId);
+        requireText(moduleCode);
+        requireText(sceneType);
+        return teachingDataTemplateMapper.selectList(new QueryWrapper<TeachingDataTemplate>()
+                .eq("tenant_id", tenantId)
+                .eq("connector_system_id", connectorSystemId)
+                .eq("module_code", moduleCode)
+                .eq("scene_type", sceneType)
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE)
+                .orderByDesc("create_time"));
+    }
+
+    /**
      * 查询指定教学点和场景下的可用教学业务数据模板。
      *
      * @param tenantId 租户 ID。
@@ -241,10 +279,85 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
      */
     private TeachingDataTemplate changeStatus(String id, String status) {
         TeachingDataTemplate existing = getTeachingDataTemplateById(id);
+        if (RecordStatus.ACTIVE.getValue().equals(status)) {
+            validateTemplateJsonFields(existing, true);
+        }
         existing.setStatus(status);
         existing.setUpdateTime(LocalDateTime.now());
         teachingDataTemplateMapper.updateById(existing);
         return existing;
+    }
+
+    /**
+     * 校验模板 JSON 配置，避免管理员把无法解析或无法支撑造数的配置启用到生产链路。
+     *
+     * @param template 鏁欏涓氬姟鏁版嵁妯℃澘瀹炰綋銆?
+     * @param requireRuntimeFields true 表示启用场景，需要校验运行必需字段。
+     */
+    private void validateTemplateJsonFields(TeachingDataTemplate template, boolean requireRuntimeFields) {
+        JsonNode config = parseJsonObject(template.getConfigJson());
+        parseJsonObject(template.getDataSchemaJson());
+        parseJsonObject(template.getMockRuleJson());
+        parseJsonObject(template.getRequestSchemaJson());
+        JsonNode requiredOrgRole = parseJsonObject(template.getRequiredOrgRoleJson());
+        JsonNode resultCheckSchema = parseJsonObject(template.getResultCheckSchemaJson());
+        parseJsonObject(template.getSensitiveFieldPolicyJson());
+
+        if (!requireRuntimeFields) {
+            return;
+        }
+        requireJsonObject(config);
+        requireJsonText(config, "adapter");
+        requireJsonObject(requiredOrgRole);
+        requireJsonText(requiredOrgRole, "org");
+        requireJsonText(requiredOrgRole, "role");
+        if (resultCheckSchema != null) {
+            requireJsonText(resultCheckSchema, "requiredStatus");
+        }
+    }
+
+    /**
+     * 将前端维护的 JSON 文本解析为对象节点；只接受对象是为了让配置天然具备可扩展的键值语义。
+     *
+     * @param json JSON 文本。
+     * @return 空文本返回 null，非空文本返回 JSON 对象节点。
+     */
+    private JsonNode parseJsonObject(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            JsonNode node = JSON_MAPPER.readTree(json);
+            if (node == null || !node.isObject()) {
+                throw new BusinessException(ApiResultCode.PARAM_ERROR);
+            }
+            return node;
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 校验启用态必须存在 JSON 对象，避免模板缺少运行配置仍被教师策略引用。
+     *
+     * @param node JSON 对象节点。
+     */
+    private void requireJsonObject(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+    }
+
+    /**
+     * 校验 JSON 中的必填文本字段，字段值承担和原平台适配器约定的运行语义。
+     *
+     * @param node JSON 对象节点。
+     * @param fieldName 字段名。
+     */
+    private void requireJsonText(JsonNode node, String fieldName) {
+        if (node == null || !node.has(fieldName) || !StringUtils.hasText(node.get(fieldName).asText())) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
     }
 
     /**
@@ -272,7 +385,7 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
             template.setUpdateTime(now);
         }
         if (!StringUtils.hasText(template.getStatus())) {
-            template.setStatus(RecordStatus.ACTIVE.getValue());
+            template.setStatus(RecordStatus.DISABLED.getValue());
         }
         if (template.getDeleted() == null) {
             template.setDeleted(Boolean.FALSE);

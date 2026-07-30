@@ -2,6 +2,8 @@ package com.sxpt.module.user.service;
 
 import com.sxpt.module.user.entity.TeachUser;
 
+import java.util.List;
+
 /**
  * 教学平台用户服务。
  *
@@ -22,4 +24,15 @@ public interface TeachUserService {
      * @return 已保存的教学平台用户实体。
      */
     TeachUser createTeachUser(TeachUser teachUser);
+
+    /**
+     * 查询租户下的教学平台用户列表。
+     *
+     * 业务功能：为后台基础配置页面提供用户可视化维护入口，避免管理员只能通过初始化脚本确认老师、学生和管理员账号。
+     * 关键流程：按租户和软删除边界读取用户，保持用户主数据不会跨租户展示。
+     *
+     * @param tenantId 租户 ID。
+     * @return 教学平台用户列表。
+     */
+    List<TeachUser> listTeachUsersByTenantId(String tenantId);
 }

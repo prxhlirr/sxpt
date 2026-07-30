@@ -1,5 +1,6 @@
 package com.sxpt.module.user.service.impl;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.user.entity.TeachUserRole;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 教学平台用户角色关系服务实现。
@@ -51,6 +53,24 @@ public class TeachUserRoleServiceImpl implements TeachUserRoleService {
         fillCreateDefaults(teachUserRole);
         teachUserRoleMapper.insert(teachUserRole);
         return teachUserRole;
+    }
+
+    /**
+     * 查询租户下的用户角色授权关系列表。
+     *
+     * 业务功能：支撑管理端查看和复核用户角色授权，保证菜单、权限和数据准备角色边界有可追溯来源。
+     * 关键流程：校验租户后按软删除边界查询，按创建时间倒序展示最近授权。
+     *
+     * @param tenantId 租户 ID。
+     * @return 用户角色授权关系列表。
+     */
+    @Override
+    public List<TeachUserRole> listUserRolesByTenantId(String tenantId) {
+        requireText(tenantId);
+        return teachUserRoleMapper.selectList(new QueryWrapper<TeachUserRole>()
+                .eq("tenant_id", tenantId)
+                .eq("deleted", Boolean.FALSE)
+                .orderByDesc("create_time"));
     }
 
     /**

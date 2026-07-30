@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 教学用户组织关系服务实现。
@@ -81,6 +82,24 @@ public class TeachUserOrgServiceImpl implements TeachUserOrgService {
         existing.setUpdateTime(LocalDateTime.now());
         teachUserOrgMapper.updateById(existing);
         return existing;
+    }
+
+    /**
+     * 查询租户下的用户教学组织关系列表。
+     *
+     * 业务功能：支撑管理端查看用户与班级、课程班、分组的绑定关系，保证任务发布和数据准备学生范围可追溯。
+     * 关键流程：校验租户后只读取未软删除关系，按创建时间倒序展示最近维护结果。
+     *
+     * @param tenantId 租户 ID。
+     * @return 用户教学组织关系列表。
+     */
+    @Override
+    public List<TeachUserOrg> listUserOrgsByTenantId(String tenantId) {
+        requireText(tenantId);
+        return teachUserOrgMapper.selectList(new QueryWrapper<TeachUserOrg>()
+                .eq("tenant_id", tenantId)
+                .eq("deleted", Boolean.FALSE)
+                .orderByDesc("create_time"));
     }
 
     /**

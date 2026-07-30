@@ -7,12 +7,16 @@ import com.sxpt.module.user.entity.TeachUserOrg;
 import com.sxpt.module.user.service.TeachUserOrgService;
 import com.sxpt.module.user.vo.TeachUserOrgVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -49,6 +53,25 @@ public class TeachUserOrgController {
     public ApiResult<TeachUserOrgVO> add(@Valid @RequestBody AddTeachUserOrgRequest request) {
         TeachUserOrg saved = teachUserOrgService.addUserToOrg(toEntity(request));
         return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 查询用户教学组织关系列表。
+     *
+     * 业务功能：为管理端单位绑定页面提供当前成员关系，支撑班级、课程班和分组成员可视化维护。
+     * 关键流程：按租户查询后转换为 VO，前端结合用户和单位列表展示可读名称。
+     *
+     * @param tenantId 租户 ID。
+     * @return 用户教学组织关系列表。
+     */
+    @GetMapping
+    public ApiResult<List<TeachUserOrgVO>> list(@RequestParam String tenantId) {
+        List<TeachUserOrg> relations = teachUserOrgService.listUserOrgsByTenantId(tenantId);
+        List<TeachUserOrgVO> result = new ArrayList<>();
+        for (TeachUserOrg relation : relations) {
+            result.add(toVO(relation));
+        }
+        return ApiResult.success(result);
     }
 
     /**

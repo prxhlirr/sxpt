@@ -1,5 +1,6 @@
 package com.sxpt.module.connector;
 
+import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.entity.ModuleDataStrategy;
@@ -105,6 +106,18 @@ class ModuleDataStrategyServiceImplTests {
     }
 
     /**
+     * 校验策略 JSON 配置不可解析时拒绝创建，避免策略启用后才暴露配置错误。
+     */
+    @Test
+    void createModuleDataStrategyShouldRejectInvalidPolicyJson() {
+        ModuleDataStrategy strategy = buildValidStrategy();
+        strategy.setDefaultOrgRolePolicyJson("{invalid");
+
+        assertThrows(BusinessException.class, () -> service.createModuleDataStrategy(strategy));
+        verify(mapper, times(0)).insert(strategy);
+    }
+
+    /**
      * 校验更新策略时只覆盖规则字段并递增策略版本和乐观锁版本。
      */
     @Test
@@ -150,7 +163,11 @@ class ModuleDataStrategyServiceImplTests {
         existing.setTemplateId(" ");
         when(mapper.selectOne(any())).thenReturn(existing);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -163,7 +180,45 @@ class ModuleDataStrategyServiceImplTests {
         existing.setPrepareTiming("AFTER_FINISH");
         when(mapper.selectOne(any())).thenReturn(existing);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.PARAM_ERROR.getCode(), exception.getCode());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
+     * 校验启用策略时必须具备默认单位角色策略，保证学生数据实例能映射到原平台办理身份。
+     */
+    @Test
+    void enableModuleDataStrategyShouldRejectMissingDefaultOrgRolePolicy() {
+        ModuleDataStrategy existing = buildValidStrategy();
+        existing.setDefaultOrgRolePolicyJson(" ");
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
+     * 校验策略池水位上下限，避免最小准备量大于最大准备量导致补数任务永远不可满足。
+     */
+    @Test
+    void enableModuleDataStrategyShouldRejectInvalidPoolSizePolicy() {
+        ModuleDataStrategy existing = buildValidStrategy();
+        existing.setPoolSizePolicyJson("{\"minReadyCount\":20,\"maxReadyCount\":5}");
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.PARAM_ERROR.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -176,7 +231,11 @@ class ModuleDataStrategyServiceImplTests {
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_NOT_FOUND.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -190,7 +249,11 @@ class ModuleDataStrategyServiceImplTests {
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_NOT_FOUND.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -202,8 +265,14 @@ class ModuleDataStrategyServiceImplTests {
         ModuleDataStrategy existing = buildValidExamStrategy();
         existing.setSharePolicy("ATTEMPT_EXCLUSIVE");
         when(mapper.selectOne(any())).thenReturn(existing);
+        when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.PARAM_ERROR.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -215,8 +284,14 @@ class ModuleDataStrategyServiceImplTests {
         ModuleDataStrategy existing = buildValidExamStrategy();
         existing.setLockPolicy("ON_ALLOCATE");
         when(mapper.selectOne(any())).thenReturn(existing);
+        when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.PARAM_ERROR.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -231,7 +306,11 @@ class ModuleDataStrategyServiceImplTests {
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -246,7 +325,11 @@ class ModuleDataStrategyServiceImplTests {
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
         when(platformCapabilityMapper.selectOne(any())).thenReturn(null);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -264,7 +347,11 @@ class ModuleDataStrategyServiceImplTests {
                 .thenReturn(buildSupportedCapability("DATA_CREATE"))
                 .thenReturn(null);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -282,7 +369,11 @@ class ModuleDataStrategyServiceImplTests {
                 .thenReturn(buildSupportedCapability("DATA_LOCK"))
                 .thenReturn(null);
 
-        assertThrows(BusinessException.class, () -> service.enableModuleDataStrategy("strategy_001"));
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -397,6 +488,9 @@ class ModuleDataStrategyServiceImplTests {
         strategy.setLockPolicy("NONE");
         strategy.setTemplateId("tpl_001");
         strategy.setPrepareTiming("ON_PUBLISH");
+        strategy.setDefaultOrgRolePolicyJson("{\"org\":\"required\",\"role\":\"required\"}");
+        strategy.setPoolSizePolicyJson("{\"minReadyCount\":1,\"maxReadyCount\":50}");
+        strategy.setValidationPolicyJson("{\"requiredStatus\":\"DRAFT\"}");
         strategy.setCreateBy("admin_001");
         strategy.setUpdateBy("admin_001");
         return strategy;

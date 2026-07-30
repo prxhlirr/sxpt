@@ -25,6 +25,17 @@ public interface DataPrepareFacadeService {
     DataPrepareJob prepareAndExecute(PrepareAndExecuteRequest request);
 
     /**
+     * 人工重试失败的数据准备任务。
+     *
+     * 业务功能：为后台证据链页面提供受控补偿入口。当前只允许全失败任务直接重试；
+     * 部分失败且已有成功数据时需要失败项级补偿，避免重复创建已成功数据。
+     *
+     * @param request 失败任务重试请求。
+     * @return 重试执行后的数据准备任务。
+     */
+    DataPrepareJob retryFailedJob(RetryFailedJobRequest request);
+
+    /**
      * 数据准备触发请求。
      *
      * 业务功能：
@@ -101,6 +112,44 @@ public interface DataPrepareFacadeService {
 
         public void setGenerateRequest(DataRequirementGenerationService.GenerateRequest generateRequest) {
             this.generateRequest = generateRequest;
+        }
+    }
+
+    /**
+     * 失败任务重试请求。
+     *
+     * 业务功能：承载租户、任务和操作人信息，保证人工重试具备租户隔离和审计来源。
+     */
+    class RetryFailedJobRequest {
+
+        private String tenantId;
+
+        private String jobId;
+
+        private String updateBy;
+
+        public String getTenantId() {
+            return tenantId;
+        }
+
+        public void setTenantId(String tenantId) {
+            this.tenantId = tenantId;
+        }
+
+        public String getJobId() {
+            return jobId;
+        }
+
+        public void setJobId(String jobId) {
+            this.jobId = jobId;
+        }
+
+        public String getUpdateBy() {
+            return updateBy;
+        }
+
+        public void setUpdateBy(String updateBy) {
+            this.updateBy = updateBy;
         }
     }
 }

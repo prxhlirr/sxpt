@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -98,6 +99,39 @@ class DataRequirementServiceImplTests {
         assertEquals(1, result.size());
         assertSame(requirement, result.get(0));
         verify(mapper).selectList(org.mockito.ArgumentMatchers.any());
+    }
+
+    /**
+     * 验证批次策略快照为空时会写入发布快照，确保 job 重试或证据查看不依赖单个执行任务。
+     */
+    @Test
+    void freezeRequirementPolicySnapshotShouldFillEmptySnapshot() {
+        DataRequirement requirement = buildValidRequirement();
+        when(mapper.selectById("req_001")).thenReturn(requirement);
+
+        DataRequirement result = service.freezeRequirementPolicySnapshot(
+                "tenant_001", "req_001", "{\"snapshot\":\"published\"}");
+
+        assertSame(requirement, result);
+        assertEquals("{\"snapshot\":\"published\"}", result.getRequirementPolicyJson());
+        verify(mapper).updateById(requirement);
+    }
+
+    /**
+     * 验证已经冻结的批次策略不会被后续触发覆盖，避免历史证据被新配置污染。
+     */
+    @Test
+    void freezeRequirementPolicySnapshotShouldKeepExistingSnapshot() {
+        DataRequirement requirement = buildValidRequirement();
+        requirement.setRequirementPolicyJson("{\"snapshot\":\"origin\"}");
+        when(mapper.selectById("req_001")).thenReturn(requirement);
+
+        DataRequirement result = service.freezeRequirementPolicySnapshot(
+                "tenant_001", "req_001", "{\"snapshot\":\"new\"}");
+
+        assertSame(requirement, result);
+        assertEquals("{\"snapshot\":\"origin\"}", result.getRequirementPolicyJson());
+        verify(mapper, times(0)).updateById(any(DataRequirement.class));
     }
 
     /**

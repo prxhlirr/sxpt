@@ -17,6 +17,7 @@ import com.sxpt.module.teachingdata.mapper.TeachingDataPoolMapper;
 import com.sxpt.module.teachingdata.service.DataPrepareOrchestrationService;
 import com.sxpt.module.teachingdata.service.impl.DataPrepareOrchestrationServiceImpl;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -25,6 +26,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -120,6 +122,36 @@ class DataPrepareOrchestrationServiceImplTests {
     }
 
     /**
+     * 验证部分失败补偿时只把失败明细提交给原平台，并把新成功数合并到原任务总成功数。
+     */
+    @Test
+    void retryFailedItemsJobShouldOnlySubmitFailedItemsAndMergeCounts() {
+        DataPrepareJob job = buildJob();
+        job.setExpectedCount(2L);
+        job.setSuccessCount(1L);
+        job.setFailedCount(1L);
+        DataRequirementItem failedItem = buildItem("item_002", "student_002");
+        failedItem.setItemStatus(RequirementItemStatus.FAILED.getValue());
+        when(dataPrepareJobMapper.selectById("job_001")).thenReturn(job);
+        when(dataRequirementItemMapper.selectList(any())).thenReturn(Collections.singletonList(failedItem));
+        mockInsertedInstanceValidation(failedItem, true, null);
+        when(originDataPrepareAdapter.createTeachingData(any())).thenReturn(buildResponse(
+                buildSuccessResponseItem("item_002", "biz_002")));
+
+        DataPrepareJob result = service.retryFailedItemsJob("job_001");
+
+        assertEquals(PrepareJobStatus.SUCCESS.getValue(), result.getJobStatus());
+        assertEquals(2L, result.getSuccessCount());
+        assertEquals(0L, result.getFailedCount());
+        assertEquals(2L, result.getExpectedCount());
+        ArgumentCaptor<OriginDataPrepareAdapter.BatchCreateRequest> requestCaptor =
+                ArgumentCaptor.forClass(OriginDataPrepareAdapter.BatchCreateRequest.class);
+        verify(originDataPrepareAdapter).createTeachingData(requestCaptor.capture());
+        assertEquals(1, requestCaptor.getValue().getItems().size());
+        assertEquals("item_002", requestCaptor.getValue().getItems().get(0).getRequestItemId());
+    }
+
+    /**
      * 验证空批次不调用原平台，避免无意义的外部请求。
      */
     @Test
@@ -130,6 +162,31 @@ class DataPrepareOrchestrationServiceImplTests {
 
         assertThrows(BusinessException.class, () -> service.executeCreateJob("job_001"));
         verify(originDataPrepareAdapter, times(0)).createTeachingData(any());
+    }
+
+    /**
+     * 验证原平台调用异常时，任务必须稳定落入 FAILED，并保留请求、错误和耗时证据，避免生产排障只能依赖临时日志。
+     */
+    @Test
+    void executeCreateJobShouldMarkFailedWhenOriginAdapterThrows() {
+        DataPrepareJob job = buildJob();
+        DataRequirementItem item = buildItem("item_001", "student_001");
+        when(dataPrepareJobMapper.selectById("job_001")).thenReturn(job);
+        when(dataRequirementItemMapper.selectList(any())).thenReturn(Collections.singletonList(item));
+        when(originDataPrepareAdapter.createTeachingData(any()))
+                .thenThrow(new IllegalStateException("origin timeout"));
+
+        DataPrepareJob result = service.executeCreateJob("job_001");
+
+        assertEquals(PrepareJobStatus.FAILED.getValue(), result.getJobStatus());
+        assertEquals(0L, result.getSuccessCount());
+        assertEquals(1L, result.getFailedCount());
+        assertEquals("IllegalStateException: origin timeout", result.getErrorMessage());
+        assertTrue(result.getRequestJson().contains("\"originCreateRequest\""));
+        assertTrue(result.getRequestJson().contains("\"requestBatchId\":\"batch_001\""));
+        assertTrue(result.getResultJson().contains("\"adapterException\""));
+        assertTrue(result.getResultJson().contains("\"elapsedMillis\""));
+        verify(dataPrepareJobMapper, times(2)).updateById(job);
     }
 
     /**

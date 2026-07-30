@@ -46,6 +46,14 @@ export interface TeachUserOrg extends StatusRecord {
 }
 
 export const usersApi = {
+  listUsers(tenantId: string) {
+    return apiRequest<TeachUser[]>({
+      method: 'GET',
+      url: '/user',
+      params: { tenantId }
+    });
+  },
+
   createUser(request: {
     tenantId: string;
     username: string;
@@ -100,6 +108,14 @@ export const usersApi = {
     });
   },
 
+  listUserRoles(tenantId: string) {
+    return apiRequest<TeachUserRole[]>({
+      method: 'GET',
+      url: '/user-roles',
+      params: { tenantId }
+    });
+  },
+
   createOrg(request: {
     tenantId: string;
     parentId?: string;
@@ -144,6 +160,14 @@ export const usersApi = {
       method: 'POST',
       url: '/orgs/users/remove',
       data: request
+    });
+  },
+
+  listUserOrgs(tenantId: string) {
+    return apiRequest<TeachUserOrg[]>({
+      method: 'GET',
+      url: '/orgs/users',
+      params: { tenantId }
     });
   }
 };

@@ -26,6 +26,17 @@ public interface DataPrepareOrchestrationService {
     DataPrepareJob executeCreateJob(String jobId);
 
     /**
+     * 只重试失败的数据准备明细。
+     *
+     * 业务功能：用于部分失败批次的安全补偿，只把 FAILED/VALIDATION_FAILED 的明细重新提交给原平台，
+     * 已成功并已生成实例的数据不再重复创建。
+     *
+     * @param jobId 数据准备任务 ID。
+     * @return 已合并最终计数的数据准备任务。
+     */
+    DataPrepareJob retryFailedItemsJob(String jobId);
+
+    /**
      * 校验教学数据实例是否满足原平台业务约束。
      *
      * @param instanceId 教学数据实例 ID。

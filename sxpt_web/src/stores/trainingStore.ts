@@ -1206,6 +1206,19 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       published.remoteEvaluationRuleId = binding.evaluationRuleId;
       published.remoteTaskStepIdsByStepId =
         binding.taskStepIdsByStepId;
+      if (mode !== 'LEARNING') {
+        const assignedStudentTasks = state.studentTasks.filter(
+          (task) => task.publishedTaskId === published.id
+        );
+        published.dataCount = await runRemote('自动准备原平台初始数据', () =>
+          backend.prepareInitialDataForPublishedTask(
+            toPlain(lesson),
+            toPlain(platform),
+            toPlain(published),
+            toPlain(assignedStudentTasks)
+          )
+        );
+      }
       published.syncStatus = 'SYNCED';
       delete published.syncError;
       state.studentTasks

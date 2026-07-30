@@ -1,6 +1,9 @@
 package com.sxpt.module.connector.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
@@ -44,6 +47,8 @@ import java.util.List;
 @Profile("!test")
 public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService {
 
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
     private static final String CAPABILITY_DATA_CREATE = "DATA_CREATE";
 
     private static final String CAPABILITY_DATA_LOCK = "DATA_LOCK";
@@ -86,6 +91,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
     @Transactional(rollbackFor = Exception.class)
     public ModuleDataStrategy createModuleDataStrategy(ModuleDataStrategy strategy) {
         validateCreateFields(strategy);
+        validateStrategyJsonFields(strategy, false);
         fillCreateDefaults(strategy);
         moduleDataStrategyMapper.insert(strategy);
         return strategy;
@@ -101,6 +107,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
     @Transactional(rollbackFor = Exception.class)
     public ModuleDataStrategy updateModuleDataStrategy(ModuleDataStrategy strategy) {
         validateUpdateFields(strategy);
+        validateStrategyJsonFields(strategy, false);
         ModuleDataStrategy existing = getModuleDataStrategyById(strategy.getId());
         existing.setModuleName(strategy.getModuleName());
         existing.setNeedPreData(strategy.getNeedPreData());
@@ -319,7 +326,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      * @param strategy 数据准备策略实体。
      */
     private void validateEnableFields(ModuleDataStrategy strategy) {
-        requireText(strategy.getTemplateId());
+        requireRuntimeText(strategy.getTemplateId());
         requireText(strategy.getDataSourceStrategy());
         requireText(strategy.getSharePolicy());
         requireText(strategy.getRegeneratePolicy());
@@ -330,6 +337,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         requireRegeneratePolicy(strategy.getRegeneratePolicy());
         requireLockPolicy(strategy.getLockPolicy());
         requirePrepareTiming(strategy.getPrepareTiming());
+        validateStrategyJsonFields(strategy, true);
         validateBusinessModuleReference(strategy);
         validateTemplateReference(strategy);
         validateExamStrategy(strategy);
@@ -387,7 +395,101 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         if (!StrategyLockPolicy.ON_EXAM_START.getValue().equals(strategy.getLockPolicy())) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
-        requireText(strategy.getResultCheckPolicyJson());
+        requireRuntimeText(strategy.getResultCheckPolicyJson());
+    }
+
+    /**
+     * 校验策略 JSON 配置，保存时保证结构可解析，启用时保证运行期能生成学生数据分配关系。
+     *
+     * @param strategy 鏁版嵁鍑嗗绛栫暐瀹炰綋銆?
+     * @param requireRuntimeFields true 表示启用场景，需要校验造数运行必需策略。
+     */
+    private void validateStrategyJsonFields(ModuleDataStrategy strategy, boolean requireRuntimeFields) {
+        JsonNode defaultOrgRolePolicy = parseJsonObject(strategy.getDefaultOrgRolePolicyJson());
+        JsonNode poolSizePolicy = parseJsonObject(strategy.getPoolSizePolicyJson());
+        JsonNode validationPolicy = parseJsonObject(strategy.getValidationPolicyJson());
+        parseJsonObject(strategy.getExpirePolicyJson());
+        parseJsonObject(strategy.getResultCheckPolicyJson());
+        parseJsonObject(strategy.getArchivePolicyJson());
+
+        if (poolSizePolicy != null) {
+            validatePoolSizePolicy(poolSizePolicy);
+        }
+        if (!requireRuntimeFields || Boolean.FALSE.equals(strategy.getNeedPreData())) {
+            return;
+        }
+        requireJsonObject(defaultOrgRolePolicy);
+        requireJsonText(defaultOrgRolePolicy, "org");
+        requireJsonText(defaultOrgRolePolicy, "role");
+        requireJsonObject(validationPolicy);
+        requireJsonText(validationPolicy, "requiredStatus");
+    }
+
+    /**
+     * 校验策略池水位，避免出现最小准备量大于最大准备量这种永远无法满足的策略。
+     *
+     * @param poolSizePolicy 策略池 JSON 对象。
+     */
+    private void validatePoolSizePolicy(JsonNode poolSizePolicy) {
+        JsonNode minReadyCountNode = poolSizePolicy.get("minReadyCount");
+        JsonNode maxReadyCountNode = poolSizePolicy.get("maxReadyCount");
+        if (minReadyCountNode == null && maxReadyCountNode == null) {
+            return;
+        }
+        if (minReadyCountNode == null || maxReadyCountNode == null
+                || !minReadyCountNode.canConvertToInt()
+                || !maxReadyCountNode.canConvertToInt()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        int minReadyCount = minReadyCountNode.asInt();
+        int maxReadyCount = maxReadyCountNode.asInt();
+        if (minReadyCount < 0 || maxReadyCount < 0 || minReadyCount > maxReadyCount) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 将前端维护的 JSON 文本解析为对象节点；策略配置只接受对象以保持字段语义稳定。
+     *
+     * @param json JSON 文本。
+     * @return 空文本返回 null，非空文本返回 JSON 对象节点。
+     */
+    private JsonNode parseJsonObject(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            JsonNode node = JSON_MAPPER.readTree(json);
+            if (node == null || !node.isObject()) {
+                throw new BusinessException(ApiResultCode.PARAM_ERROR);
+            }
+            return node;
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 校验启用态必须存在 JSON 对象，避免策略缺少单位角色或校验策略仍被教师发布任务使用。
+     *
+     * @param node JSON 对象节点。
+     */
+    private void requireJsonObject(JsonNode node) {
+        if (node == null || !node.isObject()) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+    }
+
+    /**
+     * 校验 JSON 中的必填文本字段，字段值承担原平台造数和学生分配的业务约束。
+     *
+     * @param node JSON 对象节点。
+     * @param fieldName 字段名。
+     */
+    private void requireJsonText(JsonNode node, String fieldName) {
+        if (node == null || !node.has(fieldName) || !StringUtils.hasText(node.get(fieldName).asText())) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
     }
 
     /**
@@ -426,7 +528,18 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
             if (isLocalDevConnector(strategy)) {
                 return;
             }
-            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+    }
+
+    /**
+     * 校验启用策略时必须具备的文本配置；这里返回配置不完整，方便前端引导管理员回到维护页面补齐。
+     *
+     * @param value 运行态必填配置值。
+     */
+    private void requireRuntimeText(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
         }
     }
 

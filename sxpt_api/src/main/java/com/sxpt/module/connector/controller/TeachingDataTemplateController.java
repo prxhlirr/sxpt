@@ -125,6 +125,24 @@ public class TeachingDataTemplateController {
     }
 
     /**
+     * 查询指定模块和场景下可用于运行链路的启用模板。
+     *
+     * @param tenantId 租户 ID。
+     * @param connectorSystemId 原平台配置 ID。
+     * @param moduleCode 业务模块编码。
+     * @param sceneType 教学场景。
+     * @return 启用教学业务数据模板列表。
+     */
+    @GetMapping("/active/by-module-scene")
+    public ApiResult<List<TeachingDataTemplateVO>> listActiveByModuleScene(@RequestParam String tenantId,
+                                                                           @RequestParam String connectorSystemId,
+                                                                           @RequestParam String moduleCode,
+                                                                           @RequestParam String sceneType) {
+        return ApiResult.success(toVOList(teachingDataTemplateService
+                .listActiveTemplatesByModuleAndScene(tenantId, connectorSystemId, moduleCode, sceneType)));
+    }
+
+    /**
      * 查询指定教学点和场景下的可用教学业务数据模板。
      *
      * @param tenantId 租户 ID。

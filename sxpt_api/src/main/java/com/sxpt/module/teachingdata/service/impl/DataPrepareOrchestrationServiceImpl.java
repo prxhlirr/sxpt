@@ -1,13 +1,15 @@
 package com.sxpt.module.teachingdata.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
-import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService;
 import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService.SnapshotResult;
+import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataRequirement;
 import com.sxpt.module.teachingdata.entity.DataRequirementItem;
@@ -61,6 +63,8 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
 
     private static final long INITIAL_LOCK_VERSION = 0L;
 
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
     private final DataPrepareJobMapper dataPrepareJobMapper;
 
     private final DataRequirementItemMapper dataRequirementItemMapper;
@@ -100,14 +104,44 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
     @Override
     @Transactional(rollbackFor = Exception.class)
     public DataPrepareJob executeCreateJob(String jobId) {
+        return executeCreateJob(jobId, false);
+    }
+
+    /**
+     * 只重试失败的数据准备明细。
+     *
+     * @param jobId 数据准备任务 ID。
+     * @return 已合并最终计数的数据准备任务。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public DataPrepareJob retryFailedItemsJob(String jobId) {
+        return executeCreateJob(jobId, true);
+    }
+
+    /**
+     * 执行批量创建或失败项补偿。
+     *
+     * @param jobId 数据准备任务 ID。
+     * @param failedOnly true 表示只处理失败明细。
+     * @return 已更新的数据准备任务。
+     */
+    private DataPrepareJob executeCreateJob(String jobId, boolean failedOnly) {
         requireText(jobId);
+        long startMillis = System.currentTimeMillis();
         DataPrepareJob job = getExistingJob(jobId);
-        List<DataRequirementItem> items = listRequirementItems(job);
+        long previousSuccessCount = failedOnly ? defaultLong(job.getSuccessCount()) : 0L;
+        List<DataRequirementItem> items = listRequirementItems(job, failedOnly);
         ensureHasItems(items);
-        markJobRunning(job, items.size());
-        OriginDataPrepareAdapter.BatchCreateResponse response = originDataPrepareAdapter.createTeachingData(
-                buildBatchCreateRequest(job, items));
-        return applyBatchCreateResponse(job, items, response);
+        OriginDataPrepareAdapter.BatchCreateRequest request = buildBatchCreateRequest(job, items);
+        markJobRunning(job, items.size(), request, failedOnly);
+        try {
+            OriginDataPrepareAdapter.BatchCreateResponse response = originDataPrepareAdapter.createTeachingData(request);
+            return applyBatchCreateResponse(job, items, response, elapsedMillis(startMillis),
+                    failedOnly, previousSuccessCount);
+        } catch (RuntimeException ex) {
+            return markJobFailed(job, formatException(ex), buildAdapterExceptionResultJson(ex, startMillis));
+        }
     }
 
     /**
@@ -162,15 +196,20 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      * @param job 数据准备任务。
      * @return 需求明细列表。
      */
-    private List<DataRequirementItem> listRequirementItems(DataPrepareJob job) {
-        return dataRequirementItemMapper.selectList(new QueryWrapper<DataRequirementItem>()
+    private List<DataRequirementItem> listRequirementItems(DataPrepareJob job, boolean failedOnly) {
+        QueryWrapper<DataRequirementItem> wrapper = new QueryWrapper<DataRequirementItem>()
                 .eq("tenant_id", job.getTenantId())
                 .eq("request_batch_id", job.getRequestBatchId())
                 .eq("connector_system_id", job.getConnectorSystemId())
                 .eq("module_code", job.getModuleCode())
                 .eq("scene_type", job.getSceneType())
-                .eq("deleted", Boolean.FALSE)
-                .orderByAsc("request_item_id"));
+                .eq("deleted", Boolean.FALSE);
+        if (failedOnly) {
+            wrapper.in("item_status",
+                    RequirementItemStatus.FAILED.getValue(),
+                    RequirementItemStatus.VALIDATION_FAILED.getValue());
+        }
+        return dataRequirementItemMapper.selectList(wrapper.orderByAsc("request_item_id"));
     }
 
     /**
@@ -190,10 +229,16 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      * @param job 数据准备任务。
      * @param expectedCount 预期处理数量。
      */
-    private void markJobRunning(DataPrepareJob job, int expectedCount) {
+    private void markJobRunning(DataPrepareJob job,
+                                int expectedCount,
+                                OriginDataPrepareAdapter.BatchCreateRequest request,
+                                boolean failedOnly) {
         LocalDateTime now = LocalDateTime.now();
         job.setJobStatus(PrepareJobStatus.RUNNING.getValue());
-        job.setExpectedCount((long) expectedCount);
+        if (!failedOnly) {
+            job.setExpectedCount((long) expectedCount);
+        }
+        job.setRequestJson(buildOriginCreateRequestEvidence(job.getRequestJson(), request));
         job.setStartTime(now);
         job.setUpdateTime(now);
         dataPrepareJobMapper.updateById(job);
@@ -219,6 +264,25 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         request.setRequestJson(job.getRequestJson());
         request.setItems(items.stream().map(this::buildRequestItem).collect(Collectors.toList()));
         return request;
+    }
+
+    /**
+     * 记录提交给原平台的请求证据。
+     * <p>
+     * 数据准备失败时，生产排障需要知道“教学平台到底向原平台提交了什么”。这里把原始触发请求和适配器请求放入同一个 JSON，
+     * 让后台列表、数据库和日志能够通过同一个任务 ID 还原完整调用上下文。
+     *
+     * @param job 数据准备任务。
+     * @param request 原平台批量创建请求。
+     */
+    private String buildOriginCreateRequestEvidence(String sourceRequestJson,
+                                                    OriginDataPrepareAdapter.BatchCreateRequest request) {
+        Map<String, Object> evidence = new HashMap<>();
+        evidence.put("sourceRequestJson", sourceRequestJson);
+        evidence.put("originCreateRequest", request);
+        evidence.put("requestItemCount", request.getItems() == null ? 0 : request.getItems().size());
+        evidence.put("recordedAt", LocalDateTime.now().toString());
+        return toJson(evidence);
     }
 
     /**
@@ -250,10 +314,12 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      */
     private DataPrepareJob applyBatchCreateResponse(DataPrepareJob job,
                                                     List<DataRequirementItem> items,
-                                                    OriginDataPrepareAdapter.BatchCreateResponse response) {
+                                                    OriginDataPrepareAdapter.BatchCreateResponse response,
+                                                    long elapsedMillis,
+                                                    boolean failedOnly,
+                                                    long previousSuccessCount) {
         if (response == null) {
-            markJobFailed(job, "原平台未返回数据准备结果");
-            return job;
+            return markJobFailed(job, "原平台未返回数据准备结果", buildNullResponseResultJson(elapsedMillis));
         }
         Map<String, OriginDataPrepareAdapter.ResponseItem> responseItemMap = mapResponseItems(response.getItems());
         Map<String, TeachingDataPool> poolMap = createPoolsByQuestion(job, items);
@@ -270,7 +336,8 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
             }
         }
         refreshPoolCounters(poolMap);
-        markJobFinished(job, response, successCount, failedCount);
+        long finalSuccessCount = failedOnly ? previousSuccessCount + successCount : successCount;
+        markJobFinished(job, response, finalSuccessCount, failedCount, elapsedMillis);
         return job;
     }
 
@@ -749,16 +816,18 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      * @param job 数据准备任务。
      * @param errorMessage 错误消息。
      */
-    private void markJobFailed(DataPrepareJob job, String errorMessage) {
+    private DataPrepareJob markJobFailed(DataPrepareJob job, String errorMessage, String resultJson) {
         LocalDateTime now = LocalDateTime.now();
         job.setJobStatus(PrepareJobStatus.FAILED.getValue());
         job.setFailedCount(job.getExpectedCount());
         job.setSuccessCount(0L);
         job.setErrorMessage(errorMessage);
+        job.setResultJson(resultJson);
         job.setEndTime(now);
         job.setUpdateTime(now);
         dataPrepareJobMapper.updateById(job);
         updateRequirementFinished(job, 0L, job.getExpectedCount());
+        return job;
     }
 
     /**
@@ -850,10 +919,11 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
     private void markJobFinished(DataPrepareJob job,
                                  OriginDataPrepareAdapter.BatchCreateResponse response,
                                  long successCount,
-                                 long failedCount) {
+                                 long failedCount,
+                                 long elapsedMillis) {
         LocalDateTime now = LocalDateTime.now();
         job.setExternalRequestId(response.getExternalRequestId());
-        job.setResultJson(response.getResultJson());
+        job.setResultJson(buildAdapterResponseResultJson(response, successCount, failedCount, elapsedMillis));
         job.setSuccessCount(successCount);
         job.setFailedCount(failedCount);
         job.setJobStatus(resolveJobStatus(successCount, failedCount));
@@ -881,10 +951,116 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
     }
 
     /**
+     * 构造原平台正常响应摘要。
+     * <p>
+     * result_json 面向后台排障，不保存完整原平台业务数据，只保存对账 ID、状态、数量、耗时和原平台返回的摘要 JSON。
+     *
+     * @param response 原平台批量创建响应。
+     * @param successCount 成功数量。
+     * @param failedCount 失败数量。
+     * @param elapsedMillis 调用耗时毫秒数。
+     * @return 可直接写入 jsonb 字段的结果摘要。
+     */
+    private String buildAdapterResponseResultJson(OriginDataPrepareAdapter.BatchCreateResponse response,
+                                                  long successCount,
+                                                  long failedCount,
+                                                  long elapsedMillis) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("adapterStatus", response.getAdapterStatus());
+        result.put("externalRequestId", response.getExternalRequestId());
+        result.put("requestBatchId", response.getRequestBatchId());
+        result.put("successCount", successCount);
+        result.put("failedCount", failedCount);
+        result.put("elapsedMillis", elapsedMillis);
+        result.put("adapterResultJson", response.getResultJson());
+        return toJson(result);
+    }
+
+    /**
+     * 构造原平台无响应时的失败摘要。
+     *
+     * @param elapsedMillis 调用耗时毫秒数。
+     * @return 可直接写入 jsonb 字段的失败摘要。
+     */
+    private String buildNullResponseResultJson(long elapsedMillis) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("adapterStatus", "NO_RESPONSE");
+        result.put("elapsedMillis", elapsedMillis);
+        result.put("errorMessage", "原平台未返回数据准备结果");
+        return toJson(result);
+    }
+
+    /**
+     * 构造原平台调用异常时的失败摘要。
+     *
+     * @param ex 原平台适配器异常。
+     * @param startMillis 调用开始时间戳。
+     * @return 可直接写入 jsonb 字段的失败摘要。
+     */
+    private String buildAdapterExceptionResultJson(RuntimeException ex, long startMillis) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("adapterStatus", "EXCEPTION");
+        result.put("adapterException", ex.getClass().getSimpleName());
+        result.put("errorMessage", ex.getMessage());
+        result.put("elapsedMillis", elapsedMillis(startMillis));
+        return toJson(result);
+    }
+
+    /**
+     * 格式化异常消息，确保 error_message 能直接支撑页面提示和日志检索。
+     *
+     * @param ex 原平台适配器异常。
+     * @return 异常类型与消息。
+     */
+    private String formatException(RuntimeException ex) {
+        if (ex == null) {
+            return "RuntimeException";
+        }
+        if (StringUtils.hasText(ex.getMessage())) {
+            return ex.getClass().getSimpleName() + ": " + ex.getMessage();
+        }
+        return ex.getClass().getSimpleName();
+    }
+
+    /**
+     * 计算本次原平台调用耗时。
+     *
+     * @param startMillis 调用开始时间戳。
+     * @return 非负毫秒数。
+     */
+    private long elapsedMillis(long startMillis) {
+        return Math.max(0L, System.currentTimeMillis() - startMillis);
+    }
+
+    /**
+     * 将证据对象序列化成 PostgreSQL jsonb 可接收的字符串。
+     *
+     * @param value 证据对象。
+     * @return JSON 字符串。
+     */
+    private String toJson(Object value) {
+        try {
+            return JSON_MAPPER.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
+        }
+    }
+
+    /**
      * 校验文本字段非空。
      *
      * @param value 待校验字段值。
      */
+    /**
+     * 将空计数字段按 0 处理，避免历史任务补偿时出现空指针。
+     *
+     * @param value 原始计数。
+     * @return 非空计数。
+     */
+    private long defaultLong(Long value) {
+        return value == null ? 0L : value;
+    }
+
     private void requireText(String value) {
         if (!StringUtils.hasText(value)) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
