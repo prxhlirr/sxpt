@@ -14,7 +14,8 @@ class JwtAuthInterceptorTests {
     @Test
     void shouldAllowCorsPreflightWithoutBearerToken() {
         SecurityManager securityManager = mock(SecurityManager.class);
-        JwtAuthInterceptor interceptor = new JwtAuthInterceptor(securityManager);
+        AuthenticatedUserContextService contextService = mock(AuthenticatedUserContextService.class);
+        JwtAuthInterceptor interceptor = new JwtAuthInterceptor(securityManager, contextService);
         MockHttpServletRequest request = new MockHttpServletRequest("OPTIONS", "/api/v1/connector/system/list");
 
         boolean allowed = interceptor.preHandle(request, new MockHttpServletResponse(), new Object());

@@ -67,8 +67,10 @@ class AuthMeControllerTests {
                         .header(AUTHORIZATION_HEADER, "Bearer " + token))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
-                .andExpect(jsonPath("$.result.userId", is("10001")))
-                .andExpect(jsonPath("$.result.username", is("teacher001")))
+                .andExpect(jsonPath("$.result.userId", is("demo-teacher")))
+                .andExpect(jsonPath("$.result.tenantId", is("demo-tenant")))
+                .andExpect(jsonPath("$.result.username", is("demo-teacher")))
+                .andExpect(jsonPath("$.result.userType", is("TEACHER")))
                 .andExpect(jsonPath("$.result.roles").isArray())
                 .andExpect(jsonPath("$.result.orgIds").isArray())
                 .andExpect(jsonPath("$.result.identityBindings").isArray());
@@ -76,8 +78,8 @@ class AuthMeControllerTests {
 
     private String issueToken() throws Exception {
         String response = mockMvc.perform(post("/api/v1/auth/token")
-                        .param("userId", "10001")
-                        .param("username", "teacher001"))
+                        .param("userId", "demo-teacher")
+                        .param("username", "demo-teacher"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andReturn()

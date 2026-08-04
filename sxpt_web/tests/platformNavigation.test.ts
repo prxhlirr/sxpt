@@ -32,8 +32,13 @@ describe('登录后的平台入口与身份导航', () => {
     expect(portal).toContain('import.meta.env.DEV');
     expect(portal).toContain('store.setRole(role)');
     expect(portal).toContain('authApi.useDevelopmentSession(role)');
-    expect(api).toContain('api/v1/auth/token');
+    expect(api).toContain('api/v1/auth/login');
+    expect(api).toContain('DEVELOPMENT_LOGIN_PROFILES');
+    expect(api).toContain("username: 'expert01'");
+    expect(api).toContain("username: 'teacher01'");
+    expect(api).toContain("username: 'student01'");
     expect(api).not.toContain('token: `dev-${role}-token`');
+    expect(api).not.toContain('dev-${role}');
     expect(portal).toContain("enterDevelopmentPortal('admin')");
     expect(portal).toContain("enterDevelopmentPortal('teacher')");
     expect(portal).toContain("enterDevelopmentPortal('student')");

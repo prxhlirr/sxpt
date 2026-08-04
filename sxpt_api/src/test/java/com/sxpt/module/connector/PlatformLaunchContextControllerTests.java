@@ -3,11 +3,15 @@ package com.sxpt.module.connector;
 import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.connector.entity.PlatformLaunchContext;
+import com.sxpt.module.connector.service.BusinessModuleProcessChainService;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
 import com.sxpt.module.user.mapper.TeachRoleMapper;
 import com.sxpt.module.user.mapper.TeachUserMapper;
 import com.sxpt.module.user.mapper.TeachUserOrgMapper;
 import com.sxpt.module.user.mapper.TeachUserRoleMapper;
+import com.sxpt.module.user.service.SystemConfigService;
+import com.sxpt.module.user.vo.RuntimeUserContextVO;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,6 +24,7 @@ import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -57,6 +62,12 @@ class PlatformLaunchContextControllerTests {
     private PlatformLaunchContextService platformLaunchContextService;
 
     @MockBean
+    private BusinessModuleProcessChainService businessModuleProcessChainService;
+
+    @MockBean
+    private SystemConfigService systemConfigService;
+
+    @MockBean
     private TeachUserMapper teachUserMapper;
 
     @MockBean
@@ -67,6 +78,11 @@ class PlatformLaunchContextControllerTests {
 
     @MockBean
     private TeachUserOrgMapper teachUserOrgMapper;
+
+    @BeforeEach
+    void setUpCurrentUserRuntimeContext() {
+        when(systemConfigService.getRuntimeContextForUser("admin_001")).thenReturn(buildRuntimeContext());
+    }
 
     /**
      * 校验创建启动上下文成功返回统一响应。
@@ -82,14 +98,14 @@ class PlatformLaunchContextControllerTests {
         mockMvc.perform(post("/api/v1/connector/launch-contexts/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"userId\":\"user_001\",\"connectorSystemId\":\"connector_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"executionId\":\"exec_001\",\"dataInstanceId\":\"instance_001\",\"sceneType\":\"RECORD\",\"sdkMode\":\"CAPTURE\",\"targetUrl\":\"/record/apply\",\"segmentNo\":1,\"actorType\":\"APPLICANT\",\"requiredExternalOrgId\":\"org_ext_001\",\"requiredExternalRoleId\":\"role_ext_001\",\"dataScopeJson\":\"{}\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"userId\":\"forged_user\",\"connectorSystemId\":\"connector_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"executionId\":\"exec_001\",\"dataInstanceId\":\"instance_001\",\"sceneType\":\"RECORD\",\"sdkMode\":\"CAPTURE\",\"targetUrl\":\"/record/apply\",\"segmentNo\":1,\"actorType\":\"APPLICANT\",\"requiredExternalOrgId\":\"org_ext_001\",\"requiredExternalRoleId\":\"role_ext_001\",\"dataScopeJson\":\"{}\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.result.id", is("launch_001")))
                 .andExpect(jsonPath("$.result.launchToken", is("ctx_token_001")))
                 .andExpect(jsonPath("$.result.tenantId", is("tenant_001")))
-                .andExpect(jsonPath("$.result.userId", is("user_001")))
+                .andExpect(jsonPath("$.result.userId", is("admin_001")))
                 .andExpect(jsonPath("$.result.connectorSystemId", is("connector_001")))
                 .andExpect(jsonPath("$.result.sceneType", is("RECORD")))
                 .andExpect(jsonPath("$.result.sdkMode", is("CAPTURE")))
@@ -103,7 +119,9 @@ class PlatformLaunchContextControllerTests {
         PlatformLaunchContext requestEntity = captor.getValue();
         org.junit.jupiter.api.Assertions.assertNotNull(requestEntity.getId());
         org.junit.jupiter.api.Assertions.assertEquals("tenant_001", requestEntity.getTenantId());
-        org.junit.jupiter.api.Assertions.assertEquals("user_001", requestEntity.getUserId());
+        org.junit.jupiter.api.Assertions.assertEquals("admin_001", requestEntity.getUserId());
+        org.junit.jupiter.api.Assertions.assertEquals("admin_001", requestEntity.getCreateBy());
+        org.junit.jupiter.api.Assertions.assertEquals("admin_001", requestEntity.getUpdateBy());
         org.junit.jupiter.api.Assertions.assertEquals("connector_001", requestEntity.getConnectorSystemId());
         org.junit.jupiter.api.Assertions.assertEquals("task_001", requestEntity.getTaskId());
         org.junit.jupiter.api.Assertions.assertEquals("tp_001", requestEntity.getTeachingPointId());
@@ -172,7 +190,7 @@ class PlatformLaunchContextControllerTests {
                 .andExpect(jsonPath("$.code", is(200)))
                 .andExpect(jsonPath("$.result.id", is("launch_001")))
                 .andExpect(jsonPath("$.result.launchStatus", is("VERIFIED")))
-                .andExpect(jsonPath("$.result.userId", is("user_001")))
+                .andExpect(jsonPath("$.result.userId", is("admin_001")))
                 .andExpect(jsonPath("$.result.requiredExternalOrgId", is("org_ext_001")))
                 .andExpect(jsonPath("$.result.requiredExternalRoleId", is("role_ext_001")))
                 .andExpect(jsonPath("$.result.externalBusinessId", is("biz_001")))
@@ -276,7 +294,7 @@ class PlatformLaunchContextControllerTests {
         PlatformLaunchContext launchContext = new PlatformLaunchContext();
         launchContext.setId("launch_001");
         launchContext.setTenantId("tenant_001");
-        launchContext.setUserId("user_001");
+        launchContext.setUserId("admin_001");
         launchContext.setConnectorSystemId("connector_001");
         launchContext.setTaskId("task_001");
         launchContext.setTeachingPointId("tp_001");
@@ -289,6 +307,20 @@ class PlatformLaunchContextControllerTests {
         launchContext.setExpireTime(LocalDateTime.now().plusMinutes(5));
         launchContext.setCreateTime(LocalDateTime.now());
         return launchContext;
+    }
+
+    private RuntimeUserContextVO buildRuntimeContext() {
+        RuntimeUserContextVO context = new RuntimeUserContextVO();
+        RuntimeUserContextVO.UserSummary user = new RuntimeUserContextVO.UserSummary();
+        user.setUserId("admin_001");
+        user.setTenantId("tenant_001");
+        user.setUsername("admin");
+        user.setDisplayName("绠＄悊鍛?");
+        user.setUserType("ADMIN");
+        context.setUser(user);
+        context.setRoles(Collections.emptyList());
+        context.setOrgs(Collections.emptyList());
+        return context;
     }
 
     /**

@@ -3,8 +3,12 @@ package com.sxpt.module.execution;
 import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
+import com.sxpt.module.connector.service.BusinessModuleProcessChainService;
 import com.sxpt.module.execution.entity.TaskExecution;
 import com.sxpt.module.execution.service.TaskExecutionService;
+import com.sxpt.module.user.service.SystemConfigService;
+import com.sxpt.module.user.vo.RuntimeUserContextVO;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -64,7 +68,18 @@ class TaskExecutionControllerTests {
     private TaskExecutionService taskExecutionService;
 
     @MockBean
+    private BusinessModuleProcessChainService businessModuleProcessChainService;
+
+    @MockBean
     private AuthLoginService authLoginService;
+
+    @MockBean
+    private SystemConfigService systemConfigService;
+
+    @BeforeEach
+    void setUpCurrentUserRuntimeContext() {
+        when(systemConfigService.getRuntimeContextForUser("student_001")).thenReturn(buildRuntimeContext());
+    }
 
     /**
      * 验证开始执行成功返回学生任务执行主记录。
@@ -79,7 +94,7 @@ class TaskExecutionControllerTests {
         mockMvc.perform(post("/api/v1/student/task-executions/start")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"studentId\":\"forged_student\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\",\"executionIdentityJson\":\"{\\\"identityMode\\\":\\\"STUDENT\\\"}\",\"createBy\":\"forged_operator\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"taskId\":\"task_001\",\"studentId\":\"forged_student\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\",\"executionIdentityJson\":\"{\\\"identityMode\\\":\\\"STUDENT\\\"}\",\"createBy\":\"forged_operator\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -113,7 +128,7 @@ class TaskExecutionControllerTests {
         mockMvc.perform(post("/api/v1/student/task-executions/start")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"taskId\":\"task_001\",\"connectorSystemId\":\"connector_001\",\"executionMode\":\"PRACTICE\",\"sdkMode\":\"PRACTICE\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)));
 
@@ -136,7 +151,7 @@ class TaskExecutionControllerTests {
         mockMvc.perform(post("/api/v1/student/task-executions/submit")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"executionId\":\"execution_001\",\"operatorId\":\"forged_operator\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"executionId\":\"execution_001\",\"operatorId\":\"forged_operator\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -159,7 +174,7 @@ class TaskExecutionControllerTests {
 
         mockMvc.perform(get("/api/v1/student/task-executions/execution_001")
                         .header("Authorization", bearerToken())
-                        .param("tenantId", "tenant_001"))
+                        .param("tenantId", "forged_tenant"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -181,7 +196,7 @@ class TaskExecutionControllerTests {
 
         mockMvc.perform(get("/api/v1/student/task-executions")
                         .header("Authorization", bearerToken())
-                        .param("tenantId", "tenant_001")
+                        .param("tenantId", "forged_tenant")
                         .param("studentId", "forged_student")
                         .param("taskId", "task_001"))
                 .andExpect(status().isOk())
@@ -227,6 +242,21 @@ class TaskExecutionControllerTests {
         execution.setScore(new BigDecimal("85.50"));
         execution.setResultSummary("自动评分处理中。");
         return execution;
+    }
+
+    private RuntimeUserContextVO buildRuntimeContext() {
+        RuntimeUserContextVO context = new RuntimeUserContextVO();
+        RuntimeUserContextVO.UserSummary user = new RuntimeUserContextVO.UserSummary();
+        user.setUserId("student_001");
+        user.setTenantId("tenant_001");
+        user.setUsername("student001");
+        user.setDisplayName("瀛︾敓涓€");
+        user.setUserType("STUDENT");
+        user.setStudentNo("S001");
+        context.setUser(user);
+        context.setRoles(Collections.emptyList());
+        context.setOrgs(Collections.emptyList());
+        return context;
     }
 
     /**

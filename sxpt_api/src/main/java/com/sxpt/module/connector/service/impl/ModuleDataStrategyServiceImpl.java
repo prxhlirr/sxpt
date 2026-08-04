@@ -7,13 +7,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
+import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
 import com.sxpt.module.connector.entity.ConnectorSystem;
 import com.sxpt.module.connector.entity.ModuleDataStrategy;
+import com.sxpt.module.connector.entity.OriginOrg;
+import com.sxpt.module.connector.entity.OriginRole;
 import com.sxpt.module.connector.entity.PlatformCapability;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
 import com.sxpt.module.connector.mapper.ModuleDataStrategyMapper;
+import com.sxpt.module.connector.mapper.OriginOrgMapper;
+import com.sxpt.module.connector.mapper.OriginRoleMapper;
 import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
 import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.ModuleDataStrategyService;
@@ -63,7 +71,15 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
 
     private final BusinessModuleMapper businessModuleMapper;
 
+    private final BusinessModuleProcessStepMapper processStepMapper;
+
+    private final BusinessModuleProcessActorMapper processActorMapper;
+
     private final TeachingDataTemplateMapper teachingDataTemplateMapper;
+
+    private final OriginRoleMapper originRoleMapper;
+
+    private final OriginOrgMapper originOrgMapper;
 
     private final PlatformCapabilityMapper platformCapabilityMapper;
 
@@ -71,12 +87,20 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
 
     public ModuleDataStrategyServiceImpl(ModuleDataStrategyMapper moduleDataStrategyMapper,
                                          BusinessModuleMapper businessModuleMapper,
+                                         BusinessModuleProcessStepMapper processStepMapper,
+                                         BusinessModuleProcessActorMapper processActorMapper,
                                          TeachingDataTemplateMapper teachingDataTemplateMapper,
+                                         OriginRoleMapper originRoleMapper,
+                                         OriginOrgMapper originOrgMapper,
                                          PlatformCapabilityMapper platformCapabilityMapper,
                                          ConnectorSystemMapper connectorSystemMapper) {
         this.moduleDataStrategyMapper = moduleDataStrategyMapper;
         this.businessModuleMapper = businessModuleMapper;
+        this.processStepMapper = processStepMapper;
+        this.processActorMapper = processActorMapper;
         this.teachingDataTemplateMapper = teachingDataTemplateMapper;
+        this.originRoleMapper = originRoleMapper;
+        this.originOrgMapper = originOrgMapper;
         this.platformCapabilityMapper = platformCapabilityMapper;
         this.connectorSystemMapper = connectorSystemMapper;
     }
@@ -326,12 +350,12 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      * @param strategy 数据准备策略实体。
      */
     private void validateEnableFields(ModuleDataStrategy strategy) {
-        requireRuntimeText(strategy.getTemplateId());
+        requireRuntimeText(strategy.getTemplateId(), "策略未绑定数据模板");
         requireText(strategy.getDataSourceStrategy());
         requireText(strategy.getSharePolicy());
         requireText(strategy.getRegeneratePolicy());
         requireText(strategy.getLockPolicy());
-        requireText(strategy.getPrepareTiming());
+        requireRuntimeText(strategy.getPrepareTiming(), "策略未配置数据准备时机");
         requireSceneType(strategy.getSceneType());
         requireSharePolicy(strategy.getSharePolicy());
         requireRegeneratePolicy(strategy.getRegeneratePolicy());
@@ -339,6 +363,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         requirePrepareTiming(strategy.getPrepareTiming());
         validateStrategyJsonFields(strategy, true);
         validateBusinessModuleReference(strategy);
+        validateProcessActorDictionaryReferences(strategy);
         validateTemplateReference(strategy);
         validateExamStrategy(strategy);
         validatePlatformCapabilities(strategy);
@@ -358,7 +383,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
                 .eq("status", RecordStatus.ACTIVE.getValue())
                 .eq("deleted", Boolean.FALSE));
         if (businessModule == null) {
-            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+            throw incompleteConfigException("策略绑定的业务模块不存在或未启用");
         }
     }
 
@@ -376,7 +401,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
                 .eq("status", RecordStatus.ACTIVE.getValue())
                 .eq("deleted", Boolean.FALSE));
         if (template == null) {
-            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+            throw incompleteConfigException("策略绑定的数据模板不存在或未启用");
         }
     }
 
@@ -385,6 +410,72 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      *
      * @param strategy 数据准备策略实体。
      */
+    /**
+     * 校验策略绑定模块的启用步骤参与方引用了有效的原平台组织和角色。
+     *
+     * @param strategy 数据准备策略实体。
+     */
+    private void validateProcessActorDictionaryReferences(ModuleDataStrategy strategy) {
+        if (Boolean.FALSE.equals(strategy.getNeedPreData())) {
+            return;
+        }
+        List<BusinessModuleProcessStep> activeSteps = processStepMapper.selectList(new QueryWrapper<BusinessModuleProcessStep>()
+                .eq("tenant_id", strategy.getTenantId())
+                .eq("business_module_id", strategy.getBusinessModuleId())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE)
+                .orderByAsc("step_no"));
+        if (activeSteps == null || activeSteps.isEmpty()) {
+            throw incompleteConfigException("业务模块未维护启用的标准办理步骤");
+        }
+        for (BusinessModuleProcessStep step : activeSteps) {
+            List<BusinessModuleProcessActor> activeActors = processActorMapper.selectList(new QueryWrapper<BusinessModuleProcessActor>()
+                    .eq("tenant_id", strategy.getTenantId())
+                    .eq("process_step_id", step.getId())
+                    .eq("status", RecordStatus.ACTIVE.getValue())
+                    .eq("deleted", Boolean.FALSE)
+                    .orderByAsc("actor_no"));
+            if (activeActors == null || activeActors.isEmpty()) {
+                throw incompleteConfigException("业务模块启用步骤未维护启用参与方");
+            }
+            for (BusinessModuleProcessActor actor : activeActors) {
+                validateActiveActorDictionaryReference(strategy, actor);
+            }
+        }
+    }
+
+    /**
+     * 校验单个参与方引用的原平台组织和角色仍可用于造数参数生成。
+     *
+     * @param strategy 数据准备策略实体。
+     * @param actor 步骤参与方实体。
+     */
+    private void validateActiveActorDictionaryReference(ModuleDataStrategy strategy,
+                                                        BusinessModuleProcessActor actor) {
+        if (!StringUtils.hasText(actor.getRequiredOrgCode())
+                || !StringUtils.hasText(actor.getRequiredRoleCode())) {
+            throw incompleteConfigException("业务模块参与方未绑定原平台组织或角色");
+        }
+        Integer activeRoleCount = originRoleMapper.selectCount(new QueryWrapper<OriginRole>()
+                .eq("tenant_id", strategy.getTenantId())
+                .eq("connector_system_id", strategy.getConnectorSystemId())
+                .eq("role_code", actor.getRequiredRoleCode())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE));
+        if (activeRoleCount == null || activeRoleCount <= 0) {
+            throw incompleteConfigException("业务模块参与方绑定的原平台角色不存在或未启用");
+        }
+        Integer activeOrgCount = originOrgMapper.selectCount(new QueryWrapper<OriginOrg>()
+                .eq("tenant_id", strategy.getTenantId())
+                .eq("connector_system_id", strategy.getConnectorSystemId())
+                .eq("org_code", actor.getRequiredOrgCode())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE));
+        if (activeOrgCount == null || activeOrgCount <= 0) {
+            throw incompleteConfigException("业务模块参与方绑定的原平台组织不存在或未启用");
+        }
+    }
+
     private void validateExamStrategy(ModuleDataStrategy strategy) {
         if (!StrategySceneType.EXAM.getValue().equals(strategy.getSceneType())) {
             return;
@@ -395,7 +486,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         if (!StrategyLockPolicy.ON_EXAM_START.getValue().equals(strategy.getLockPolicy())) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
-        requireRuntimeText(strategy.getResultCheckPolicyJson());
+        requireRuntimeText(strategy.getResultCheckPolicyJson(), "考试策略未配置结果校验策略");
     }
 
     /**
@@ -418,11 +509,11 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         if (!requireRuntimeFields || Boolean.FALSE.equals(strategy.getNeedPreData())) {
             return;
         }
-        requireJsonObject(defaultOrgRolePolicy);
-        requireJsonText(defaultOrgRolePolicy, "org");
-        requireJsonText(defaultOrgRolePolicy, "role");
-        requireJsonObject(validationPolicy);
-        requireJsonText(validationPolicy, "requiredStatus");
+        requireJsonObject(defaultOrgRolePolicy, "初始身份策略 JSON 不能为空");
+        requireJsonText(defaultOrgRolePolicy, "org", "初始身份策略 JSON 缺少 org");
+        requireJsonText(defaultOrgRolePolicy, "role", "初始身份策略 JSON 缺少 role");
+        requireJsonObject(validationPolicy, "初始数据校验策略 JSON 不能为空");
+        requireJsonText(validationPolicy, "requiredStatus", "初始数据校验策略 JSON 缺少 requiredStatus");
     }
 
     /**
@@ -474,9 +565,9 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      *
      * @param node JSON 对象节点。
      */
-    private void requireJsonObject(JsonNode node) {
+    private void requireJsonObject(JsonNode node, String message) {
         if (node == null || !node.isObject()) {
-            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+            throw incompleteConfigException(message);
         }
     }
 
@@ -486,9 +577,9 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      * @param node JSON 对象节点。
      * @param fieldName 字段名。
      */
-    private void requireJsonText(JsonNode node, String fieldName) {
+    private void requireJsonText(JsonNode node, String fieldName, String message) {
         if (node == null || !node.has(fieldName) || !StringUtils.hasText(node.get(fieldName).asText())) {
-            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+            throw incompleteConfigException(message);
         }
     }
 
@@ -528,7 +619,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
             if (isLocalDevConnector(strategy)) {
                 return;
             }
-            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+            throw incompleteConfigException("原平台未注册或未启用 " + capabilityCode + " 能力");
         }
     }
 
@@ -537,10 +628,20 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      *
      * @param value 运行态必填配置值。
      */
-    private void requireRuntimeText(String value) {
+    private void requireRuntimeText(String value, String message) {
         if (!StringUtils.hasText(value)) {
-            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+            throw incompleteConfigException(message);
         }
+    }
+
+    /**
+     * 业务功能：构造策略启用缺项异常。
+     * 关键流程：保持原有错误码不变，只补充明确缺项，前端可直接展示给管理员定位配置节点。
+     */
+    private BusinessException incompleteConfigException(String message) {
+        return new BusinessException(
+                ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getMessage() + "：" + message);
     }
 
     /**

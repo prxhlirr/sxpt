@@ -4,6 +4,9 @@ import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -77,19 +80,135 @@ public final class CurrentUserContext {
 
         private final String userId;
 
+        private final String tenantId;
+
         private final String username;
 
+        private final String displayName;
+
+        private final String userType;
+
+        private final String studentNo;
+
+        private final String employeeNo;
+
+        private final List<String> roleCodes;
+
+        private final List<String> orgIds;
+
+        private final List<IdentityBindingSummary> identityBindings;
+
         public CurrentUser(String userId, String username) {
+            this(userId, null, username, null, null, null, null,
+                    Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
+        }
+
+        public CurrentUser(String userId,
+                           String tenantId,
+                           String username,
+                           String displayName,
+                           String userType,
+                           String studentNo,
+                           String employeeNo,
+                           List<String> roleCodes,
+                           List<String> orgIds,
+                           List<IdentityBindingSummary> identityBindings) {
             this.userId = userId;
+            this.tenantId = tenantId;
             this.username = username;
+            this.displayName = displayName;
+            this.userType = userType;
+            this.studentNo = studentNo;
+            this.employeeNo = employeeNo;
+            this.roleCodes = immutableCopy(roleCodes);
+            this.orgIds = immutableCopy(orgIds);
+            this.identityBindings = immutableIdentityBindingCopy(identityBindings);
         }
 
         public String getUserId() {
             return userId;
         }
 
+        public String getTenantId() {
+            return tenantId;
+        }
+
         public String getUsername() {
             return username;
+        }
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public String getUserType() {
+            return userType;
+        }
+
+        public String getStudentNo() {
+            return studentNo;
+        }
+
+        public String getEmployeeNo() {
+            return employeeNo;
+        }
+
+        public List<String> getRoleCodes() {
+            return roleCodes;
+        }
+
+        public List<String> getOrgIds() {
+            return orgIds;
+        }
+
+        public List<IdentityBindingSummary> getIdentityBindings() {
+            return identityBindings;
+        }
+
+        private static List<String> immutableCopy(List<String> values) {
+            if (values == null || values.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return Collections.unmodifiableList(new ArrayList<String>(values));
+        }
+
+        private static List<IdentityBindingSummary> immutableIdentityBindingCopy(
+                List<IdentityBindingSummary> values) {
+            if (values == null || values.isEmpty()) {
+                return Collections.emptyList();
+            }
+            return Collections.unmodifiableList(new ArrayList<IdentityBindingSummary>(values));
+        }
+    }
+
+    /**
+     * 鍘熷钩鍙拌韩浠界粦瀹氭憳瑕併€?     *
+     * 涓氬姟鍔熻兘锛?     * 1. 灏嗗綋鍓嶇敤鎴峰湪鍘熷钩鍙扮殑鍙俊韬唤缁戝畾鏆存斁鍏ヨ璇佷笂涓嬫枃銆?     * 2. 鍚庣画鏁版嵁鍑嗗鍜?launchToken 鏀堕敛鏃跺彲鐩存帴浣跨敤鏈嶅姟绔弽鏌ョ殑韬唤鏄犲皠銆?     *
+     * 鍏抽敭娴佺▼锛?     * 1. 褰撳墠闃舵浼樺厛淇濈暀缁撴瀯锛屾帴鍏ュ叏閲忕粦瀹氭煡璇㈠悗鍐嶅～鍏呭垪琛ㄣ€?     * 2. 瀵硅薄涓嶆彁渚涘彲鍙樻洿闆嗗悎锛岄伩鍏嶄笟鍔＄嚎绋嬩慨鏀硅璇佺粨鏋溿€?     */
+    public static final class IdentityBindingSummary {
+
+        private final String connectorSystemId;
+
+        private final String externalUserId;
+
+        private final String externalUsername;
+
+        public IdentityBindingSummary(String connectorSystemId, String externalUserId, String externalUsername) {
+            this.connectorSystemId = connectorSystemId;
+            this.externalUserId = externalUserId;
+            this.externalUsername = externalUsername;
+        }
+
+        public String getConnectorSystemId() {
+            return connectorSystemId;
+        }
+
+        public String getExternalUserId() {
+            return externalUserId;
+        }
+
+        public String getExternalUsername() {
+            return externalUsername;
         }
     }
 }

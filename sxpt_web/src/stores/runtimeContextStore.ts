@@ -29,7 +29,7 @@ export function createRuntimeContextStore(
 
   /**
    * 业务功能：加载当前用户运行时上下文，作为菜单和按钮显隐的统一数据源。
-   * 关键流程：同一时刻复用请求 Promise；失败时记录错误但返回空上下文，避免初始化期锁死管理入口。
+   * 关键流程：同一时刻复用请求 Promise；失败时记录错误并清空上下文，后续权限判断按拒绝处理。
    */
   async function loadRuntimeContext(
     options: { force?: boolean } = {}
@@ -70,10 +70,11 @@ export function createRuntimeContextStore(
 
   /**
    * 业务功能：判断指定权限码是否对当前用户开放。
-   * 关键流程：无权限码或上下文未初始化时走兼容放行；上下文存在后优先使用角色和权限码精确判断。
+   * 关键流程：无权限码直接放行；上下文缺失时拒绝需要权限码的操作；上下文存在后按角色和权限码精确判断。
    */
   function hasPermission(permissionCode?: string): boolean {
-    if (!permissionCode || !state.context) return true;
+    if (!permissionCode) return true;
+    if (!state.context) return false;
     if (isSuperAdmin()) return true;
     return state.context.permissions.includes(permissionCode);
   }
@@ -90,17 +91,18 @@ export function createRuntimeContextStore(
 
   /**
    * 业务功能：判断目标路由是否在当前用户可见菜单范围内。
-   * 关键流程：菜单未初始化或加载失败时放行；存在菜单配置后，按精确路由、动态路由和父级菜单前缀判断页面访问。
+   * 关键流程：平台选择页始终可达；上下文缺失或菜单为空时拒绝后台页面；存在菜单配置后按路由规则判断页面访问。
    */
   function canAccessRoute(targetPath: string): boolean {
-    if (!state.context || isSuperAdmin()) return true;
+    const normalizedTarget = normalizeRoutePath(targetPath);
+    if (normalizedTarget === '/platforms') return true;
+    if (!state.context) return false;
+    if (isSuperAdmin()) return true;
     const menuPaths = getVisibleMenus()
       .map((menu) => menu.routePath)
       .filter((routePath): routePath is string => Boolean(routePath));
-    if (menuPaths.length === 0) return true;
+    if (menuPaths.length === 0) return false;
 
-    const normalizedTarget = normalizeRoutePath(targetPath);
-    if (normalizedTarget === '/platforms') return true;
     return menuPaths.some((menuPath) => routePathMatches(menuPath, normalizedTarget));
   }
 

@@ -41,7 +41,7 @@ describe('运行时上下文 Store', () => {
     expect(store.state.context?.permissions).toEqual(['system:user:create']);
   });
 
-  it('加载失败时进入兼容模式，避免初始化期入口被锁死', async () => {
+  it('加载失败时拒绝需要权限码的操作入口', async () => {
     const store = createRuntimeContextStore({
       listCurrentUserContext: vi.fn(async () => {
         throw new Error('网络异常');
@@ -53,7 +53,7 @@ describe('运行时上下文 Store', () => {
     expect(context).toBeNull();
     expect(store.state.initialized).toBe(true);
     expect(store.state.lastError).toBe('网络异常');
-    expect(store.hasPermission('system:menu:create')).toBe(true);
+    expect(store.hasPermission('system:menu:create')).toBe(false);
   });
 
   it('超级管理员默认拥有全部权限', async () => {
@@ -145,7 +145,7 @@ describe('运行时上下文 Store', () => {
     ]);
   });
 
-  it('没有菜单配置时不启用页面级拦截', async () => {
+  it('没有菜单配置时拒绝页面级后台访问', async () => {
     const store = createRuntimeContextStore({
       listCurrentUserContext: vi.fn(async () =>
         createContext({
@@ -157,7 +157,8 @@ describe('运行时上下文 Store', () => {
 
     await store.loadRuntimeContext();
 
-    expect(store.canAccessRoute('/admin/basic/users')).toBe(true);
+    expect(store.canAccessRoute('/platforms')).toBe(true);
+    expect(store.canAccessRoute('/admin/basic/users')).toBe(false);
   });
 
   it('有菜单配置时按菜单路由限制页面访问', async () => {

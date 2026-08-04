@@ -34,8 +34,12 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
 
     private final SecurityManager securityManager;
 
-    public JwtAuthInterceptor(SecurityManager securityManager) {
+    private final AuthenticatedUserContextService authenticatedUserContextService;
+
+    public JwtAuthInterceptor(SecurityManager securityManager,
+                              AuthenticatedUserContextService authenticatedUserContextService) {
         this.securityManager = securityManager;
+        this.authenticatedUserContextService = authenticatedUserContextService;
     }
 
     @Override
@@ -53,7 +57,7 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
             subject.login(new JwtAuthenticationToken(token));
             ThreadContext.bind(subject);
             JwtPrincipal principal = (JwtPrincipal) SecurityUtils.getSubject().getPrincipal();
-            CurrentUserContext.set(new CurrentUserContext.CurrentUser(principal.getUserId(), principal.getUsername()));
+            CurrentUserContext.set(authenticatedUserContextService.loadCurrentUser(principal));
             return true;
         } catch (RuntimeException ex) {
             CurrentUserContext.clear();

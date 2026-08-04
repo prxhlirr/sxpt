@@ -51,13 +51,13 @@ class TaskExecutionContractTests {
      * 验证缺少学生 ID 时开始执行请求会被拒绝。
      */
     @Test
-    void startRequestShouldRejectMissingStudentId() {
+    void startRequestShouldAllowMissingStudentId() {
         StartTaskExecutionRequest request = buildValidStartRequest();
         request.setStudentId(" ");
 
         Set<ConstraintViolation<StartTaskExecutionRequest>> violations = validator.validate(request);
 
-        assertEquals(1, violations.size());
+        assertEquals(0, violations.size());
     }
 
     /**

@@ -3,12 +3,18 @@ package com.sxpt.module.connector;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
+import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
 import com.sxpt.module.connector.entity.ModuleDataStrategy;
 import com.sxpt.module.connector.entity.PlatformCapability;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
 import com.sxpt.module.connector.mapper.ModuleDataStrategyMapper;
+import com.sxpt.module.connector.mapper.OriginOrgMapper;
+import com.sxpt.module.connector.mapper.OriginRoleMapper;
 import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
 import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.ModuleDataStrategyService;
@@ -48,7 +54,15 @@ class ModuleDataStrategyServiceImplTests {
 
     private final BusinessModuleMapper businessModuleMapper = mock(BusinessModuleMapper.class);
 
+    private final BusinessModuleProcessStepMapper processStepMapper = mock(BusinessModuleProcessStepMapper.class);
+
+    private final BusinessModuleProcessActorMapper processActorMapper = mock(BusinessModuleProcessActorMapper.class);
+
     private final TeachingDataTemplateMapper teachingDataTemplateMapper = mock(TeachingDataTemplateMapper.class);
+
+    private final OriginRoleMapper originRoleMapper = mock(OriginRoleMapper.class);
+
+    private final OriginOrgMapper originOrgMapper = mock(OriginOrgMapper.class);
 
     private final PlatformCapabilityMapper platformCapabilityMapper = mock(PlatformCapabilityMapper.class);
 
@@ -57,7 +71,11 @@ class ModuleDataStrategyServiceImplTests {
     private final ModuleDataStrategyService service = new ModuleDataStrategyServiceImpl(
             mapper,
             businessModuleMapper,
+            processStepMapper,
+            processActorMapper,
             teachingDataTemplateMapper,
+            originRoleMapper,
+            originOrgMapper,
             platformCapabilityMapper,
             connectorSystemMapper);
 
@@ -235,7 +253,8 @@ class ModuleDataStrategyServiceImplTests {
                 BusinessException.class,
                 () -> service.enableModuleDataStrategy("strategy_001"));
 
-        assertEquals(ApiResultCode.DATA_NOT_FOUND.getCode(), exception.getCode());
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        assertEquals("数据准备配置不完整：策略绑定的业务模块不存在或未启用", exception.getMessage());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -247,13 +266,15 @@ class ModuleDataStrategyServiceImplTests {
         ModuleDataStrategy existing = buildValidStrategy();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(null);
 
         BusinessException exception = assertThrows(
                 BusinessException.class,
                 () -> service.enableModuleDataStrategy("strategy_001"));
 
-        assertEquals(ApiResultCode.DATA_NOT_FOUND.getCode(), exception.getCode());
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        assertEquals("数据准备配置不完整：策略绑定的数据模板不存在或未启用", exception.getMessage());
         verify(mapper, times(0)).updateById(existing);
     }
 
@@ -266,6 +287,7 @@ class ModuleDataStrategyServiceImplTests {
         existing.setSharePolicy("ATTEMPT_EXCLUSIVE");
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
 
         BusinessException exception = assertThrows(
@@ -285,6 +307,7 @@ class ModuleDataStrategyServiceImplTests {
         existing.setLockPolicy("ON_ALLOCATE");
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
 
         BusinessException exception = assertThrows(
@@ -304,6 +327,7 @@ class ModuleDataStrategyServiceImplTests {
         existing.setResultCheckPolicyJson(" ");
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
 
         BusinessException exception = assertThrows(
@@ -322,6 +346,7 @@ class ModuleDataStrategyServiceImplTests {
         ModuleDataStrategy existing = buildValidStrategy();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
         when(platformCapabilityMapper.selectOne(any())).thenReturn(null);
 
@@ -334,7 +359,50 @@ class ModuleDataStrategyServiceImplTests {
     }
 
     /**
+     * 业务功能：验证策略启用失败时返回可执行的缺项说明。
+     * 关键流程：原平台未声明 DATA_CREATE 能力时，错误消息必须指向能力声明，而不是只给泛化配置不完整。
+     */
+    @Test
+    void enableModuleDataStrategyShouldReportMissingDataCreateCapabilityDetail() {
+        ModuleDataStrategy existing = buildValidStrategy();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
+        when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
+        when(platformCapabilityMapper.selectOne(any())).thenReturn(null);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        assertEquals("数据准备配置不完整：原平台未注册或未启用 DATA_CREATE 能力", exception.getMessage());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
      * 校验锁定策略依赖原平台锁定能力，避免考试或强约束练习数据被并发修改。
+     */
+    @Test
+    void enableModuleDataStrategyShouldRejectInactiveActorOriginRole() {
+        ModuleDataStrategy existing = buildValidStrategy();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
+        when(processActorMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessActor()));
+        when(originRoleMapper.selectCount(any())).thenReturn(0);
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableModuleDataStrategy("strategy_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        assertEquals("数据准备配置不完整：业务模块参与方绑定的原平台角色不存在或未启用", exception.getMessage());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
+     * 验证锁定策略依赖原平台锁定能力，避免考试或强约束练习数据被并发修改。
      */
     @Test
     void enableModuleDataStrategyShouldRejectMissingLockCapability() {
@@ -342,6 +410,7 @@ class ModuleDataStrategyServiceImplTests {
         existing.setLockPolicy("ON_ALLOCATE");
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
         when(platformCapabilityMapper.selectOne(any()))
                 .thenReturn(buildSupportedCapability("DATA_CREATE"))
@@ -363,6 +432,7 @@ class ModuleDataStrategyServiceImplTests {
         ModuleDataStrategy existing = buildValidExamStrategy();
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
         when(platformCapabilityMapper.selectOne(any()))
                 .thenReturn(buildSupportedCapability("DATA_CREATE"))
@@ -387,6 +457,7 @@ class ModuleDataStrategyServiceImplTests {
         existing.setLockVersion(1L);
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
         when(platformCapabilityMapper.selectOne(any()))
                 .thenReturn(buildSupportedCapability("DATA_CREATE"))
@@ -410,6 +481,7 @@ class ModuleDataStrategyServiceImplTests {
         existing.setLockVersion(0L);
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
+        mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
         when(platformCapabilityMapper.selectOne(any())).thenReturn(buildSupportedCapability("DATA_CREATE"));
 
@@ -531,6 +603,47 @@ class ModuleDataStrategyServiceImplTests {
      *
      * @return 教学业务数据模板实体。
      */
+    private void mockCompleteProcessDictionaries() {
+        when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
+        when(processActorMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessActor()));
+        when(originRoleMapper.selectCount(any())).thenReturn(1);
+        when(originOrgMapper.selectCount(any())).thenReturn(1);
+    }
+
+    /**
+     * 构造启用状态的标准办理步骤。
+     *
+     * @return 标准办理步骤实体。
+     */
+    private BusinessModuleProcessStep buildActiveProcessStep() {
+        BusinessModuleProcessStep step = new BusinessModuleProcessStep();
+        step.setId("step_001");
+        step.setTenantId("tenant_001");
+        step.setBusinessModuleId("module_001");
+        step.setStatus(RecordStatus.ACTIVE.getValue());
+        step.setDeleted(Boolean.FALSE);
+        return step;
+    }
+
+    /**
+     * 构造启用状态的步骤参与方。
+     *
+     * @return 步骤参与方实体。
+     */
+    private BusinessModuleProcessActor buildActiveProcessActor() {
+        BusinessModuleProcessActor actor = new BusinessModuleProcessActor();
+        actor.setId("actor_001");
+        actor.setTenantId("tenant_001");
+        actor.setConnectorSystemId("connector_001");
+        actor.setBusinessModuleId("module_001");
+        actor.setProcessStepId("step_001");
+        actor.setRequiredOrgCode("OA_DEPT");
+        actor.setRequiredRoleCode("OA_APPLICANT");
+        actor.setStatus(RecordStatus.ACTIVE.getValue());
+        actor.setDeleted(Boolean.FALSE);
+        return actor;
+    }
+
     private TeachingDataTemplate buildActiveTemplate() {
         return buildActiveTemplate("RECORD");
     }

@@ -353,9 +353,9 @@ async function openStrategyEditorAfterEnableFailure(strategy: ModuleDataStrategy
 function strategyEnableErrorMessage(err: unknown) {
   const rawMessage = err instanceof Error ? err.message : '操作失败';
   const normalized = rawMessage.trim();
-  const guide = '请确认已选择启用模板，并在“常用策略表单”中补齐单位要求、角色要求、状态校验、策略池水位；如仍失败，请检查原平台能力是否已注册并启用。';
+  const guide = '下一步：如缺模板或策略 JSON，请在当前编辑弹窗补齐；如缺平台能力，请到“原平台系统维护 -> 能力”补齐能力声明。';
   if (isDataPrepareConfigIncompleteError(err)) {
-    return `策略启用失败：数据准备配置不完整。${guide}`;
+    return `策略启用失败：${normalized}。${guide}`;
   }
   return `${normalized}。${guide}`;
 }

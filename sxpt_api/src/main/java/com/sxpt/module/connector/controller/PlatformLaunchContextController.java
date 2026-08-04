@@ -1,6 +1,7 @@
 package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.connector.dto.CreatePlatformLaunchContextRequest;
 import com.sxpt.module.connector.dto.MarkPlatformLaunchFailedRequest;
 import com.sxpt.module.connector.dto.MarkPlatformLaunchUsedRequest;
@@ -100,10 +101,11 @@ public class PlatformLaunchContextController {
      * @return 原平台启动上下文实体。
      */
     private PlatformLaunchContext toEntity(CreatePlatformLaunchContextRequest request) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         PlatformLaunchContext launchContext = new PlatformLaunchContext();
         launchContext.setId(generateId());
-        launchContext.setTenantId(request.getTenantId());
-        launchContext.setUserId(request.getUserId());
+        launchContext.setTenantId(currentUser.getTenantId());
+        launchContext.setUserId(currentUser.getUserId());
         launchContext.setConnectorSystemId(request.getConnectorSystemId());
         launchContext.setTaskId(request.getTaskId());
         launchContext.setTeachingPointId(request.getTeachingPointId());
@@ -121,6 +123,8 @@ public class PlatformLaunchContextController {
         launchContext.setExternalBusinessId(request.getExternalBusinessId());
         launchContext.setExternalBusinessNo(request.getExternalBusinessNo());
         launchContext.setDataScopeJson(request.getDataScopeJson());
+        launchContext.setCreateBy(currentUser.getUserId());
+        launchContext.setUpdateBy(currentUser.getUserId());
         return launchContext;
     }
 

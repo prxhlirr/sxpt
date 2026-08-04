@@ -1,6 +1,22 @@
 package com.sxpt.module.teachingdata.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.CurrentUserContext;
+import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
+import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
+import com.sxpt.module.connector.entity.ConnectorSystem;
+import com.sxpt.module.connector.entity.ModuleDataStrategy;
+import com.sxpt.module.connector.entity.PlatformCapability;
+import com.sxpt.module.connector.entity.TeachingDataTemplate;
+import com.sxpt.module.connector.service.BusinessModuleProcessChainService;
+import com.sxpt.module.connector.service.BusinessModuleService;
+import com.sxpt.module.connector.service.ConnectorSystemService;
+import com.sxpt.module.connector.service.ModuleDataStrategyService;
+import com.sxpt.module.connector.service.PlatformCapabilityService;
+import com.sxpt.module.connector.service.TeachingDataTemplateService;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataInstanceAllocation;
 import com.sxpt.module.teachingdata.entity.DataRequirement;
@@ -10,9 +26,11 @@ import com.sxpt.module.teachingdata.service.DataInstanceAllocationService;
 import com.sxpt.module.teachingdata.service.DataPrepareFacadeService;
 import com.sxpt.module.teachingdata.service.DataPrepareJobService;
 import com.sxpt.module.teachingdata.service.DataRequirementItemService;
+import com.sxpt.module.teachingdata.service.DataRequirementGenerationService;
 import com.sxpt.module.teachingdata.service.DataRequirementService;
 import com.sxpt.module.teachingdata.service.TeachingDataPoolService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -22,7 +40,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -54,18 +75,42 @@ public class DataPrepareAdminController {
 
     private final DataInstanceAllocationService dataInstanceAllocationService;
 
+    private final ConnectorSystemService connectorSystemService;
+
+    private final PlatformCapabilityService platformCapabilityService;
+
+    private final BusinessModuleService businessModuleService;
+
+    private final TeachingDataTemplateService teachingDataTemplateService;
+
+    private final ModuleDataStrategyService moduleDataStrategyService;
+
+    private final BusinessModuleProcessChainService processChainService;
+
     public DataPrepareAdminController(DataRequirementService dataRequirementService,
                                       DataRequirementItemService dataRequirementItemService,
                                       DataPrepareJobService dataPrepareJobService,
                                       DataPrepareFacadeService dataPrepareFacadeService,
                                       TeachingDataPoolService teachingDataPoolService,
-                                      DataInstanceAllocationService dataInstanceAllocationService) {
+                                      DataInstanceAllocationService dataInstanceAllocationService,
+                                      ConnectorSystemService connectorSystemService,
+                                      PlatformCapabilityService platformCapabilityService,
+                                      BusinessModuleService businessModuleService,
+                                      TeachingDataTemplateService teachingDataTemplateService,
+                                      ModuleDataStrategyService moduleDataStrategyService,
+                                      BusinessModuleProcessChainService processChainService) {
         this.dataRequirementService = dataRequirementService;
         this.dataRequirementItemService = dataRequirementItemService;
         this.dataPrepareJobService = dataPrepareJobService;
         this.dataPrepareFacadeService = dataPrepareFacadeService;
         this.teachingDataPoolService = teachingDataPoolService;
         this.dataInstanceAllocationService = dataInstanceAllocationService;
+        this.connectorSystemService = connectorSystemService;
+        this.platformCapabilityService = platformCapabilityService;
+        this.businessModuleService = businessModuleService;
+        this.teachingDataTemplateService = teachingDataTemplateService;
+        this.moduleDataStrategyService = moduleDataStrategyService;
+        this.processChainService = processChainService;
     }
 
     /**
@@ -76,12 +121,16 @@ public class DataPrepareAdminController {
      */
     @PostMapping("/requirements/create")
     public ApiResult<DataRequirement> createRequirement(@RequestBody DataRequirement requirement) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         if (!StringUtils.hasText(requirement.getId())) {
             requirement.setId(generateId());
         }
         if (!StringUtils.hasText(requirement.getRequirementCode())) {
             requirement.setRequirementCode("REQ-" + System.currentTimeMillis());
         }
+        requirement.setTenantId(currentUser.getTenantId());
+        requirement.setCreateBy(currentUser.getUserId());
+        requirement.setUpdateBy(currentUser.getUserId());
         return ApiResult.success(dataRequirementService.createDataRequirement(requirement));
     }
 
@@ -97,7 +146,8 @@ public class DataPrepareAdminController {
     public ApiResult<List<DataRequirement>> listRequirements(@RequestParam String tenantId,
                                                              @RequestParam String taskId,
                                                              @RequestParam String sceneType) {
-        return ApiResult.success(dataRequirementService.listByTaskAndScene(tenantId, taskId, sceneType));
+        return ApiResult.success(dataRequirementService.listByTaskAndScene(
+                CurrentUserContext.getRequiredUser().getTenantId(), taskId, sceneType));
     }
 
     /**
@@ -110,7 +160,8 @@ public class DataPrepareAdminController {
     @GetMapping("/requirements/{requirementId}/items")
     public ApiResult<List<DataRequirementItem>> listRequirementItems(@PathVariable String requirementId,
                                                                      @RequestParam String tenantId) {
-        return ApiResult.success(dataRequirementItemService.listByRequirement(tenantId, requirementId));
+        return ApiResult.success(dataRequirementItemService.listByRequirement(
+                CurrentUserContext.getRequiredUser().getTenantId(), requirementId));
     }
 
     /**
@@ -125,7 +176,38 @@ public class DataPrepareAdminController {
     public ApiResult<List<DataPrepareJob>> listJobs(@RequestParam String tenantId,
                                                     @RequestParam String taskId,
                                                     @RequestParam String sceneType) {
-        return ApiResult.success(dataPrepareJobService.listByTaskAndScene(tenantId, taskId, sceneType));
+        return ApiResult.success(dataPrepareJobService.listByTaskAndScene(
+                CurrentUserContext.getRequiredUser().getTenantId(), taskId, sceneType));
+    }
+
+    /**
+     * 数据准备前置链路自检。
+     *
+     * 业务功能：在真正创建批次和调用原平台前，检查当前任务选择的平台、能力、模块、模板、策略和办理链是否满足造数最小闭环。
+     * 关键流程：
+     * 1. 使用当前登录用户租户覆盖请求租户，避免跨租户探测配置。
+     * 2. 逐项检查 DATA_CREATE 能力、启用模块、启用模板、启用策略、启用流程步骤和步骤参与方。
+     * 3. 返回结构化检查项，让前端和后台日志都能定位“状态不允许操作”之前的具体缺口。
+     *
+     * @param taskId 教学任务 ID。
+     * @param tenantId 前端传入租户 ID，仅用于兼容调用，实际以当前登录用户租户为准。
+     * @param connectorSystemId 原平台系统 ID。
+     * @param businessModuleId 业务模块 ID。
+     * @param moduleCode 业务模块编码。
+     * @param sceneType 教学场景。
+     * @return 数据准备链路自检结果。
+     */
+    @GetMapping("/tasks/{taskId}/prepare/preflight")
+    public ApiResult<DataPreparePreflightResult> preflightTaskPrepare(@PathVariable String taskId,
+                                                                      @RequestParam String tenantId,
+                                                                      @RequestParam String connectorSystemId,
+                                                                      @RequestParam String businessModuleId,
+                                                                      @RequestParam String moduleCode,
+                                                                      @RequestParam String sceneType) {
+        requireText(taskId);
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        return ApiResult.success(buildPreflightResult(
+                currentUser.getTenantId(), taskId, connectorSystemId, businessModuleId, moduleCode, sceneType));
     }
 
     /**
@@ -137,7 +219,79 @@ public class DataPrepareAdminController {
     @PostMapping("/prepare/execute")
     public ApiResult<DataPrepareJob> prepareAndExecute(
             @RequestBody DataPrepareFacadeService.PrepareAndExecuteRequest request) {
+        applyCurrentUserToPrepareRequest(request);
         return ApiResult.success(dataPrepareFacadeService.prepareAndExecute(request));
+    }
+
+    /**
+     * 按教学任务触发一次完整的数据准备。
+     *
+     * 业务功能：
+     * 1. 为页面提供“按任务触发”的后端入口，避免前端分别编排创建批次和启动准备两个动作。
+     * 2. 以登录用户为租户和审计来源，保证触发入口不会信任前端传入的租户或操作人字段。
+     *
+     * 关键流程：
+     * 1. 校验任务、平台、模块、场景和参与者这些最小可执行上下文。
+     * 2. 创建 DataRequirement 批次，让策略绑定、模板绑定和策略快照仍由 DataRequirementService 统一处理。
+     * 3. 组装 GenerateRequest 并调用 DataPrepareFacadeService，保证明细生成、原平台造数、数据池落库走同一条主链路。
+     *
+     * @param taskId 教学任务 ID。
+     * @param request 触发数据准备所需的模块、班级、场景和参与者约束。
+     * @return 新创建的数据需求批次、准备任务和 requestBatchId，供页面刷新证据链。
+     */
+    @PostMapping("/tasks/{taskId}/prepare")
+    @Transactional(rollbackFor = Exception.class)
+    public ApiResult<TaskPrepareTriggerResult> triggerTaskPrepare(@PathVariable String taskId,
+                                                                  @RequestBody TriggerTaskPrepareRequest request) {
+        validateTaskPrepareRequest(taskId, request);
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        ensureTaskPrepareReady(currentUser.getTenantId(), taskId, request);
+        String operatorId = currentUser.getUserId();
+        String requestBatchId = StringUtils.hasText(request.getRequestBatchId())
+                ? request.getRequestBatchId()
+                : "attempt-" + System.currentTimeMillis();
+
+        DataRequirement requirement = new DataRequirement();
+        requirement.setId(generateId());
+        requirement.setTenantId(currentUser.getTenantId());
+        requirement.setRequirementCode(StringUtils.hasText(request.getRequirementCode())
+                ? request.getRequirementCode()
+                : "REQ-" + System.currentTimeMillis());
+        requirement.setConnectorSystemId(request.getConnectorSystemId());
+        requirement.setBusinessModuleId(request.getBusinessModuleId());
+        requirement.setModuleCode(request.getModuleCode());
+        requirement.setStrategyId(request.getStrategyId());
+        requirement.setTemplateId(request.getTemplateId());
+        requirement.setTaskId(taskId);
+        requirement.setClassId(request.getClassId());
+        requirement.setSceneType(request.getSceneType());
+        requirement.setRemark(request.getRemark());
+        requirement.setCreateBy(operatorId);
+        requirement.setUpdateBy(operatorId);
+        DataRequirement createdRequirement = dataRequirementService.createDataRequirement(requirement);
+
+        DataRequirementGenerationService.GenerateRequest generateRequest =
+                new DataRequirementGenerationService.GenerateRequest();
+        generateRequest.setRequirementId(createdRequirement.getId());
+        generateRequest.setRequestBatchId(requestBatchId);
+        generateRequest.setCreateBy(operatorId);
+        generateRequest.setUpdateBy(operatorId);
+        generateRequest.setParticipants(request.getParticipants());
+
+        DataPrepareFacadeService.PrepareAndExecuteRequest prepareRequest =
+                new DataPrepareFacadeService.PrepareAndExecuteRequest();
+        prepareRequest.setTriggerType(StringUtils.hasText(request.getTriggerType())
+                ? request.getTriggerType()
+                : "ON_DEMAND");
+        prepareRequest.setIdempotencyKey(StringUtils.hasText(request.getIdempotencyKey())
+                ? request.getIdempotencyKey()
+                : "task-prepare:" + taskId + ":" + request.getSceneType() + ":" + requestBatchId);
+        prepareRequest.setTraceId(request.getTraceId());
+        prepareRequest.setRequestJson(request.getRequestJson());
+        prepareRequest.setGenerateRequest(generateRequest);
+
+        DataPrepareJob job = dataPrepareFacadeService.prepareAndExecute(prepareRequest);
+        return ApiResult.success(new TaskPrepareTriggerResult(createdRequirement, job, requestBatchId));
     }
 
     /**
@@ -151,8 +305,266 @@ public class DataPrepareAdminController {
     public ApiResult<DataPrepareJob> retryFailedJob(
             @PathVariable String jobId,
             @RequestBody DataPrepareFacadeService.RetryFailedJobRequest request) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         request.setJobId(jobId);
+        request.setTenantId(currentUser.getTenantId());
+        request.setUpdateBy(currentUser.getUserId());
         return ApiResult.success(dataPrepareFacadeService.retryFailedJob(request));
+    }
+
+    /**
+     * 构建数据准备链路自检结果。
+     *
+     * 业务功能：把造数前必须成立的业务事实压缩成可审计检查项，提前发现运行期会触发 STATE_NOT_ALLOWED 的配置缺口。
+     * 关键流程：按平台能力、模块、模板、策略、流程步骤、流程参与方顺序检查；前置节点失败时仍继续检查可独立判断的节点。
+     */
+    private DataPreparePreflightResult buildPreflightResult(String tenantId,
+                                                            String taskId,
+                                                            String connectorSystemId,
+                                                            String businessModuleId,
+                                                            String moduleCode,
+                                                            String sceneType) {
+        DataPreparePreflightResult result = new DataPreparePreflightResult(taskId);
+        ConnectorSystem connectorSystem = findConnectorSystem(tenantId, connectorSystemId);
+        addConnectorCheck(result, connectorSystem, connectorSystemId);
+
+        List<PlatformCapability> capabilities =
+                platformCapabilityService.listPlatformCapabilities(tenantId, connectorSystemId);
+        addDataCreateCapabilityCheck(result, connectorSystem, capabilities);
+
+        BusinessModule businessModule = findActiveBusinessModule(tenantId, connectorSystemId, businessModuleId);
+        addBusinessModuleCheck(result, businessModule, businessModuleId, moduleCode);
+
+        List<TeachingDataTemplate> templates = teachingDataTemplateService
+                .listActiveTemplatesByModuleAndScene(tenantId, connectorSystemId, moduleCode, sceneType);
+        addTemplateCheck(result, templates, moduleCode, sceneType);
+
+        List<ModuleDataStrategy> strategies = moduleDataStrategyService
+                .listActiveStrategiesByBusinessModule(tenantId, connectorSystemId, businessModuleId);
+        addStrategyCheck(result, strategies, moduleCode, sceneType);
+
+        List<BusinessModuleProcessStep> steps =
+                processChainService.listActiveProcessSteps(tenantId, businessModuleId);
+        addProcessStepCheck(result, steps);
+        addProcessActorCheck(result, tenantId, steps);
+
+        result.finish();
+        return result;
+    }
+
+    private ConnectorSystem findConnectorSystem(String tenantId, String connectorSystemId) {
+        List<ConnectorSystem> systems = connectorSystemService.listConnectorSystemsByTenantId(tenantId);
+        for (ConnectorSystem system : systems) {
+            if (connectorSystemId.equals(system.getId())) {
+                return system;
+            }
+        }
+        return null;
+    }
+
+    private BusinessModule findActiveBusinessModule(String tenantId, String connectorSystemId, String businessModuleId) {
+        List<BusinessModule> modules = businessModuleService.listActiveBusinessModules(tenantId, connectorSystemId);
+        for (BusinessModule module : modules) {
+            if (businessModuleId.equals(module.getId())) {
+                return module;
+            }
+        }
+        return null;
+    }
+
+    private void addConnectorCheck(DataPreparePreflightResult result,
+                                   ConnectorSystem connectorSystem,
+                                   String connectorSystemId) {
+        if (connectorSystem == null) {
+            result.addFail("CONNECTOR_SYSTEM", "原平台系统不存在或不属于当前租户", evidence("connectorSystemId", connectorSystemId));
+            return;
+        }
+        result.addPass("CONNECTOR_SYSTEM", "原平台系统已注册", evidence(
+                "connectorSystemId", connectorSystem.getId(),
+                "systemCode", connectorSystem.getSystemCode(),
+                "status", connectorSystem.getStatus()));
+    }
+
+    private void addDataCreateCapabilityCheck(DataPreparePreflightResult result,
+                                              ConnectorSystem connectorSystem,
+                                              List<PlatformCapability> capabilities) {
+        PlatformCapability capability = findCapability(capabilities, "DATA_CREATE");
+        if (capability == null) {
+            result.addFail("DATA_CREATE_CAPABILITY", "原平台未注册或未启用 DATA_CREATE 能力", evidence("capabilityCode", "DATA_CREATE"));
+            return;
+        }
+        if (!Boolean.TRUE.equals(capability.getSupportFlag())) {
+            result.addFail("DATA_CREATE_CAPABILITY", "DATA_CREATE 能力声明为不支持", evidence(
+                    "capabilityId", capability.getId(),
+                    "supportFlag", String.valueOf(capability.getSupportFlag())));
+            return;
+        }
+        if (!StringUtils.hasText(capability.getEndpointUrl())
+                && connectorSystem != null
+                && !"LOCAL_DEV".equals(connectorSystem.getSystemType())) {
+            result.addWarn("DATA_CREATE_CAPABILITY", "DATA_CREATE 能力未配置 endpointUrl，真实原平台对接可能无法发起造数请求", evidence(
+                    "capabilityId", capability.getId(),
+                    "method", capability.getMethod()));
+            return;
+        }
+        result.addPass("DATA_CREATE_CAPABILITY", "DATA_CREATE 能力可用于造数", evidence(
+                "capabilityId", capability.getId(),
+                "endpointUrl", capability.getEndpointUrl(),
+                "method", capability.getMethod()));
+    }
+
+    private PlatformCapability findCapability(List<PlatformCapability> capabilities, String capabilityCode) {
+        for (PlatformCapability capability : capabilities) {
+            if (capabilityCode.equals(capability.getCapabilityCode())
+                    && Boolean.TRUE.equals(capability.getSupportFlag())
+                    && "ACTIVE".equals(capability.getStatus())) {
+                return capability;
+            }
+        }
+        return null;
+    }
+
+    private void addBusinessModuleCheck(DataPreparePreflightResult result,
+                                        BusinessModule businessModule,
+                                        String businessModuleId,
+                                        String moduleCode) {
+        if (businessModule == null) {
+            result.addFail("BUSINESS_MODULE", "业务模块不存在、未启用或不属于当前原平台", evidence(
+                    "businessModuleId", businessModuleId,
+                    "moduleCode", moduleCode));
+            return;
+        }
+        if (!moduleCode.equals(businessModule.getModuleCode())) {
+            result.addFail("BUSINESS_MODULE", "业务模块 ID 与 moduleCode 不匹配", evidence(
+                    "businessModuleId", businessModule.getId(),
+                    "expectedModuleCode", businessModule.getModuleCode(),
+                    "requestModuleCode", moduleCode));
+            return;
+        }
+        result.addPass("BUSINESS_MODULE", "业务模块已启用且编码匹配", evidence(
+                "businessModuleId", businessModule.getId(),
+                "moduleCode", businessModule.getModuleCode(),
+                "moduleName", businessModule.getModuleName()));
+    }
+
+    private void addTemplateCheck(DataPreparePreflightResult result,
+                                  List<TeachingDataTemplate> templates,
+                                  String moduleCode,
+                                  String sceneType) {
+        if (templates == null || templates.isEmpty()) {
+            result.addFail("DATA_TEMPLATE", "当前模块和场景没有启用的数据模板", evidence(
+                    "moduleCode", moduleCode,
+                    "sceneType", sceneType));
+            return;
+        }
+        TeachingDataTemplate template = templates.get(0);
+        result.addPass("DATA_TEMPLATE", "当前模块和场景存在启用的数据模板", evidence(
+                "templateId", template.getId(),
+                "templateCode", template.getTemplateCode(),
+                "templateName", template.getTemplateName(),
+                "templateCount", String.valueOf(templates.size())));
+    }
+
+    private void addStrategyCheck(DataPreparePreflightResult result,
+                                  List<ModuleDataStrategy> strategies,
+                                  String moduleCode,
+                                  String sceneType) {
+        ModuleDataStrategy matched = null;
+        if (strategies != null) {
+            for (ModuleDataStrategy strategy : strategies) {
+                if (moduleCode.equals(strategy.getModuleCode()) && sceneType.equals(strategy.getSceneType())) {
+                    matched = strategy;
+                    break;
+                }
+            }
+        }
+        if (matched == null) {
+            result.addFail("MODULE_DATA_STRATEGY", "当前模块和场景没有启用的数据准备策略", evidence(
+                    "moduleCode", moduleCode,
+                    "sceneType", sceneType));
+            return;
+        }
+        result.addPass("MODULE_DATA_STRATEGY", "当前模块和场景存在启用的数据准备策略", evidence(
+                "strategyId", matched.getId(),
+                "strategyCode", matched.getStrategyCode(),
+                "templateId", matched.getTemplateId()));
+    }
+
+    private void addProcessStepCheck(DataPreparePreflightResult result, List<BusinessModuleProcessStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            result.addFail("PROCESS_STEPS", "业务模块没有启用的办理步骤，生成流程快照时会被拒绝", evidence("stepCount", "0"));
+            return;
+        }
+        BusinessModuleProcessStep firstStep = steps.get(0);
+        result.addPass("PROCESS_STEPS", "业务模块存在启用的办理步骤", evidence(
+                "stepCount", String.valueOf(steps.size()),
+                "firstStepCode", firstStep.getStepCode(),
+                "firstStepName", firstStep.getStepName()));
+    }
+
+    private void addProcessActorCheck(DataPreparePreflightResult result,
+                                      String tenantId,
+                                      List<BusinessModuleProcessStep> steps) {
+        if (steps == null || steps.isEmpty()) {
+            result.addFail("PROCESS_ACTORS", "无法检查步骤参与方，因为业务模块没有启用步骤", evidence("blockedBy", "PROCESS_STEPS"));
+            return;
+        }
+        List<String> missingStepCodes = new ArrayList<>();
+        int actorCount = 0;
+        for (BusinessModuleProcessStep step : steps) {
+            List<BusinessModuleProcessActor> actors =
+                    processChainService.listActiveProcessActors(tenantId, step.getId());
+            if (actors == null || actors.isEmpty()) {
+                missingStepCodes.add(step.getStepCode());
+            } else {
+                actorCount += actors.size();
+            }
+        }
+        if (!missingStepCodes.isEmpty()) {
+            result.addFail("PROCESS_ACTORS", "存在启用步骤未配置启用参与方，生成流程快照时会被拒绝", evidence(
+                    "missingStepCodes", String.join(",", missingStepCodes),
+                    "actorCount", String.valueOf(actorCount)));
+            return;
+        }
+        result.addPass("PROCESS_ACTORS", "所有启用步骤均配置了启用参与方", evidence(
+                "stepCount", String.valueOf(steps.size()),
+                "actorCount", String.valueOf(actorCount)));
+    }
+
+    private Map<String, String> evidence(String key, String value) {
+        Map<String, String> result = new LinkedHashMap<>();
+        result.put(key, value);
+        return result;
+    }
+
+    private Map<String, String> evidence(String key1, String value1, String key2, String value2) {
+        Map<String, String> result = evidence(key1, value1);
+        result.put(key2, value2);
+        return result;
+    }
+
+    private Map<String, String> evidence(String key1,
+                                         String value1,
+                                         String key2,
+                                         String value2,
+                                         String key3,
+                                         String value3) {
+        Map<String, String> result = evidence(key1, value1, key2, value2);
+        result.put(key3, value3);
+        return result;
+    }
+
+    private Map<String, String> evidence(String key1,
+                                         String value1,
+                                         String key2,
+                                         String value2,
+                                         String key3,
+                                         String value3,
+                                         String key4,
+                                         String value4) {
+        Map<String, String> result = evidence(key1, value1, key2, value2, key3, value3);
+        result.put(key4, value4);
+        return result;
     }
 
     /**
@@ -165,7 +577,8 @@ public class DataPrepareAdminController {
     @GetMapping("/pools")
     public ApiResult<List<TeachingDataPool>> listPools(@RequestParam String tenantId,
                                                        @RequestParam String requirementId) {
-        return ApiResult.success(teachingDataPoolService.listByRequirement(tenantId, requirementId));
+        return ApiResult.success(teachingDataPoolService.listByRequirement(
+                CurrentUserContext.getRequiredUser().getTenantId(), requirementId));
     }
 
     /**
@@ -178,7 +591,8 @@ public class DataPrepareAdminController {
     @GetMapping("/allocations")
     public ApiResult<List<DataInstanceAllocation>> listAllocations(@RequestParam String tenantId,
                                                                    @RequestParam String requirementId) {
-        return ApiResult.success(dataInstanceAllocationService.listByRequirement(tenantId, requirementId));
+        return ApiResult.success(dataInstanceAllocationService.listByRequirement(
+                CurrentUserContext.getRequiredUser().getTenantId(), requirementId));
     }
 
     /**
@@ -195,8 +609,9 @@ public class DataPrepareAdminController {
                                                                      @RequestParam String taskId,
                                                                      @RequestParam String sceneType,
                                                                      @RequestParam String ownerUserId) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         return ApiResult.success(dataInstanceAllocationService.listByOwnerAndScene(
-                tenantId, taskId, sceneType, ownerUserId));
+                currentUser.getTenantId(), taskId, sceneType, currentUser.getUserId()));
     }
 
     /**
@@ -208,7 +623,88 @@ public class DataPrepareAdminController {
     @PostMapping("/allocations/acquire")
     public ApiResult<DataInstanceAllocation> acquire(
             @RequestBody DataInstanceAllocationService.AcquireReadyInstanceRequest request) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        String ownerUserId = resolveAcquireOwnerUserId(request, currentUser);
+        request.setTenantId(currentUser.getTenantId());
+        request.setOwnerUserId(ownerUserId);
+        request.setCreateBy(currentUser.getUserId());
+        request.setUpdateBy(currentUser.getUserId());
         return ApiResult.success(dataInstanceAllocationService.acquireReadyInstance(request));
+    }
+
+    /**
+     * 解析数据领取归属人。
+     *
+     * 业务功能：区分教师发布时的学生预分配和学生端自助领取，避免把教师发布的数据错误分配给教师本人。
+     * 关键流程：有教学管理角色时保留请求中的学生 ID；普通学生只能领取到自己名下。
+     *
+     * @param request 当前数据领取请求。
+     * @param currentUser 当前认证用户。
+     * @return 服务端确认后的领取归属用户 ID。
+     */
+    private String resolveAcquireOwnerUserId(DataInstanceAllocationService.AcquireReadyInstanceRequest request,
+                                             CurrentUserContext.CurrentUser currentUser) {
+        if (request == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        String requestedOwnerUserId = request.getOwnerUserId();
+        if (!StringUtils.hasText(requestedOwnerUserId)) {
+            return currentUser.getUserId();
+        }
+        if (requestedOwnerUserId.equals(currentUser.getUserId())) {
+            return requestedOwnerUserId;
+        }
+        if (canAllocateForOtherUser(currentUser)) {
+            return requestedOwnerUserId;
+        }
+        throw new BusinessException(ApiResultCode.FORBIDDEN);
+    }
+
+    /**
+     * 判断当前用户是否具备为其他学生预分配数据的教学管理身份。
+     *
+     * 业务功能：把教师、专家和管理员视为数据准备操作人，学生账号不能伪造 ownerUserId 冒领他人数据。
+     * 关键流程：同时兼容角色编码和用户类型，降低历史种子数据或角色编码差异造成的误判。
+     *
+     * @param currentUser 当前认证用户。
+     * @return 是否允许为其他用户领取数据。
+     */
+    private boolean canAllocateForOtherUser(CurrentUserContext.CurrentUser currentUser) {
+        if (currentUser == null) {
+            return false;
+        }
+        if (matchesAnyRole(currentUser.getUserType(), "ADMIN", "SUPER_ADMIN", "MANAGER", "EXPERT", "TEACHER")) {
+            return true;
+        }
+        for (String roleCode : currentUser.getRoleCodes()) {
+            if (matchesAnyRole(roleCode, "ADMIN", "SUPER_ADMIN", "MANAGER", "EXPERT", "TEACHER")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 判断角色文本是否匹配目标角色集合。
+     *
+     * 业务功能：集中处理大小写差异，避免每个授权分支重复字符串归一化逻辑。
+     * 关键流程：空值直接拒绝；非空文本转为大写后做精确匹配。
+     *
+     * @param value 待判断角色文本。
+     * @param expectedRoles 允许的角色编码集合。
+     * @return 是否命中允许角色。
+     */
+    private boolean matchesAnyRole(String value, String... expectedRoles) {
+        if (!StringUtils.hasText(value) || expectedRoles == null) {
+            return false;
+        }
+        String normalized = value.trim().toUpperCase();
+        for (String expectedRole : expectedRoles) {
+            if (normalized.equals(expectedRole)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -218,5 +714,393 @@ public class DataPrepareAdminController {
      */
     private String generateId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    /**
+     * 用可信登录身份覆盖数据准备触发请求中的审计字段，避免前端伪造操作人。
+     *
+     * @param request 数据准备触发请求。
+     */
+    private void applyCurrentUserToPrepareRequest(DataPrepareFacadeService.PrepareAndExecuteRequest request) {
+        if (request == null || request.getGenerateRequest() == null) {
+            return;
+        }
+        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        request.getGenerateRequest().setCreateBy(currentUserId);
+        request.getGenerateRequest().setUpdateBy(currentUserId);
+    }
+
+    /**
+     * 校验按任务触发准备的最小上下文。
+     *
+     * 业务功能：在进入批次创建之前阻断不可执行请求，避免生成缺少平台、模块或参与者的孤立数据。
+     * 关键流程：只校验入口层能判断的必填项，策略和模板有效性继续交给领域服务按真实数据校验。
+     *
+     * @param taskId 教学任务 ID。
+     * @param request 页面提交的数据准备触发请求。
+     */
+    private void validateTaskPrepareRequest(String taskId, TriggerTaskPrepareRequest request) {
+        requireText(taskId);
+        if (request == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(request.getConnectorSystemId());
+        requireText(request.getBusinessModuleId());
+        requireText(request.getModuleCode());
+        requireText(request.getSceneType());
+        if (request.getParticipants() == null || request.getParticipants().isEmpty()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 校验按任务触发准备的后台配置闭环。
+     *
+     * 业务功能：在创建批次和启动造数前复用 preflight 事实检查，避免绕过页面自检后生成不可执行的孤立批次。
+     * 关键流程：使用当前登录租户重新计算自检结果；只要存在失败节点就返回配置不完整，由调用方先补齐配置。
+     *
+     * @param tenantId 当前登录用户租户 ID。
+     * @param taskId 教学任务 ID。
+     * @param request 页面提交的数据准备触发请求。
+     */
+    private void ensureTaskPrepareReady(String tenantId, String taskId, TriggerTaskPrepareRequest request) {
+        DataPreparePreflightResult preflightResult = buildPreflightResult(
+                tenantId,
+                taskId,
+                request.getConnectorSystemId(),
+                request.getBusinessModuleId(),
+                request.getModuleCode(),
+                request.getSceneType());
+        if (!preflightResult.isReady()) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+    }
+
+    /**
+     * 校验文本字段非空。
+     *
+     * 业务功能：复用控制器入口参数校验，避免空任务或空模块进入后续领域服务。
+     * 关键流程：使用 Spring 的文本判定保留与现有服务层一致的空白字符串处理方式。
+     *
+     * @param value 待校验字段值。
+     */
+    private void requireText(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 按任务触发数据准备的请求体。
+     *
+     * 业务功能：承载页面触发数据准备所需的教学任务上下文和参与者约束。
+     * 关键流程：控制器接收后会覆盖租户和操作人，只使用这里的平台、模块、场景和参与者业务参数。
+     */
+    /**
+     * 业务功能：承载数据准备前置链路自检结果。
+     * 关键流程：Controller 逐项追加检查项后调用 finish 生成汇总状态，前端据此决定是否允许继续造数。
+     */
+    public static class DataPreparePreflightResult {
+
+        private final String taskId;
+
+        private final List<PreflightCheckItem> checks = new ArrayList<>();
+
+        private boolean ready;
+
+        private int passCount;
+
+        private int warnCount;
+
+        private int failCount;
+
+        private String summary;
+
+        public DataPreparePreflightResult(String taskId) {
+            this.taskId = taskId;
+        }
+
+        public void addPass(String nodeCode, String message, Map<String, String> evidence) {
+            checks.add(new PreflightCheckItem(nodeCode, "PASS", message, evidence));
+        }
+
+        public void addWarn(String nodeCode, String message, Map<String, String> evidence) {
+            checks.add(new PreflightCheckItem(nodeCode, "WARN", message, evidence));
+        }
+
+        public void addFail(String nodeCode, String message, Map<String, String> evidence) {
+            checks.add(new PreflightCheckItem(nodeCode, "FAIL", message, evidence));
+        }
+
+        public void finish() {
+            passCount = 0;
+            warnCount = 0;
+            failCount = 0;
+            for (PreflightCheckItem item : checks) {
+                if ("PASS".equals(item.getStatus())) {
+                    passCount++;
+                } else if ("WARN".equals(item.getStatus())) {
+                    warnCount++;
+                } else if ("FAIL".equals(item.getStatus())) {
+                    failCount++;
+                }
+            }
+            ready = failCount == 0;
+            summary = ready
+                    ? "数据准备前置链路已具备最小闭环"
+                    : "数据准备前置链路存在阻塞项，请先补齐失败节点";
+        }
+
+        public String getTaskId() {
+            return taskId;
+        }
+
+        public List<PreflightCheckItem> getChecks() {
+            return checks;
+        }
+
+        public boolean isReady() {
+            return ready;
+        }
+
+        public int getPassCount() {
+            return passCount;
+        }
+
+        public int getWarnCount() {
+            return warnCount;
+        }
+
+        public int getFailCount() {
+            return failCount;
+        }
+
+        public String getSummary() {
+            return summary;
+        }
+    }
+
+    /**
+     * 业务功能：描述单个自检节点的结果。
+     * 关键流程：每个节点保留 nodeCode、状态、业务消息和证据字段，便于页面展示和日志排查使用同一套事实。
+     */
+    public static class PreflightCheckItem {
+
+        private final String nodeCode;
+
+        private final String status;
+
+        private final String message;
+
+        private final Map<String, String> evidence;
+
+        public PreflightCheckItem(String nodeCode, String status, String message, Map<String, String> evidence) {
+            this.nodeCode = nodeCode;
+            this.status = status;
+            this.message = message;
+            this.evidence = evidence;
+        }
+
+        public String getNodeCode() {
+            return nodeCode;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public Map<String, String> getEvidence() {
+            return evidence;
+        }
+    }
+
+    public static class TriggerTaskPrepareRequest {
+
+        private String requirementCode;
+
+        private String connectorSystemId;
+
+        private String businessModuleId;
+
+        private String moduleCode;
+
+        private String strategyId;
+
+        private String templateId;
+
+        private String classId;
+
+        private String sceneType;
+
+        private String requestBatchId;
+
+        private String triggerType;
+
+        private String idempotencyKey;
+
+        private String traceId;
+
+        private String requestJson;
+
+        private String remark;
+
+        private List<DataRequirementGenerationService.ParticipantRequirement> participants;
+
+        public String getRequirementCode() {
+            return requirementCode;
+        }
+
+        public void setRequirementCode(String requirementCode) {
+            this.requirementCode = requirementCode;
+        }
+
+        public String getConnectorSystemId() {
+            return connectorSystemId;
+        }
+
+        public void setConnectorSystemId(String connectorSystemId) {
+            this.connectorSystemId = connectorSystemId;
+        }
+
+        public String getBusinessModuleId() {
+            return businessModuleId;
+        }
+
+        public void setBusinessModuleId(String businessModuleId) {
+            this.businessModuleId = businessModuleId;
+        }
+
+        public String getModuleCode() {
+            return moduleCode;
+        }
+
+        public void setModuleCode(String moduleCode) {
+            this.moduleCode = moduleCode;
+        }
+
+        public String getStrategyId() {
+            return strategyId;
+        }
+
+        public void setStrategyId(String strategyId) {
+            this.strategyId = strategyId;
+        }
+
+        public String getTemplateId() {
+            return templateId;
+        }
+
+        public void setTemplateId(String templateId) {
+            this.templateId = templateId;
+        }
+
+        public String getClassId() {
+            return classId;
+        }
+
+        public void setClassId(String classId) {
+            this.classId = classId;
+        }
+
+        public String getSceneType() {
+            return sceneType;
+        }
+
+        public void setSceneType(String sceneType) {
+            this.sceneType = sceneType;
+        }
+
+        public String getRequestBatchId() {
+            return requestBatchId;
+        }
+
+        public void setRequestBatchId(String requestBatchId) {
+            this.requestBatchId = requestBatchId;
+        }
+
+        public String getTriggerType() {
+            return triggerType;
+        }
+
+        public void setTriggerType(String triggerType) {
+            this.triggerType = triggerType;
+        }
+
+        public String getIdempotencyKey() {
+            return idempotencyKey;
+        }
+
+        public void setIdempotencyKey(String idempotencyKey) {
+            this.idempotencyKey = idempotencyKey;
+        }
+
+        public String getTraceId() {
+            return traceId;
+        }
+
+        public void setTraceId(String traceId) {
+            this.traceId = traceId;
+        }
+
+        public String getRequestJson() {
+            return requestJson;
+        }
+
+        public void setRequestJson(String requestJson) {
+            this.requestJson = requestJson;
+        }
+
+        public String getRemark() {
+            return remark;
+        }
+
+        public void setRemark(String remark) {
+            this.remark = remark;
+        }
+
+        public List<DataRequirementGenerationService.ParticipantRequirement> getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(List<DataRequirementGenerationService.ParticipantRequirement> participants) {
+            this.participants = participants;
+        }
+    }
+
+    /**
+     * 按任务触发数据准备的返回结果。
+     *
+     * 业务功能：把批次和执行任务一起返回给页面，页面可以立即选中批次并刷新证据链。
+     * 关键流程：返回 requestBatchId 方便页面将当前 attempt 与后续任务、池和分配记录对齐。
+     */
+    public static class TaskPrepareTriggerResult {
+
+        private final DataRequirement requirement;
+
+        private final DataPrepareJob job;
+
+        private final String requestBatchId;
+
+        public TaskPrepareTriggerResult(DataRequirement requirement, DataPrepareJob job, String requestBatchId) {
+            this.requirement = requirement;
+            this.job = job;
+            this.requestBatchId = requestBatchId;
+        }
+
+        public DataRequirement getRequirement() {
+            return requirement;
+        }
+
+        public DataPrepareJob getJob() {
+            return job;
+        }
+
+        public String getRequestBatchId() {
+            return requestBatchId;
+        }
     }
 }

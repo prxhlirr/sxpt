@@ -6,9 +6,13 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
 import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
+import com.sxpt.module.connector.entity.OriginOrg;
+import com.sxpt.module.connector.entity.OriginRole;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
 import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
 import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
+import com.sxpt.module.connector.mapper.OriginOrgMapper;
+import com.sxpt.module.connector.mapper.OriginRoleMapper;
 import com.sxpt.module.connector.service.BusinessModuleService;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import org.springframework.context.annotation.Profile;
@@ -41,12 +45,20 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
 
     private final BusinessModuleProcessActorMapper processActorMapper;
 
+    private final OriginRoleMapper originRoleMapper;
+
+    private final OriginOrgMapper originOrgMapper;
+
     public BusinessModuleServiceImpl(BusinessModuleMapper businessModuleMapper,
                                      BusinessModuleProcessStepMapper processStepMapper,
-                                     BusinessModuleProcessActorMapper processActorMapper) {
+                                     BusinessModuleProcessActorMapper processActorMapper,
+                                     OriginRoleMapper originRoleMapper,
+                                     OriginOrgMapper originOrgMapper) {
         this.businessModuleMapper = businessModuleMapper;
         this.processStepMapper = processStepMapper;
         this.processActorMapper = processActorMapper;
+        this.originRoleMapper = originRoleMapper;
+        this.originOrgMapper = originOrgMapper;
     }
 
     /**
@@ -258,14 +270,50 @@ public class BusinessModuleServiceImpl implements BusinessModuleService {
             throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
         }
         for (BusinessModuleProcessStep step : activeSteps) {
-            Integer activeActorCount = processActorMapper.selectCount(new QueryWrapper<BusinessModuleProcessActor>()
+            List<BusinessModuleProcessActor> activeActors = processActorMapper.selectList(new QueryWrapper<BusinessModuleProcessActor>()
                     .eq("tenant_id", businessModule.getTenantId())
                     .eq("process_step_id", step.getId())
                     .eq("status", RecordStatus.ACTIVE.getValue())
-                    .eq("deleted", Boolean.FALSE));
-            if (activeActorCount == null || activeActorCount <= 0) {
+                    .eq("deleted", Boolean.FALSE)
+                    .orderByAsc("actor_no"));
+            if (activeActors == null || activeActors.isEmpty()) {
                 throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
             }
+            for (BusinessModuleProcessActor actor : activeActors) {
+                validateActiveActorDictionaryReference(businessModule, actor);
+            }
+        }
+    }
+
+    /**
+     * 校验启用参与方引用的原平台组织和角色仍然有效。
+     *
+     * @param businessModule 业务模块实体。
+     * @param actor 步骤参与方实体。
+     */
+    private void validateActiveActorDictionaryReference(BusinessModule businessModule,
+                                                        BusinessModuleProcessActor actor) {
+        if (!StringUtils.hasText(actor.getRequiredOrgCode())
+                || !StringUtils.hasText(actor.getRequiredRoleCode())) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+        Integer activeRoleCount = originRoleMapper.selectCount(new QueryWrapper<OriginRole>()
+                .eq("tenant_id", businessModule.getTenantId())
+                .eq("connector_system_id", businessModule.getConnectorSystemId())
+                .eq("role_code", actor.getRequiredRoleCode())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE));
+        if (activeRoleCount == null || activeRoleCount <= 0) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+        Integer activeOrgCount = originOrgMapper.selectCount(new QueryWrapper<OriginOrg>()
+                .eq("tenant_id", businessModule.getTenantId())
+                .eq("connector_system_id", businessModule.getConnectorSystemId())
+                .eq("org_code", actor.getRequiredOrgCode())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE));
+        if (activeOrgCount == null || activeOrgCount <= 0) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
         }
     }
 

@@ -37,11 +37,16 @@ const identityProfiles: Record<
     destinationLabel: '学生端'
   }
 };
+const guestIdentity = {
+  label: '请先登录',
+  name: '未登录',
+  destination: '/login',
+  destinationLabel: '登录页'
+};
 
 const identity = computed(() => {
-  const fallbackRole = store.state.currentRole;
   const session = authApi.getSession();
-  return identityProfiles[session ? authApi.getPortalRole(session) : fallbackRole];
+  return session ? identityProfiles[authApi.getPortalRole(session)] : guestIdentity;
 });
 const showDevelopmentEntrances = import.meta.env.DEV;
 const premiumClassroomUrl = String(
@@ -57,6 +62,13 @@ function openPremiumClassroom() {
 }
 
 async function openTrainingPlatform() {
+  if (!authApi.getSession()) {
+    await router.push({
+      path: '/login',
+      query: { redirect: authApi.getHomePath() }
+    });
+    return;
+  }
   await router.push(authApi.getHomePath());
 }
 

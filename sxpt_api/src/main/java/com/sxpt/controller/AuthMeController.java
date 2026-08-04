@@ -6,8 +6,9 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Collections;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -36,11 +37,28 @@ public class AuthMeController {
         CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         Map<String, Object> result = new LinkedHashMap<String, Object>();
         result.put("userId", currentUser.getUserId());
+        result.put("tenantId", currentUser.getTenantId());
         result.put("username", currentUser.getUsername());
-        result.put("tenantId", null);
-        result.put("roles", Collections.emptyList());
-        result.put("orgIds", Collections.emptyList());
-        result.put("identityBindings", Collections.emptyList());
+        result.put("displayName", currentUser.getDisplayName());
+        result.put("userType", currentUser.getUserType());
+        result.put("studentNo", currentUser.getStudentNo());
+        result.put("employeeNo", currentUser.getEmployeeNo());
+        result.put("roles", currentUser.getRoleCodes());
+        result.put("orgIds", currentUser.getOrgIds());
+        result.put("identityBindings", toIdentityBindingResults(currentUser.getIdentityBindings()));
         return ApiResult.success(result);
+    }
+
+    private List<Map<String, Object>> toIdentityBindingResults(
+            List<CurrentUserContext.IdentityBindingSummary> identityBindings) {
+        List<Map<String, Object>> results = new ArrayList<Map<String, Object>>();
+        for (CurrentUserContext.IdentityBindingSummary identityBinding : identityBindings) {
+            Map<String, Object> result = new LinkedHashMap<String, Object>();
+            result.put("connectorSystemId", identityBinding.getConnectorSystemId());
+            result.put("externalUserId", identityBinding.getExternalUserId());
+            result.put("externalUsername", identityBinding.getExternalUsername());
+            results.add(result);
+        }
+        return results;
     }
 }

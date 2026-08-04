@@ -579,6 +579,9 @@ public class SystemConfigServiceImpl implements SystemConfigService {
         if (user == null || Boolean.TRUE.equals(user.getDeleted())) {
             throw new BusinessException(ApiResultCode.UNAUTHORIZED);
         }
+        if (!DEFAULT_STATUS.equals(user.getStatus()) || !StringUtils.hasText(user.getTenantId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
         return user;
     }
 

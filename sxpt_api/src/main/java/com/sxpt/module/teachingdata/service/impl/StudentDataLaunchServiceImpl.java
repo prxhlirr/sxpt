@@ -102,9 +102,11 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
     @Transactional(rollbackFor = Exception.class)
     public StudentDataLaunchVO createLaunch(CreateStudentDataLaunchRequest request) {
         validateRequest(request);
-        DataInstanceAllocation allocation = getStudentAllocation(request);
-        validateAllocation(allocation, request);
-        PlatformLaunchContext launchContext = buildLaunchContext(request, allocation);
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        requireText(currentUser.getTenantId());
+        DataInstanceAllocation allocation = getStudentAllocation(request, currentUser);
+        validateAllocation(allocation, currentUser);
+        PlatformLaunchContext launchContext = buildLaunchContext(request, allocation, currentUser);
         PlatformLaunchContextService.CreatedLaunchContext created =
                 platformLaunchContextService.createLaunchContext(launchContext);
         return buildResult(created, allocation);
@@ -396,8 +398,8 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         launchRequest.setStudentId(allocation.getOwnerUserId());
         launchRequest.setExecutionId(firstText(request.getExecutionId(),
                 firstText(allocation.getExecutionId(), allocation.getAttemptId())));
-        validateAllocation(allocation, launchRequest);
-        PlatformLaunchContext launchContext = buildLaunchContext(launchRequest, allocation);
+        validateAllocation(allocation, currentUser);
+        PlatformLaunchContext launchContext = buildLaunchContext(launchRequest, allocation, currentUser);
         PlatformLaunchContextService.CreatedLaunchContext created =
                 platformLaunchContextService.createLaunchContext(launchContext);
         return buildResult(created, allocation);
@@ -542,9 +544,7 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         if (request == null) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
-        requireText(request.getTenantId());
         requireText(request.getAllocationId());
-        requireText(request.getStudentId());
     }
 
     /**
@@ -553,11 +553,12 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @param request 学生启动请求。
      * @return 数据实例分配记录。
      */
-    private DataInstanceAllocation getStudentAllocation(CreateStudentDataLaunchRequest request) {
+    private DataInstanceAllocation getStudentAllocation(CreateStudentDataLaunchRequest request,
+                                                        CurrentUserContext.CurrentUser currentUser) {
         DataInstanceAllocation allocation = dataInstanceAllocationMapper.selectOne(
                 new QueryWrapper<DataInstanceAllocation>()
                         .eq("id", request.getAllocationId())
-                        .eq("tenant_id", request.getTenantId())
+                        .eq("tenant_id", currentUser.getTenantId())
                         .eq("deleted", Boolean.FALSE));
         if (allocation == null) {
             throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
@@ -571,8 +572,8 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @param allocation 分配记录。
      * @param request 学生启动请求。
      */
-    private void validateAllocation(DataInstanceAllocation allocation, CreateStudentDataLaunchRequest request) {
-        if (!request.getStudentId().equals(allocation.getOwnerUserId())) {
+    private void validateAllocation(DataInstanceAllocation allocation, CurrentUserContext.CurrentUser currentUser) {
+        if (!currentUser.getUserId().equals(allocation.getOwnerUserId())) {
             throw new BusinessException(ApiResultCode.FORBIDDEN);
         }
         if (!AllocationStatus.ALLOCATED.getValue().equals(allocation.getAllocationStatus())) {
@@ -595,11 +596,12 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @return 原平台启动上下文。
      */
     private PlatformLaunchContext buildLaunchContext(CreateStudentDataLaunchRequest request,
-                                                     DataInstanceAllocation allocation) {
+                                                     DataInstanceAllocation allocation,
+                                                     CurrentUserContext.CurrentUser currentUser) {
         PlatformLaunchContext launchContext = new PlatformLaunchContext();
         launchContext.setId(generateId());
-        launchContext.setTenantId(request.getTenantId());
-        launchContext.setUserId(request.getStudentId());
+        launchContext.setTenantId(currentUser.getTenantId());
+        launchContext.setUserId(currentUser.getUserId());
         launchContext.setConnectorSystemId(allocation.getConnectorSystemId());
         launchContext.setTaskId(allocation.getTaskId());
         launchContext.setExecutionId(firstText(request.getExecutionId(),
@@ -621,8 +623,8 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         launchContext.setExternalBusinessId(allocation.getExternalBusinessId());
         launchContext.setExternalBusinessNo(allocation.getExternalBusinessName());
         launchContext.setDataScopeJson(buildDataScopeJson(allocation));
-        launchContext.setCreateBy(request.getStudentId());
-        launchContext.setUpdateBy(request.getStudentId());
+        launchContext.setCreateBy(currentUser.getUserId());
+        launchContext.setUpdateBy(currentUser.getUserId());
         return launchContext;
     }
 

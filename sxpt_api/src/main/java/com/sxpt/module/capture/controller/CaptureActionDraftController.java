@@ -83,7 +83,8 @@ public class CaptureActionDraftController {
     @GetMapping
     public ApiResult<List<CaptureActionDraftVO>> listBySession(@RequestParam String tenantId,
                                                                @RequestParam String captureSessionId) {
-        return ApiResult.success(toVOList(actionDraftService.listBySession(tenantId, captureSessionId)));
+        return ApiResult.success(toVOList(actionDraftService.listBySession(
+                CurrentUserContext.getRequiredUser().getTenantId(), captureSessionId)));
     }
 
     /**
@@ -98,8 +99,9 @@ public class CaptureActionDraftController {
     public ApiResult<CaptureActionDraftGenerateResultVO> generateFromSession(@RequestParam String tenantId,
                                                                              @RequestParam String captureSessionId,
                                                                              @RequestParam String operatorId) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         List<CaptureActionDraft> generatedDrafts = actionDraftGenerateService.generateDraftsFromSession(
-                tenantId, captureSessionId, operatorId);
+                currentUser.getTenantId(), captureSessionId, currentUser.getUserId());
         CaptureActionDraftGenerateResultVO result = new CaptureActionDraftGenerateResultVO();
         result.setGeneratedCount(generatedDrafts.size());
         result.setDrafts(toVOList(generatedDrafts));
@@ -123,7 +125,7 @@ public class CaptureActionDraftController {
                 request.getGuideContent(),
                 request.getPracticeHint(),
                 request.getConnectorResourceId(),
-                request.getUpdateBy());
+                CurrentUserContext.getRequiredUser().getUserId());
         return ApiResult.success(toVO(confirmed));
     }
 
@@ -137,14 +139,14 @@ public class CaptureActionDraftController {
     @PostMapping("/{id}/publish")
     public ApiResult<TaskStepVO> publish(@PathVariable String id,
                                          @Valid @RequestBody PublishCaptureActionDraftRequest request) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TaskStep taskStep = draftPublishService.publishDraftToTaskStep(
-                request.getTenantId(),
+                currentUser.getTenantId(),
                 id,
                 request.getTaskId(),
                 request.getTeachingPointId(),
                 request.getEvaluationRuleId(),
-                currentUserId);
+                currentUser.getUserId());
         return ApiResult.success(toTaskStepVO(taskStep));
     }
 
@@ -158,7 +160,8 @@ public class CaptureActionDraftController {
     @PostMapping("/{id}/discard")
     public ApiResult<CaptureActionDraftVO> discard(@PathVariable String id,
                                                    @Valid @RequestBody DiscardCaptureActionDraftRequest request) {
-        return ApiResult.success(toVO(actionDraftService.discardActionDraft(id, request.getUpdateBy())));
+        return ApiResult.success(toVO(actionDraftService.discardActionDraft(
+                id, CurrentUserContext.getRequiredUser().getUserId())));
     }
 
     /**
@@ -168,9 +171,10 @@ public class CaptureActionDraftController {
      * @return 页面动作草稿实体。
      */
     private CaptureActionDraft toEntity(CreateCaptureActionDraftRequest request) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         CaptureActionDraft actionDraft = new CaptureActionDraft();
         actionDraft.setId(generateId());
-        actionDraft.setTenantId(request.getTenantId());
+        actionDraft.setTenantId(currentUser.getTenantId());
         actionDraft.setCaptureSessionId(request.getCaptureSessionId());
         actionDraft.setEventId(request.getEventId());
         actionDraft.setActionName(request.getActionName());

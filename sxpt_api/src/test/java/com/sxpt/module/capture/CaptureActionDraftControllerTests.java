@@ -3,11 +3,15 @@ package com.sxpt.module.capture;
 import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
+import com.sxpt.module.connector.service.BusinessModuleProcessChainService;
 import com.sxpt.module.capture.entity.CaptureActionDraft;
 import com.sxpt.module.capture.service.CaptureActionDraftGenerateService;
 import com.sxpt.module.capture.service.CaptureActionDraftService;
 import com.sxpt.module.capture.service.CaptureDraftPublishService;
 import com.sxpt.module.teaching.entity.TaskStep;
+import com.sxpt.module.user.service.SystemConfigService;
+import com.sxpt.module.user.vo.RuntimeUserContextVO;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,7 +69,18 @@ class CaptureActionDraftControllerTests {
     private CaptureDraftPublishService draftPublishService;
 
     @MockBean
+    private BusinessModuleProcessChainService businessModuleProcessChainService;
+
+    @MockBean
     private AuthLoginService authLoginService;
+
+    @MockBean
+    private SystemConfigService systemConfigService;
+
+    @BeforeEach
+    void setUpCurrentUserRuntimeContext() {
+        when(systemConfigService.getRuntimeContextForUser("teacher_001")).thenReturn(buildRuntimeContext());
+    }
 
     /**
      * 校验动作草稿创建成功返回统一响应。
@@ -80,7 +95,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"captureSessionId\":\"cap_001\",\"eventId\":\"evt_001\",\"actionName\":\"点击提交按钮\",\"actionType\":\"CLICK\",\"sequenceNo\":1,\"suggestedOperationName\":\"提交备案申请\",\"guideContent\":\"点击页面底部的提交按钮。\",\"practiceHint\":\"确认表单填写完整后再提交。\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"captureSessionId\":\"cap_001\",\"eventId\":\"evt_001\",\"actionName\":\"点击提交按钮\",\"actionType\":\"CLICK\",\"sequenceNo\":1,\"suggestedOperationName\":\"提交备案申请\",\"guideContent\":\"点击页面底部的提交按钮。\",\"practiceHint\":\"确认表单填写完整后再提交。\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -110,7 +125,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"captureSessionId\":\"cap_001\",\"actionType\":\"CLICK\",\"sequenceNo\":1}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"captureSessionId\":\"cap_001\",\"actionType\":\"CLICK\",\"sequenceNo\":1}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.code", is(400)))
@@ -130,7 +145,7 @@ class CaptureActionDraftControllerTests {
 
         mockMvc.perform(get("/api/v1/capture/action-drafts")
                         .header("Authorization", bearerToken())
-                        .param("tenantId", "tenant_001")
+                        .param("tenantId", "forged_tenant")
                         .param("captureSessionId", "cap_001"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
@@ -155,9 +170,9 @@ class CaptureActionDraftControllerTests {
 
         mockMvc.perform(post("/api/v1/capture/action-drafts/generate")
                         .header("Authorization", bearerToken())
-                        .param("tenantId", "tenant_001")
+                        .param("tenantId", "forged_tenant")
                         .param("captureSessionId", "cap_001")
-                        .param("operatorId", "teacher_001"))
+                        .param("operatorId", "forged_teacher"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -189,7 +204,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/draft_001/confirm")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"confirmedOperationName\":\"提交备案申请\",\"confirmedStepName\":\"提交申请表\",\"guideContent\":\"点击提交按钮。\",\"practiceHint\":\"提交前检查必填项。\",\"connectorResourceId\":\"res_001\",\"updateBy\":\"teacher_001\"}"))
+                        .content("{\"confirmedOperationName\":\"提交备案申请\",\"confirmedStepName\":\"提交申请表\",\"guideContent\":\"点击提交按钮。\",\"practiceHint\":\"提交前检查必填项。\",\"connectorResourceId\":\"res_001\",\"updateBy\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -236,7 +251,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/draft_001/publish")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"evaluationRuleId\":\"rule_001\",\"operatorId\":\"forged_teacher\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"evaluationRuleId\":\"rule_001\",\"operatorId\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -263,7 +278,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/draft_001/publish")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"tenantId\":\"tenant_001\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"operatorId\":\"teacher_001\"}"))
+                        .content("{\"tenantId\":\"forged_tenant\",\"taskId\":\"task_001\",\"teachingPointId\":\"tp_001\",\"operatorId\":\"forged_teacher\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.success", is(false)))
                 .andExpect(jsonPath("$.code", is(400)))
@@ -284,7 +299,7 @@ class CaptureActionDraftControllerTests {
         mockMvc.perform(post("/api/v1/capture/action-drafts/draft_001/discard")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"updateBy\":\"teacher_001\"}"))
+                        .content("{\"updateBy\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
                 .andExpect(jsonPath("$.code", is(200)))
@@ -350,6 +365,21 @@ class CaptureActionDraftControllerTests {
      *
      * @return Bearer Token 请求头值。
      */
+    private RuntimeUserContextVO buildRuntimeContext() {
+        RuntimeUserContextVO context = new RuntimeUserContextVO();
+        RuntimeUserContextVO.UserSummary user = new RuntimeUserContextVO.UserSummary();
+        user.setUserId("teacher_001");
+        user.setTenantId("tenant_001");
+        user.setUsername("teacher001");
+        user.setDisplayName("教师一");
+        user.setUserType("TEACHER");
+        user.setEmployeeNo("T001");
+        context.setUser(user);
+        context.setRoles(Collections.emptyList());
+        context.setOrgs(Collections.emptyList());
+        return context;
+    }
+
     private String bearerToken() {
         return "Bearer " + jwtService.generateToken("teacher_001", "teacher001");
     }

@@ -53,8 +53,8 @@ public class TaskPublishController {
      */
     @PostMapping("/create")
     public ApiResult<TaskVO> createTask(@Valid @RequestBody CreateTaskRequest request) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
-        return ApiResult.success(toTaskVO(taskPublishService.createTask(toTaskEntity(request, currentUserId))));
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        return ApiResult.success(toTaskVO(taskPublishService.createTask(toTaskEntity(request, currentUser))));
     }
 
     /**
@@ -69,7 +69,8 @@ public class TaskPublishController {
     public ApiResult<List<TaskVO>> listTasks(@RequestParam String tenantId,
                                              @RequestParam(required = false) String courseId,
                                              @RequestParam(required = false) String publishOrgId) {
-        return ApiResult.success(toTaskVOList(taskPublishService.listTasks(tenantId, courseId, publishOrgId)));
+        return ApiResult.success(toTaskVOList(taskPublishService.listTasks(
+                CurrentUserContext.getRequiredUser().getTenantId(), courseId, publishOrgId)));
     }
 
     /**
@@ -81,9 +82,9 @@ public class TaskPublishController {
     @PostMapping("/teaching-points/create")
     public ApiResult<TaskTeachingPointVO> createTaskTeachingPoint(
             @Valid @RequestBody CreateTaskTeachingPointRequest request) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         return ApiResult.success(toTaskTeachingPointVO(
-                taskPublishService.createTaskTeachingPoint(toTaskTeachingPointEntity(request, currentUserId))));
+                taskPublishService.createTaskTeachingPoint(toTaskTeachingPointEntity(request, currentUser))));
     }
 
     /**
@@ -97,7 +98,8 @@ public class TaskPublishController {
     public ApiResult<List<TaskTeachingPointVO>> listTaskTeachingPoints(@RequestParam String tenantId,
                                                                        @RequestParam String taskId) {
         return ApiResult.success(toTaskTeachingPointVOList(
-                taskPublishService.listTeachingPointsByTask(tenantId, taskId)));
+                taskPublishService.listTeachingPointsByTask(
+                        CurrentUserContext.getRequiredUser().getTenantId(), taskId)));
     }
 
     /**
@@ -116,9 +118,9 @@ public class TaskPublishController {
                                                             @RequestParam String teachingPointId,
                                                             @RequestParam String evaluationRuleId,
                                                             @RequestParam(required = false) String operatorId) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         return ApiResult.success(toTaskVO(taskPublishService.publishTaskTeachingPointAssets(
-                tenantId, taskId, teachingPointId, evaluationRuleId, currentUserId)));
+                currentUser.getTenantId(), taskId, teachingPointId, evaluationRuleId, currentUser.getUserId())));
     }
 
     /**
@@ -127,10 +129,10 @@ public class TaskPublishController {
      * @param request 创建任务请求。
      * @return 教学任务实体。
      */
-    private Task toTaskEntity(CreateTaskRequest request, String currentUserId) {
+    private Task toTaskEntity(CreateTaskRequest request, CurrentUserContext.CurrentUser currentUser) {
         Task task = new Task();
         task.setId(generateId());
-        task.setTenantId(request.getTenantId());
+        task.setTenantId(currentUser.getTenantId());
         task.setCourseId(request.getCourseId());
         task.setPublishOrgId(request.getPublishOrgId());
         task.setTaskCode(request.getTaskCode());
@@ -142,8 +144,8 @@ public class TaskPublishController {
         task.setEndTime(request.getEndTime());
         task.setTimeLimitMinutes(request.getTimeLimitMinutes());
         task.setOverlayPolicyJson(request.getOverlayPolicyJson());
-        task.setCreateBy(currentUserId);
-        task.setUpdateBy(currentUserId);
+        task.setCreateBy(currentUser.getUserId());
+        task.setUpdateBy(currentUser.getUserId());
         return task;
     }
 
@@ -153,16 +155,18 @@ public class TaskPublishController {
      * @param request 创建任务教学点关联请求。
      * @return 任务教学点关联实体。
      */
-    private TaskTeachingPoint toTaskTeachingPointEntity(CreateTaskTeachingPointRequest request, String currentUserId) {
+    private TaskTeachingPoint toTaskTeachingPointEntity(
+            CreateTaskTeachingPointRequest request,
+            CurrentUserContext.CurrentUser currentUser) {
         TaskTeachingPoint taskTeachingPoint = new TaskTeachingPoint();
         taskTeachingPoint.setId(generateId());
-        taskTeachingPoint.setTenantId(request.getTenantId());
+        taskTeachingPoint.setTenantId(currentUser.getTenantId());
         taskTeachingPoint.setTaskId(request.getTaskId());
         taskTeachingPoint.setTeachingPointId(request.getTeachingPointId());
         taskTeachingPoint.setRequiredFlag(request.getRequiredFlag());
         taskTeachingPoint.setSequenceNo(request.getSequenceNo());
-        taskTeachingPoint.setCreateBy(currentUserId);
-        taskTeachingPoint.setUpdateBy(currentUserId);
+        taskTeachingPoint.setCreateBy(currentUser.getUserId());
+        taskTeachingPoint.setUpdateBy(currentUser.getUserId());
         return taskTeachingPoint;
     }
 

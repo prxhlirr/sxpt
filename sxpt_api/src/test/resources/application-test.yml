@@ -18,7 +18,15 @@ sxpt:
       enabled: false
     data-instance-controller:
       enabled: false
+    platform-capability-controller:
+      enabled: false
+    origin-role-controller:
+      enabled: false
+    origin-org-controller:
+      enabled: false
     business-module-controller:
+      enabled: false
+    business-module-process-chain-controller:
       enabled: false
     module-data-strategy-controller:
       enabled: false
@@ -81,6 +89,9 @@ sxpt:
     score-summary-controller:
       enabled: false
   user:
+    controller:
+      enabled: false
+  system-config:
     controller:
       enabled: false
   role:

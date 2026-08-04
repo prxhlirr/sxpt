@@ -1,7 +1,9 @@
 package com.sxpt.config;
 
+import com.sxpt.common.audit.ApiAccessLogInterceptor;
 import com.sxpt.common.trace.TraceIdInterceptor;
 import com.sxpt.common.idempotent.IdempotentInterceptor;
+import com.sxpt.common.security.AuthenticatedUserContextService;
 import com.sxpt.common.security.JwtAuthInterceptor;
 import org.apache.shiro.mgt.SecurityManager;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,18 +33,26 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final StringRedisTemplate stringRedisTemplate;
 
+    private final AuthenticatedUserContextService authenticatedUserContextService;
+
     private final String[] allowedOrigins;
+
+    private final boolean accessLogEnabled;
 
     public WebConfig(SecurityManager securityManager,
                      StringRedisTemplate stringRedisTemplate,
+                     AuthenticatedUserContextService authenticatedUserContextService,
                      @Value("${sxpt.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
-                     String allowedOrigins) {
+                     String allowedOrigins,
+                     @Value("${sxpt.access-log.enabled:false}") boolean accessLogEnabled) {
         this.securityManager = securityManager;
         this.stringRedisTemplate = stringRedisTemplate;
+        this.authenticatedUserContextService = authenticatedUserContextService;
         this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isEmpty())
                 .toArray(String[]::new);
+        this.accessLogEnabled = accessLogEnabled;
     }
 
     @Override
@@ -89,7 +99,7 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new TraceIdInterceptor()).addPathPatterns("/**");
         registry.addInterceptor(new IdempotentInterceptor(stringRedisTemplate)).addPathPatterns("/**");
-        registry.addInterceptor(new JwtAuthInterceptor(securityManager))
+        registry.addInterceptor(new JwtAuthInterceptor(securityManager, authenticatedUserContextService))
                 .addPathPatterns("/api/v1/**")
                 .excludePathPatterns(
                         "/api/v1/system/**",
@@ -100,5 +110,8 @@ public class WebConfig implements WebMvcConfigurer {
                         "/webjars/**",
                         "/v2/api-docs"
                 );
+        if (accessLogEnabled) {
+            registry.addInterceptor(new ApiAccessLogInterceptor()).addPathPatterns("/api/v1/**");
+        }
     }
 }

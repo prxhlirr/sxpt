@@ -3,10 +3,13 @@ package com.sxpt.module.connector;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
 import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
 import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
 import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
+import com.sxpt.module.connector.mapper.OriginOrgMapper;
+import com.sxpt.module.connector.mapper.OriginRoleMapper;
 import com.sxpt.module.connector.service.BusinessModuleService;
 import com.sxpt.module.connector.service.impl.BusinessModuleServiceImpl;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
@@ -46,10 +49,16 @@ class BusinessModuleServiceImplTests {
 
     private final BusinessModuleProcessActorMapper processActorMapper = mock(BusinessModuleProcessActorMapper.class);
 
+    private final OriginRoleMapper originRoleMapper = mock(OriginRoleMapper.class);
+
+    private final OriginOrgMapper originOrgMapper = mock(OriginOrgMapper.class);
+
     private final BusinessModuleService service = new BusinessModuleServiceImpl(
             mapper,
             processStepMapper,
-            processActorMapper);
+            processActorMapper,
+            originRoleMapper,
+            originOrgMapper);
 
     /**
      * 校验创建业务模块时写入 Mapper 并补齐默认值。
@@ -151,7 +160,9 @@ class BusinessModuleServiceImplTests {
         existing.setLockVersion(2L);
         when(mapper.selectOne(any())).thenReturn(existing);
         when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
-        when(processActorMapper.selectCount(any())).thenReturn(1);
+        when(processActorMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessActor()));
+        when(originRoleMapper.selectCount(any())).thenReturn(1);
+        when(originOrgMapper.selectCount(any())).thenReturn(1);
 
         BusinessModule result = service.enableBusinessModule("module_001");
 
@@ -187,7 +198,27 @@ class BusinessModuleServiceImplTests {
         existing.setStatus(RecordStatus.DISABLED.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
         when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
-        when(processActorMapper.selectCount(any())).thenReturn(0);
+        when(processActorMapper.selectList(any())).thenReturn(Collections.emptyList());
+
+        BusinessException exception = assertThrows(
+                BusinessException.class,
+                () -> service.enableBusinessModule("module_001"));
+
+        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
+        verify(mapper, times(0)).updateById(existing);
+    }
+
+    /**
+     * 验证启用模块前参与方引用的原平台角色必须仍然启用，避免造数参数指向失效角色。
+     */
+    @Test
+    void enableBusinessModuleShouldRejectActorWithInactiveOriginRole() {
+        BusinessModule existing = buildValidBusinessModule();
+        existing.setStatus(RecordStatus.DISABLED.getValue());
+        when(mapper.selectOne(any())).thenReturn(existing);
+        when(processStepMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessStep()));
+        when(processActorMapper.selectList(any())).thenReturn(Collections.singletonList(buildActiveProcessActor()));
+        when(originRoleMapper.selectCount(any())).thenReturn(0);
 
         BusinessException exception = assertThrows(
                 BusinessException.class,
@@ -269,5 +300,24 @@ class BusinessModuleServiceImplTests {
         step.setStatus(RecordStatus.ACTIVE.getValue());
         step.setDeleted(Boolean.FALSE);
         return step;
+    }
+
+    /**
+     * 构造启用状态的步骤参与方，用于验证模块启用前的原平台组织角色引用。
+     *
+     * @return 步骤参与方实体。
+     */
+    private BusinessModuleProcessActor buildActiveProcessActor() {
+        BusinessModuleProcessActor actor = new BusinessModuleProcessActor();
+        actor.setId("actor_001");
+        actor.setTenantId("tenant_001");
+        actor.setConnectorSystemId("connector_001");
+        actor.setBusinessModuleId("module_001");
+        actor.setProcessStepId("step_001");
+        actor.setRequiredOrgCode("OA_DEPT");
+        actor.setRequiredRoleCode("OA_APPLICANT");
+        actor.setStatus(RecordStatus.ACTIVE.getValue());
+        actor.setDeleted(Boolean.FALSE);
+        return actor;
     }
 }

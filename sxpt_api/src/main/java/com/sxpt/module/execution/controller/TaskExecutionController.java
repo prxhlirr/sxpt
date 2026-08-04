@@ -66,9 +66,9 @@ public class TaskExecutionController {
      */
     @PostMapping("/submit")
     public ApiResult<TaskExecutionVO> submit(@Valid @RequestBody SubmitTaskExecutionRequest request) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TaskExecution saved = taskExecutionService.submitExecution(
-                request.getTenantId(), request.getExecutionId(), currentUserId);
+                currentUser.getTenantId(), request.getExecutionId(), currentUser.getUserId());
         return ApiResult.success(toVO(saved));
     }
 
@@ -82,7 +82,8 @@ public class TaskExecutionController {
     @GetMapping("/{executionId}")
     public ApiResult<TaskExecutionVO> getExecution(@PathVariable String executionId,
                                                    @RequestParam String tenantId) {
-        TaskExecution execution = taskExecutionService.getExecution(tenantId, executionId);
+        TaskExecution execution = taskExecutionService.getExecution(
+                CurrentUserContext.getRequiredUser().getTenantId(), executionId);
         ensureCurrentStudentOwnsExecution(execution);
         return ApiResult.success(toVO(execution));
     }
@@ -99,9 +100,9 @@ public class TaskExecutionController {
     public ApiResult<List<TaskExecutionVO>> listByStudentAndTask(@RequestParam String tenantId,
                                                                  @RequestParam String studentId,
                                                                  @RequestParam String taskId) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         return ApiResult.success(toVOList(
-                taskExecutionService.listByStudentAndTask(tenantId, currentUserId, taskId)));
+                taskExecutionService.listByStudentAndTask(currentUser.getTenantId(), currentUser.getUserId(), taskId)));
     }
 
     /**
@@ -111,17 +112,18 @@ public class TaskExecutionController {
      * @return 学生任务执行实体。
      */
     private TaskExecution toStartEntity(StartTaskExecutionRequest request) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TaskExecution execution = new TaskExecution();
         execution.setId(generateId());
-        execution.setTenantId(request.getTenantId());
+        execution.setTenantId(currentUser.getTenantId());
         execution.setTaskId(request.getTaskId());
-        execution.setStudentId(CurrentUserContext.getRequiredUser().getUserId());
+        execution.setStudentId(currentUser.getUserId());
         execution.setConnectorSystemId(request.getConnectorSystemId());
         execution.setExecutionMode(request.getExecutionMode());
         execution.setSdkMode(request.getSdkMode());
         execution.setExecutionIdentityJson(request.getExecutionIdentityJson());
-        execution.setCreateBy(CurrentUserContext.getRequiredUser().getUserId());
-        execution.setUpdateBy(CurrentUserContext.getRequiredUser().getUserId());
+        execution.setCreateBy(currentUser.getUserId());
+        execution.setUpdateBy(currentUser.getUserId());
         return execution;
     }
 

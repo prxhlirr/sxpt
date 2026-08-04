@@ -2,6 +2,7 @@ import {
   createDefaultBusinessPlatforms,
   createMockTrainingState
 } from '../data/mockSeed';
+import { clearApiToken, setApiToken } from '../api/http';
 import type { PortalRole, StorageLike, TrainingState } from '../domain/models';
 
 export const TRAINING_STORAGE_KEY = 'sxpt_web.training.demo.v1';
@@ -43,11 +44,26 @@ export interface LoginRequest {
   loginType: 'PASSWORD';
 }
 
-interface DevelopmentTokenResponse {
-  token: string;
-  tokenType?: string;
-  expiresIn?: number;
-}
+const DEVELOPMENT_LOGIN_PROFILES: Record<
+  PortalRole,
+  { tenantId: string; username: string; password: string }
+> = {
+  admin: {
+    tenantId: 'demo-tenant',
+    username: 'expert01',
+    password: 'Sxpt@123456'
+  },
+  teacher: {
+    tenantId: 'demo-tenant',
+    username: 'teacher01',
+    password: 'Sxpt@123456'
+  },
+  student: {
+    tenantId: 'demo-tenant',
+    username: 'student01',
+    password: 'Sxpt@123456'
+  }
+};
 
 export interface DataRequirement {
   id: string;
@@ -102,6 +118,71 @@ export interface UpdateConnectorSystemRequest {
   baseUrl: string;
   authType: string;
   configJson?: string;
+}
+
+export interface PlatformCapability {
+  id: string;
+  tenantId: string;
+  connectorSystemId: string;
+  capabilityCode: string;
+  capabilityName: string;
+  capabilityType: string;
+  supportFlag: boolean;
+  endpointUrl: string;
+  method: string;
+  requestSchemaJson?: string;
+  responseSchemaJson?: string;
+  timeoutMs?: number;
+  retryPolicyJson?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface PlatformCapabilityRequest {
+  tenantId: string;
+  connectorSystemId: string;
+  capabilityCode: string;
+  capabilityName: string;
+  capabilityType: string;
+  supportFlag: boolean;
+  endpointUrl: string;
+  method: string;
+  requestSchemaJson?: string;
+  responseSchemaJson?: string;
+  timeoutMs?: number;
+  retryPolicyJson?: string;
+  createBy?: string;
+  updateBy?: string;
+}
+
+export interface OriginRole {
+  id: string;
+  tenantId: string;
+  connectorSystemId: string;
+  roleCode: string;
+  roleName: string;
+  externalRoleId?: string;
+  roleType?: string;
+  remark?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface OriginOrg {
+  id: string;
+  tenantId: string;
+  connectorSystemId: string;
+  orgCode: string;
+  orgName: string;
+  externalOrgId?: string;
+  parentExternalOrgId?: string;
+  orgType?: string;
+  remark?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
 export interface TeachingDataTemplate {
@@ -510,6 +591,47 @@ export interface PrepareAndExecuteRequest {
   };
 }
 
+export interface TriggerTaskPrepareRequest {
+  requirementCode?: string;
+  connectorSystemId: string;
+  businessModuleId: string;
+  moduleCode: string;
+  strategyId?: string;
+  templateId?: string;
+  classId?: string;
+  sceneType: string;
+  requestBatchId?: string;
+  triggerType?: string;
+  idempotencyKey?: string;
+  traceId?: string;
+  requestJson?: string;
+  remark?: string;
+  participants: DataPrepareParticipant[];
+}
+
+export interface TaskPrepareTriggerResult {
+  requirement: DataRequirement;
+  job: DataPrepareJob;
+  requestBatchId: string;
+}
+
+export interface DataPreparePreflightCheck {
+  nodeCode: string;
+  status: 'PASS' | 'WARN' | 'FAIL' | string;
+  message: string;
+  evidence?: Record<string, string>;
+}
+
+export interface DataPreparePreflightResult {
+  taskId: string;
+  checks: DataPreparePreflightCheck[];
+  ready: boolean;
+  passCount: number;
+  warnCount: number;
+  failCount: number;
+  summary: string;
+}
+
 interface ApiResult<T> {
   success: boolean;
   code: number;
@@ -678,37 +800,13 @@ export const authApi = {
     if (!import.meta.env.DEV) {
       throw new Error('生产环境不允许使用开发快捷登录');
     }
-    const userId = `dev-${role}`;
-    const username = `dev-${role}`;
-    const response = await fetch(
-      `${API_BASE_URL}api/v1/auth/token?${stringifyQuery({ userId, username })}`,
-      { method: 'POST' }
-    );
-    const payload = (await response.json()) as ApiResult<DevelopmentTokenResponse>;
-    if (!response.ok || !payload.success || !payload.result?.token) {
-      throw new Error(payload.message || '开发快捷登录失败，请使用真实账号登录');
-    }
-    const session = normalizeSession(
-      {
-        token: payload.result.token,
-        tokenType: payload.result.tokenType || 'Bearer',
-        expiresIn: Number(payload.result.expiresIn) || 0,
-        issuedAt: Date.now(),
-        user: {
-          userId,
-          tenantId: 'demo-tenant',
-          username,
-          displayName:
-            role === 'admin' ? '本地管理员' : role === 'teacher' ? '本地教师' : '本地学生',
-          userType: role,
-          roles: [role],
-          orgIds: []
-        }
-      },
-      Date.now()
-    );
-    saveAuthSession(session);
-    return session;
+    const profile = DEVELOPMENT_LOGIN_PROFILES[role];
+    return authApi.login({
+      loginType: 'PASSWORD',
+      tenantId: profile.tenantId,
+      username: profile.username,
+      password: profile.password
+    });
   },
 
   cleanupInvalidSession() {
@@ -782,6 +880,85 @@ export const dataPrepareApi = {
     return requestApi<ConnectorSystem>(
       `api/v1/connector/system/${encodeURIComponent(id)}/disable`,
       { method: 'POST' }
+    );
+  },
+
+  async listPlatformCapabilities(params: {
+    tenantId: string;
+    connectorSystemId: string;
+  }): Promise<PlatformCapability[]> {
+    return requestApi<PlatformCapability[]>(
+      `api/v1/connector/platform-capabilities?${stringifyQuery(params)}`
+    );
+  },
+
+  async createPlatformCapability(
+    request: PlatformCapabilityRequest
+  ): Promise<PlatformCapability> {
+    return requestApi<PlatformCapability>('api/v1/connector/platform-capabilities/create', {
+      method: 'POST',
+      body: JSON.stringify(request)
+    });
+  },
+
+  async getPlatformCapability(id: string): Promise<PlatformCapability> {
+    return requestApi<PlatformCapability>(
+      `api/v1/connector/platform-capabilities/${encodeURIComponent(id)}`
+    );
+  },
+
+  async updatePlatformCapability(
+    id: string,
+    request: PlatformCapabilityRequest
+  ): Promise<PlatformCapability> {
+    return requestApi<PlatformCapability>(
+      `api/v1/connector/platform-capabilities/${encodeURIComponent(id)}/update`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async enablePlatformCapability(id: string): Promise<PlatformCapability> {
+    return requestApi<PlatformCapability>(
+      `api/v1/connector/platform-capabilities/${encodeURIComponent(id)}/enable`,
+      { method: 'POST' }
+    );
+  },
+
+  async disablePlatformCapability(id: string): Promise<PlatformCapability> {
+    return requestApi<PlatformCapability>(
+      `api/v1/connector/platform-capabilities/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' }
+    );
+  },
+
+  async listOriginRoles(params: {
+    tenantId: string;
+    connectorSystemId: string;
+    activeOnly?: boolean;
+  }): Promise<OriginRole[]> {
+    return requestApi<OriginRole[]>(
+      `api/v1/connector/origin-roles?${stringifyQuery({
+        tenantId: params.tenantId,
+        connectorSystemId: params.connectorSystemId,
+        activeOnly: String(Boolean(params.activeOnly))
+      })}`
+    );
+  },
+
+  async listOriginOrgs(params: {
+    tenantId: string;
+    connectorSystemId: string;
+    activeOnly?: boolean;
+  }): Promise<OriginOrg[]> {
+    return requestApi<OriginOrg[]>(
+      `api/v1/connector/origin-orgs?${stringifyQuery({
+        tenantId: params.tenantId,
+        connectorSystemId: params.connectorSystemId,
+        activeOnly: String(Boolean(params.activeOnly))
+      })}`
     );
   },
 
@@ -1214,6 +1391,33 @@ export const dataPrepareApi = {
     });
   },
 
+  async triggerTaskPrepare(
+    taskId: string,
+    request: TriggerTaskPrepareRequest
+  ): Promise<TaskPrepareTriggerResult> {
+    return requestApi<TaskPrepareTriggerResult>(
+      `api/v1/teaching-data/tasks/${encodeURIComponent(taskId)}/prepare`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async preflightTaskPrepare(params: {
+    tenantId: string;
+    taskId: string;
+    connectorSystemId: string;
+    businessModuleId: string;
+    moduleCode: string;
+    sceneType: string;
+  }): Promise<DataPreparePreflightResult> {
+    const { taskId, ...query } = params;
+    return requestApi<DataPreparePreflightResult>(
+      `api/v1/teaching-data/tasks/${encodeURIComponent(taskId)}/prepare/preflight?${stringifyQuery(query)}`
+    );
+  },
+
   async retryFailedJob(
     jobId: string,
     request: RetryFailedJobRequest
@@ -1377,6 +1581,7 @@ function resolveBrowserStorage(): StorageLike {
 }
 
 function saveAuthSession(session: AuthSession) {
+  setApiToken(session.token);
   try {
     resolveBrowserStorage().setItem(
       AUTH_SESSION_STORAGE_KEY,
@@ -1388,6 +1593,7 @@ function saveAuthSession(session: AuthSession) {
 }
 
 function clearAuthSession() {
+  clearApiToken();
   try {
     resolveBrowserStorage().removeItem(AUTH_SESSION_STORAGE_KEY);
   } catch {
@@ -1410,13 +1616,16 @@ function loadAuthSession(): AuthSession | null {
     const parsed = JSON.parse(raw) as Partial<AuthSession>;
     if (typeof parsed.issuedAt !== 'number') {
       resolveBrowserStorage().removeItem(AUTH_SESSION_STORAGE_KEY);
+      clearApiToken();
       return null;
     }
     const session = normalizeSession(parsed as AuthSession, parsed.issuedAt);
     if (isSessionExpired(session)) {
       resolveBrowserStorage().removeItem(AUTH_SESSION_STORAGE_KEY);
+      clearApiToken();
       return null;
     }
+    setApiToken(session.token);
     return session;
   } catch {
     return null;
@@ -1467,11 +1676,7 @@ function hasPortalRole(
       roleText.includes('expert') ||
       roleText.includes('manager') ||
       roleText.includes('管理') ||
-      roleText.includes('专家') ||
-      (!roleText.includes('teacher') &&
-        !roleText.includes('教师') &&
-        !roleText.includes('student') &&
-        !roleText.includes('学生'))
+      roleText.includes('专家')
     );
   }
   if (requiredRole === 'teacher') {

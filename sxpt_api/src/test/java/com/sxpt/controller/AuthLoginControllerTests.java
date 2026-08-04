@@ -2,6 +2,8 @@ package com.sxpt.controller;
 
 import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.AuthLoginService;
+import com.sxpt.module.connector.service.BusinessModuleProcessChainService;
+import com.sxpt.module.user.service.SystemConfigService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -39,6 +41,12 @@ class AuthLoginControllerTests {
 
     @MockBean
     private AuthLoginService authLoginService;
+
+    @MockBean
+    private BusinessModuleProcessChainService businessModuleProcessChainService;
+
+    @MockBean
+    private SystemConfigService systemConfigService;
 
     /**
      * 校验登录接口无需 Bearer Token 即可访问。

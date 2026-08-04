@@ -11,7 +11,9 @@ import {
   type BusinessModuleProcessStep,
   type BusinessModuleProcessStepRequest,
   type BusinessModuleRequest,
-  type ConnectorSystem
+  type ConnectorSystem,
+  type OriginOrg,
+  type OriginRole
 } from '../../services/trainingApi';
 
 type ModuleDialogMode = 'none' | 'detail' | 'create' | 'edit';
@@ -29,6 +31,8 @@ const modules = ref<BusinessModule[]>([]);
 const selectedModule = ref<BusinessModule | null>(null);
 const processSteps = ref<BusinessModuleProcessStep[]>([]);
 const processActors = ref<BusinessModuleProcessActor[]>([]);
+const originRoles = ref<OriginRole[]>([]);
+const originOrgs = ref<OriginOrg[]>([]);
 const selectedStep = ref<BusinessModuleProcessStep | null>(null);
 const selectedActor = ref<BusinessModuleProcessActor | null>(null);
 const dialogMode = ref<ModuleDialogMode>('none');
@@ -173,6 +177,8 @@ async function initialize() {
  */
 async function loadModules() {
   modules.value = [];
+  originRoles.value = [];
+  originOrgs.value = [];
   if (!connectorSystemId.value) return;
   modules.value = await dataPrepareApi.listAllBusinessModules({
     tenantId: tenantId.value,
@@ -300,6 +306,29 @@ async function loadProcessActors(step: BusinessModuleProcessStep | null) {
   });
 }
 
+async function loadOriginDictionaries() {
+  const systemId = selectedModule.value?.connectorSystemId || connectorSystemId.value;
+  if (!systemId) {
+    originRoles.value = [];
+    originOrgs.value = [];
+    return;
+  }
+  const [roles, orgs] = await Promise.all([
+    dataPrepareApi.listOriginRoles({
+      tenantId: tenantId.value,
+      connectorSystemId: systemId,
+      activeOnly: true
+    }),
+    dataPrepareApi.listOriginOrgs({
+      tenantId: tenantId.value,
+      connectorSystemId: systemId,
+      activeOnly: true
+    })
+  ]);
+  originRoles.value = roles;
+  originOrgs.value = orgs;
+}
+
 function openCreateStepDialog() {
   if (!selectedModule.value) return;
   fillStepForm({
@@ -356,11 +385,12 @@ async function toggleStepStatus(step: BusinessModuleProcessStep) {
   }, step.status === 'ACTIVE' ? '标准步骤已停用' : '标准步骤已启用');
 }
 
-function openCreateActorDialog() {
+async function openCreateActorDialog() {
   if (!selectedStep.value) {
     notify('error', '请先选择标准步骤');
     return;
   }
+  await loadOriginDictionaries();
   fillActorForm({
     actorNo: processActors.value.length + 1,
     actorRelation: processActors.value.length === 0 ? 'PRIMARY' : 'REVIEWER',
@@ -378,7 +408,8 @@ function openCreateActorDialog() {
   chainDialogMode.value = 'actor-create';
 }
 
-function openEditActorDialog(actor: BusinessModuleProcessActor) {
+async function openEditActorDialog(actor: BusinessModuleProcessActor) {
+  await loadOriginDictionaries();
   selectedActor.value = actor;
   fillActorForm(actor);
   chainDialogMode.value = 'actor-edit';
@@ -394,8 +425,12 @@ async function saveProcessActor() {
     notify('error', '请填写参与人类型');
     return;
   }
+  if (!actorForm.requiredOrgCode?.trim()) {
+    notify('error', '请选择原平台单位');
+    return;
+  }
   if (!actorForm.requiredRoleCode?.trim()) {
-    notify('error', '请填写角色编码');
+    notify('error', '请选择原平台角色');
     return;
   }
   await run(async () => {
@@ -565,6 +600,17 @@ function fillActorForm(actor: BusinessModuleProcessActorRequest) {
   actorForm.isRequired = actor.isRequired ?? true;
   actorForm.assignmentRule = actor.assignmentRule || 'CURRENT_STUDENT';
   actorForm.remark = actor.remark || '';
+}
+
+function handleOriginOrgChange() {
+  const org = originOrgs.value.find((item) => item.orgCode === actorForm.requiredOrgCode);
+  actorForm.requiredOrgName = org?.orgName || '';
+  actorForm.requiredOrgType = org?.orgType || '';
+}
+
+function handleOriginRoleChange() {
+  const role = originRoles.value.find((item) => item.roleCode === actorForm.requiredRoleCode);
+  actorForm.requiredRoleName = role?.roleName || '';
 }
 
 function buildStepRequest(): BusinessModuleProcessStepRequest {
@@ -1188,23 +1234,33 @@ function relationText(value?: string) {
           </label>
           <label>
             <span>单位类型</span>
-            <input v-model="actorForm.requiredOrgType" type="text" />
+            <input v-model="actorForm.requiredOrgType" type="text" readonly />
           </label>
           <label>
-            <span>单位编码</span>
-            <input v-model="actorForm.requiredOrgCode" type="text" />
+            <span>原平台单位 <em>*</em></span>
+            <select v-model="actorForm.requiredOrgCode" @change="handleOriginOrgChange">
+              <option value="">请选择原平台单位</option>
+              <option v-for="org in originOrgs" :key="org.id" :value="org.orgCode">
+                {{ org.orgName }} / {{ org.orgCode }}
+              </option>
+            </select>
           </label>
           <label>
             <span>单位名称</span>
-            <input v-model="actorForm.requiredOrgName" type="text" />
+            <input v-model="actorForm.requiredOrgName" type="text" readonly />
           </label>
           <label>
-            <span>角色编码 <em>*</em></span>
-            <input v-model="actorForm.requiredRoleCode" type="text" />
+            <span>原平台角色 <em>*</em></span>
+            <select v-model="actorForm.requiredRoleCode" @change="handleOriginRoleChange">
+              <option value="">请选择原平台角色</option>
+              <option v-for="role in originRoles" :key="role.id" :value="role.roleCode">
+                {{ role.roleName }} / {{ role.roleCode }}
+              </option>
+            </select>
           </label>
           <label>
             <span>角色名称</span>
-            <input v-model="actorForm.requiredRoleName" type="text" />
+            <input v-model="actorForm.requiredRoleName" type="text" readonly />
           </label>
           <label class="check-field">
             <input v-model="actorForm.isRequired" type="checkbox" />

@@ -6,6 +6,8 @@ import {
   dataPrepareApi,
   type ConnectorSystem,
   type CreateConnectorSystemRequest,
+  type PlatformCapability,
+  type PlatformCapabilityRequest,
   type UpdateConnectorSystemRequest
 } from '../../services/trainingApi';
 
@@ -14,8 +16,10 @@ type ConnectorSystemForm = Omit<CreateConnectorSystemRequest, 'tenantId' | 'conf
 };
 
 type PlatformDialogMode = 'none' | 'create' | 'detail' | 'edit';
+type CapabilityDialogMode = 'none' | 'list' | 'create' | 'edit';
 
 const PAGE_SIZE = 10;
+const CAPABILITY_PRESETS = ['DATA_CREATE', 'DATA_VALIDATE', 'DATA_LOCK', 'RESULT_CHECK', 'DATA_ARCHIVE'];
 
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
@@ -25,6 +29,10 @@ const systemKeyword = ref('');
 const currentPage = ref(1);
 const dialogMode = ref<PlatformDialogMode>('none');
 const selectedSystem = ref<ConnectorSystem | null>(null);
+const capabilityDialogMode = ref<CapabilityDialogMode>('none');
+const capabilitySystem = ref<ConnectorSystem | null>(null);
+const selectedCapability = ref<PlatformCapability | null>(null);
+const capabilities = ref<PlatformCapability[]>([]);
 const notice = reactive({
   show: false,
   type: 'info' as 'success' | 'error' | 'info',
@@ -38,6 +46,23 @@ const form = reactive<ConnectorSystemForm>({
   baseUrl: '',
   authType: 'NONE',
   configJson: ''
+});
+
+const capabilityForm = reactive<PlatformCapabilityRequest>({
+  tenantId: tenantId.value,
+  connectorSystemId: '',
+  capabilityCode: 'DATA_CREATE',
+  capabilityName: '批量创建教学初始数据',
+  capabilityType: 'DATA_CREATE',
+  supportFlag: true,
+  endpointUrl: '/openapi/teaching-data/batch-create',
+  method: 'POST',
+  requestSchemaJson: '{\n  "required": ["requestBatchId", "items"]\n}',
+  responseSchemaJson: '{\n  "required": ["requestBatchId", "items"]\n}',
+  timeoutMs: 10000,
+  retryPolicyJson: '{\n  "maxAttempts": 3,\n  "backoffMs": 1000\n}',
+  createBy: session?.user.userId || 'admin',
+  updateBy: session?.user.userId || 'admin'
 });
 
 const activeCount = computed(
@@ -62,6 +87,7 @@ const pagedSystems = computed(() => {
 });
 
 const isDialogOpen = computed(() => dialogMode.value !== 'none');
+const isCapabilityDialogOpen = computed(() => capabilityDialogMode.value !== 'none');
 
 onMounted(loadSystems);
 
@@ -211,6 +237,133 @@ async function toggleSystemStatus(system: ConnectorSystem) {
   }, system.status === 'ACTIVE' ? '平台已停用' : '平台已启用');
 }
 
+/**
+ * 业务功能：打开某个原平台的能力维护弹窗。
+ * 关键流程：先绑定当前系统，再读取该系统下全部能力声明，保证后续新增和编辑都落在同一平台边界内。
+ */
+async function openCapabilityDialog(system: ConnectorSystem) {
+  capabilitySystem.value = system;
+  capabilityDialogMode.value = 'list';
+  await loadCapabilities(system);
+}
+
+/**
+ * 业务功能：读取当前原平台下的能力声明列表。
+ * 关键流程：按租户和 connectorSystemId 查询，避免跨平台展示或误启停能力。
+ */
+async function loadCapabilities(system = capabilitySystem.value) {
+  if (!system) return;
+  await run(async () => {
+    capabilities.value = await dataPrepareApi.listPlatformCapabilities({
+      tenantId: tenantId.value,
+      connectorSystemId: system.id
+    });
+  }, '能力列表已刷新');
+}
+
+/**
+ * 业务功能：打开能力新增表单。
+ * 关键流程：以当前原平台为边界初始化默认 DATA_CREATE 能力，管理员可在保存前调整接口地址和 Schema。
+ */
+function openCreateCapabilityForm() {
+  if (!capabilitySystem.value) return;
+  resetCapabilityForm(capabilitySystem.value);
+  selectedCapability.value = null;
+  capabilityDialogMode.value = 'create';
+}
+
+/**
+ * 业务功能：打开能力编辑表单。
+ * 关键流程：先把列表行完整回填到表单，保留 Schema、超时和重试策略等运行参数。
+ */
+function editCapability(capability: PlatformCapability) {
+  selectedCapability.value = capability;
+  capabilityForm.tenantId = capability.tenantId;
+  capabilityForm.connectorSystemId = capability.connectorSystemId;
+  capabilityForm.capabilityCode = capability.capabilityCode;
+  capabilityForm.capabilityName = capability.capabilityName;
+  capabilityForm.capabilityType = capability.capabilityType;
+  capabilityForm.supportFlag = capability.supportFlag;
+  capabilityForm.endpointUrl = capability.endpointUrl;
+  capabilityForm.method = capability.method;
+  capabilityForm.requestSchemaJson = capability.requestSchemaJson || '';
+  capabilityForm.responseSchemaJson = capability.responseSchemaJson || '';
+  capabilityForm.timeoutMs = capability.timeoutMs || 10000;
+  capabilityForm.retryPolicyJson = capability.retryPolicyJson || '';
+  capabilityForm.updateBy = session?.user.userId || 'admin';
+  capabilityDialogMode.value = 'edit';
+}
+
+/**
+ * 业务功能：创建原平台能力声明。
+ * 关键流程：先校验必填和 JSON，再调用后端创建接口；成功后回到能力列表并刷新事实状态。
+ */
+async function saveCapability() {
+  const validationMessage = validateCapabilityForm();
+  if (validationMessage) {
+    notify('error', validationMessage);
+    return;
+  }
+  await run(async () => {
+    await dataPrepareApi.createPlatformCapability({ ...capabilityForm });
+    capabilityDialogMode.value = 'list';
+    await loadCapabilities();
+  }, '能力已创建');
+}
+
+/**
+ * 业务功能：更新原平台能力声明。
+ * 关键流程：不允许在编辑中改变能力归属边界，只提交当前能力的可维护运行参数。
+ */
+async function updateCapability() {
+  if (!selectedCapability.value) return;
+  const validationMessage = validateCapabilityForm();
+  if (validationMessage) {
+    notify('error', validationMessage);
+    return;
+  }
+  await run(async () => {
+    await dataPrepareApi.updatePlatformCapability(selectedCapability.value!.id, { ...capabilityForm });
+    capabilityDialogMode.value = 'list';
+    await loadCapabilities();
+  }, '能力已更新');
+}
+
+/**
+ * 业务功能：启用或停用原平台能力声明。
+ * 关键流程：策略启用只认 ACTIVE 且 supportFlag=true 的能力，状态切换后必须刷新列表。
+ */
+async function toggleCapabilityStatus(capability: PlatformCapability) {
+  await run(async () => {
+    if (capability.status === 'ACTIVE') {
+      await dataPrepareApi.disablePlatformCapability(capability.id);
+    } else {
+      await dataPrepareApi.enablePlatformCapability(capability.id);
+    }
+    await loadCapabilities();
+  }, capability.status === 'ACTIVE' ? '能力已停用' : '能力已启用');
+}
+
+/**
+ * 业务功能：关闭能力维护弹窗。
+ * 关键流程：只清理前端能力编辑态，不影响原平台系统弹窗和已保存配置。
+ */
+function closeCapabilityDialog() {
+  capabilityDialogMode.value = 'none';
+  capabilitySystem.value = null;
+  selectedCapability.value = null;
+  capabilities.value = [];
+}
+
+/**
+ * 业务功能：回到能力列表。
+ * 关键流程：保留当前平台上下文，取消新增或编辑表单。
+ */
+function backToCapabilityList() {
+  selectedCapability.value = null;
+  capabilityDialogMode.value = 'list';
+}
+
 async function run(action: () => Promise<void>, successMessage: string) {
   loading.value = true;
   closeNotice();
@@ -286,6 +439,63 @@ function friendlyErrorMessage(err: unknown) {
 
 function statusClass(status?: string) {
   return status === 'ACTIVE' ? 'success' : 'info';
+}
+
+function resetCapabilityForm(system: ConnectorSystem) {
+  capabilityForm.tenantId = tenantId.value;
+  capabilityForm.connectorSystemId = system.id;
+  capabilityForm.capabilityCode = 'DATA_CREATE';
+  applyCapabilityPreset('DATA_CREATE');
+  capabilityForm.createBy = session?.user.userId || 'admin';
+  capabilityForm.updateBy = session?.user.userId || 'admin';
+}
+
+function applyCapabilityPreset(code = capabilityForm.capabilityCode) {
+  capabilityForm.capabilityCode = code;
+  capabilityForm.capabilityType = code;
+  capabilityForm.supportFlag = true;
+  capabilityForm.method = 'POST';
+  capabilityForm.timeoutMs = 10000;
+  capabilityForm.requestSchemaJson = '{\n  "required": ["requestBatchId", "items"]\n}';
+  capabilityForm.responseSchemaJson = '{\n  "required": ["requestBatchId", "items"]\n}';
+  capabilityForm.retryPolicyJson = '{\n  "maxAttempts": 3,\n  "backoffMs": 1000\n}';
+  const names: Record<string, string> = {
+    DATA_CREATE: '批量创建教学初始数据',
+    DATA_VALIDATE: '校验教学数据可用性',
+    DATA_LOCK: '锁定教学业务数据',
+    RESULT_CHECK: '校验学生办理结果',
+    DATA_ARCHIVE: '归档教学业务数据'
+  };
+  const endpoints: Record<string, string> = {
+    DATA_CREATE: '/openapi/teaching-data/batch-create',
+    DATA_VALIDATE: '/openapi/teaching-data/validate',
+    DATA_LOCK: '/openapi/teaching-data/lock',
+    RESULT_CHECK: '/openapi/teaching-data/result-check',
+    DATA_ARCHIVE: '/openapi/teaching-data/archive'
+  };
+  capabilityForm.capabilityName = names[code] || code;
+  capabilityForm.endpointUrl = endpoints[code] || '/openapi/teaching-data';
+}
+
+function validateCapabilityForm() {
+  if (!capabilityForm.capabilityCode.trim()) return '请填写能力编码';
+  if (!capabilityForm.capabilityName.trim()) return '请填写能力名称';
+  if (!capabilityForm.endpointUrl.trim()) return '请填写能力接口地址';
+  if (!capabilityForm.method.trim()) return '请填写 HTTP 方法';
+  if (!isJsonObjectText(capabilityForm.requestSchemaJson)) return '请求 Schema 必须是 JSON 对象';
+  if (!isJsonObjectText(capabilityForm.responseSchemaJson)) return '响应 Schema 必须是 JSON 对象';
+  if (!isJsonObjectText(capabilityForm.retryPolicyJson)) return '重试策略必须是 JSON 对象';
+  return '';
+}
+
+function isJsonObjectText(value?: string) {
+  if (!value?.trim()) return true;
+  try {
+    const parsed = JSON.parse(value);
+    return Boolean(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+  } catch {
+    return false;
+  }
 }
 </script>
 
@@ -375,6 +585,7 @@ function statusClass(status?: string) {
                 <div class="row-actions">
                   <button type="button" @click="showSystemDetail(system)">详情</button>
                   <button type="button" @click="editSystem(system)">编辑</button>
+                  <button type="button" :disabled="loading" @click="openCapabilityDialog(system)">能力</button>
                   <button type="button" :disabled="loading" @click="toggleSystemStatus(system)">
                     {{ system.status === 'ACTIVE' ? '停用' : '启用' }}
                   </button>
@@ -514,6 +725,182 @@ function statusClass(status?: string) {
               class="primary-action"
               :disabled="loading"
               @click="updateConnectorSystem"
+            >
+              保存修改
+            </button>
+          </div>
+        </footer>
+      </section>
+    </div>
+
+    <div
+      v-if="isCapabilityDialogOpen"
+      class="modal-overlay"
+      role="presentation"
+      @click.self="closeCapabilityDialog"
+    >
+      <section
+        class="create-dialog capability-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="capability-dialog-title"
+      >
+        <header class="dialog-header">
+          <div>
+            <p>平台能力</p>
+            <h2 id="capability-dialog-title">
+              {{ capabilitySystem?.systemName || '原平台' }}
+            </h2>
+          </div>
+          <button
+            type="button"
+            class="icon-close"
+            aria-label="关闭能力维护弹窗"
+            :disabled="loading"
+            @click="closeCapabilityDialog"
+          >
+            ×
+          </button>
+        </header>
+
+        <p class="dialog-helper">
+          能力声明决定策略启用前能否确认原平台支持造数、锁定、校验和归档。
+        </p>
+
+        <section v-if="capabilityDialogMode === 'list'" class="capability-section">
+          <div class="capability-toolbar">
+            <div>
+              <strong>{{ capabilities.length }} 项能力</strong>
+              <span>{{ capabilitySystem?.systemCode || '-' }}</span>
+            </div>
+            <button type="button" class="primary-action" :disabled="loading" @click="openCreateCapabilityForm">
+              新增能力
+            </button>
+          </div>
+
+          <div class="table-wrap compact-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>能力编码</th>
+                  <th>名称</th>
+                  <th>接口</th>
+                  <th>支持</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="capability in capabilities" :key="capability.id">
+                  <td>{{ capability.capabilityCode }}</td>
+                  <td>{{ capability.capabilityName }}</td>
+                  <td>{{ capability.method }} {{ capability.endpointUrl }}</td>
+                  <td>{{ capability.supportFlag ? '是' : '否' }}</td>
+                  <td>
+                    <span class="status-badge" :class="statusClass(capability.status)">
+                      {{ capability.status || '未设置' }}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="row-actions">
+                      <button type="button" @click="editCapability(capability)">编辑</button>
+                      <button type="button" :disabled="loading" @click="toggleCapabilityStatus(capability)">
+                        {{ capability.status === 'ACTIVE' ? '停用' : '启用' }}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <div v-if="capabilities.length === 0" class="empty-state">
+              <strong>暂无能力声明</strong>
+              <p>策略启用前至少需要 DATA_CREATE 能力。</p>
+            </div>
+          </div>
+        </section>
+
+        <section v-else class="create-form capability-form">
+          <label>
+            <span>能力编码 <em>*</em></span>
+            <select
+              v-model="capabilityForm.capabilityCode"
+              :disabled="capabilityDialogMode === 'edit'"
+              @change="applyCapabilityPreset()"
+            >
+              <option v-for="code in CAPABILITY_PRESETS" :key="code" :value="code">
+                {{ code }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>能力名称 <em>*</em></span>
+            <input v-model="capabilityForm.capabilityName" type="text" />
+          </label>
+          <label>
+            <span>能力类型</span>
+            <input v-model="capabilityForm.capabilityType" type="text" />
+          </label>
+          <label class="check-line">
+            <input v-model="capabilityForm.supportFlag" type="checkbox" />
+            <span>原平台支持该能力</span>
+          </label>
+          <label>
+            <span>HTTP 方法 <em>*</em></span>
+            <select v-model="capabilityForm.method">
+              <option value="POST">POST</option>
+              <option value="GET">GET</option>
+              <option value="PUT">PUT</option>
+              <option value="PATCH">PATCH</option>
+              <option value="DELETE">DELETE</option>
+            </select>
+          </label>
+          <label>
+            <span>超时毫秒</span>
+            <input v-model.number="capabilityForm.timeoutMs" type="number" min="0" />
+          </label>
+          <label class="field-wide">
+            <span>接口地址 <em>*</em></span>
+            <input v-model="capabilityForm.endpointUrl" type="text" />
+          </label>
+          <label class="field-wide">
+            <span>请求 Schema JSON</span>
+            <textarea v-model="capabilityForm.requestSchemaJson" rows="4" />
+          </label>
+          <label class="field-wide">
+            <span>响应 Schema JSON</span>
+            <textarea v-model="capabilityForm.responseSchemaJson" rows="4" />
+          </label>
+          <label class="field-wide">
+            <span>重试策略 JSON</span>
+            <textarea v-model="capabilityForm.retryPolicyJson" rows="3" />
+          </label>
+        </section>
+
+        <footer class="dialog-actions">
+          <button
+            type="button"
+            class="secondary-action"
+            :disabled="loading"
+            @click="capabilityDialogMode === 'list' ? closeCapabilityDialog() : backToCapabilityList()"
+          >
+            {{ capabilityDialogMode === 'list' ? '关闭' : '返回列表' }}
+          </button>
+          <div>
+            <button
+              v-if="capabilityDialogMode === 'create'"
+              type="button"
+              class="primary-action"
+              :disabled="loading"
+              @click="saveCapability"
+            >
+              保存能力
+            </button>
+            <button
+              v-if="capabilityDialogMode === 'edit'"
+              type="button"
+              class="primary-action"
+              :disabled="loading"
+              @click="updateCapability"
             >
               保存修改
             </button>
@@ -842,6 +1229,63 @@ function statusClass(status?: string) {
 
 .ghost-action {
   color: #2563eb;
+}
+
+.capability-dialog {
+  width: min(980px, 100%);
+}
+
+.capability-section {
+  padding: 16px 22px 20px;
+}
+
+.capability-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.capability-toolbar div {
+  display: grid;
+  gap: 4px;
+}
+
+.capability-toolbar strong {
+  color: #172033;
+  font-size: 15px;
+}
+
+.capability-toolbar span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.compact-table table {
+  min-width: 780px;
+}
+
+.compact-table td {
+  overflow-wrap: anywhere;
+}
+
+.capability-form {
+  padding-top: 18px;
+}
+
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 20px;
+}
+
+.check-line input {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
 }
 
 @media (max-width: 720px) {

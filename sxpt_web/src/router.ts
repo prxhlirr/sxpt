@@ -225,7 +225,7 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   const session = authApi.getSession();
-  if (to.meta.public) {
+  if (to.meta.public || to.path === '/platforms') {
     return session && to.path === '/login' ? '/platforms' : true;
   }
   if (!session) {
