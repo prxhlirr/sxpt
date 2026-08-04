@@ -15,6 +15,7 @@ import { usersApi } from '../api/users';
 import { getApiConfig } from '../config/api';
 import type {
   BusinessPlatform,
+  BusinessPlatformModule,
   LessonPlan,
   LessonStage,
   PublishedTask,
@@ -171,15 +172,19 @@ export const backendTrainingApi: BackendTrainingApi = {
       }
     }
 
-    return systems.map((system) =>
-      mapConnectorSystem(
-        system,
-        cachedPlatforms.find(
+    return Promise.all(
+      systems.map(async (system) => {
+        const cached = cachedPlatforms.find(
           (platform) =>
             platform.id === system.id ||
             normalizeCode(platform.code) === normalizeCode(system.systemCode)
-        )
-      )
+        );
+        const persistedModules = await dataPrepareApi.listAllBusinessModules({
+          tenantId: config.tenantId,
+          connectorSystemId: system.id
+        });
+        return mapConnectorSystem(system, cached, persistedModules);
+      })
     );
   },
 
@@ -711,8 +716,23 @@ export function findOrganizationByIdOrCode<
 
 export function mapConnectorSystem(
   system: ConnectorSystem,
-  cached?: BusinessPlatform
+  cached?: BusinessPlatform,
+  persistedModules: BusinessModule[] = []
 ): BusinessPlatform {
+  const remoteModuleKeys = new Set(
+    persistedModules.flatMap((businessModule) => [
+      businessModule.id,
+      normalizeCode(businessModule.moduleCode)
+    ])
+  );
+  const modules = [
+    ...persistedModules.map(mapBusinessModule),
+    ...(cached?.modules ?? []).filter(
+      (businessModule) =>
+        !remoteModuleKeys.has(businessModule.id) &&
+        !remoteModuleKeys.has(normalizeCode(businessModule.code))
+    )
+  ];
   return {
     id: system.id,
     code: system.systemCode,
@@ -720,8 +740,25 @@ export function mapConnectorSystem(
     baseUrl: system.baseUrl,
     description: cached?.description ?? '',
     status: system.status === 'ACTIVE' ? 'ENABLED' : 'DISABLED',
-    modules: cached?.modules ? clone(cached.modules) : [],
+    modules: clone(modules),
     updatedAt: system.updateTime ?? system.createTime ?? new Date().toISOString()
+  };
+}
+
+export function mapBusinessModule(
+  businessModule: BusinessModule
+): BusinessPlatformModule {
+  return {
+    id: businessModule.id,
+    code: businessModule.moduleCode,
+    name: businessModule.moduleName,
+    path: businessModule.entryUrl,
+    description: businessModule.remark ?? '',
+    status: businessModule.status === 'ACTIVE' ? 'ENABLED' : 'DISABLED',
+    updatedAt:
+      businessModule.updateTime ??
+      businessModule.createTime ??
+      new Date().toISOString()
   };
 }
 

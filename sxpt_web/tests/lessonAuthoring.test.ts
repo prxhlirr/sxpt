@@ -54,14 +54,28 @@ describe('后台教案编排页面', () => {
   it('展示录制页面、动作、选择器、时长与逐步讲解信息', () => {
     const editor = source('src/views/admin/LessonEditorView.vue');
     const preview = source('src/views/admin/RecordingPreviewView.vue');
+    const playback = source('src/components/lesson/LessonPlaybackPlayer.vue');
 
     ['pageTitle', 'actionLabel', 'selector', 'durationSeconds'].forEach((field) => {
       expect(editor).toContain(field);
-      expect(preview).toContain(field);
+      expect(playback).toContain(field);
     });
-    expect(preview).toContain('上一步');
-    expect(preview).toContain('下一步');
-    expect(preview).toContain('返回编辑');
+    expect(playback).toContain('上一步');
+    expect(playback).toContain('下一步');
+    expect(preview).toContain('<LessonPlaybackPlayer');
+    expect(preview).toContain("'返回编辑'");
+  });
+
+  it('录制时使用可收起抽屉和边缘工具坞，元素选择提示可换角落', () => {
+    const editor = source('src/views/admin/LessonEditorView.vue');
+
+    expect(editor).toContain('const showStagePanel = ref(false)');
+    expect(editor).toContain('toggleStagePanel');
+    expect(editor).toContain('toggleConfigPanel');
+    expect(editor).toContain('closeAuthoringDrawers();');
+    expect(editor).toContain('aria-label="编排快捷工具坞"');
+    expect(editor).toContain('cyclePickerToolbarPosition');
+    expect(editor).toContain('换个角落');
   });
 
   it('发布中心可直接进入教师讲解并返回发布中心', () => {
@@ -85,5 +99,12 @@ describe('后台教案编排页面', () => {
     expect(editor).toContain('发布校验');
     expect(editor).toContain('下一步：考试设置');
     expect(editor).toContain("name: 'exam-setup'");
+  });
+
+  it('直接进入编排页时同步后端平台和业务模块', () => {
+    const editor = source('src/views/admin/LessonEditorView.vue');
+
+    expect(editor).toContain('await store.syncBusinessPlatforms()');
+    expect(editor).toContain('basicForm.businessPlatformModuleId');
   });
 });

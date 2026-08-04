@@ -17,6 +17,13 @@ interface NavigationItem {
 const route = useRoute();
 const store = useTrainingStore();
 const runtimeContextStore = useRuntimeContextStore();
+const hiddenNavigationMenuCodes = new Set([
+  'lesson-editor',
+  'exam-setup',
+  'group-setup',
+  'exam-data',
+  'publish-center'
+]);
 const immersiveRoute = computed(() =>
   ['lesson-editor', 'lesson-recording', 'student-task-runner'].includes(
     String(route.name ?? '')
@@ -34,15 +41,6 @@ const roleOptions: Array<{
   { key: 'student', label: '学生端', shortLabel: '学', home: '/student/tasks' }
 ];
 
-const activeLessonId = computed(() => {
-  const routeLessonId = String(route.params.lessonId ?? '');
-  return (
-    store.state.lessons.find((lesson) => lesson.id === routeLessonId)?.id ??
-    store.state.lessons[0]?.id ??
-    ''
-  );
-});
-
 const navigation = computed<NavigationItem[]>(() => {
   const staticItems = buildStaticNavigation();
   const runtimeItems = buildRuntimeNavigation(runtimeContextStore.getVisibleMenus());
@@ -59,7 +57,6 @@ watch(
 );
 
 function buildStaticNavigation(): NavigationItem[] {
-  const lessonId = activeLessonId.value;
   if (store.state.currentRole === 'teacher') {
     return [
       { label: '教学工作台', icon: '01', to: '/teacher/dashboard' },
@@ -85,46 +82,11 @@ function buildStaticNavigation(): NavigationItem[] {
     { label: '角色权限', icon: '09', to: '/admin/basic/role-permissions', group: 'basic-config' },
     { label: '字典配置', icon: '10', to: '/admin/basic/dict-items', group: 'basic-config' },
     { label: '教案管理', icon: '11', to: '/admin/lessons' },
-    {
-      label: '教案编排',
-      icon: '12',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/editor`
-        : '/admin/lessons'
-    },
-    {
-      label: '考试设置',
-      icon: '13',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/exam`
-        : '/admin/lessons'
-    },
-    {
-      label: '分组设置',
-      icon: '14',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/groups`
-        : '/admin/lessons'
-    },
-    {
-      label: '考试数据',
-      icon: '15',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/data`
-        : '/admin/lessons'
-    },
     { label: '平台接入', icon: '16', to: '/admin/data-prepare/systems', group: 'data-prepare' },
     { label: '业务模块', icon: '17', to: '/admin/data-prepare/modules', group: 'data-prepare' },
     { label: '模板管理', icon: '18', to: '/admin/data-prepare/templates', group: 'data-prepare' },
     { label: '策略管理', icon: '19', to: '/admin/data-prepare/strategies', group: 'data-prepare' },
-    { label: '批次准备', icon: '20', to: '/admin/data-prepare', group: 'data-prepare' },
-    {
-      label: '发布中心',
-      icon: '21',
-      to: lessonId
-        ? `/admin/lessons/${encodeURIComponent(lessonId)}/publish`
-      : '/admin/lessons'
-    }
+    { label: '批次准备', icon: '20', to: '/admin/data-prepare', group: 'data-prepare' }
   ];
 }
 
@@ -142,7 +104,10 @@ async function loadRuntimeMenus() {
  */
 function buildRuntimeNavigation(menus: SysMenuConfig[]): NavigationItem[] {
   return menus
-    .filter((menu) => Boolean(menu.routePath))
+    .filter(
+      (menu) =>
+        Boolean(menu.routePath) && !hiddenNavigationMenuCodes.has(menu.menuCode)
+    )
     .map((menu, index) => ({
       label: menu.menuName,
       icon: menu.icon || String(menu.sortNo || index + 1).padStart(2, '0'),
@@ -218,7 +183,7 @@ const currentRole = computed(
     </aside>
 
     <section class="app-workspace">
-      <header>
+      <header class="topbar">
         <div>
           <span class="breadcrumb">业务实训平台 / {{ currentRole.label }}</span>
           <strong>{{ String(route.meta.title ?? '工作台') }}</strong>

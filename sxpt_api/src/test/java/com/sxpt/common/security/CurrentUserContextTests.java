@@ -5,6 +5,9 @@ import com.sxpt.common.exception.BusinessException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
+import java.util.Collections;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -64,5 +67,25 @@ class CurrentUserContextTests {
                 .extracting("code")
                 .isEqualTo(ApiResultCode.UNAUTHORIZED.getCode());
         assertThat(CurrentUserContext.get()).isNotPresent();
+    }
+
+    @Test
+    void shouldMatchUserTypeAndRoleCodesIgnoringCase() {
+        CurrentUserContext.CurrentUser user = new CurrentUserContext.CurrentUser(
+                "10001",
+                "tenant-001",
+                "teacher001",
+                "张老师",
+                "teacher",
+                null,
+                "T001",
+                Arrays.asList("COURSE_OWNER", " expert "),
+                Collections.emptyList(),
+                Collections.emptyList());
+
+        assertThat(user.hasAnyRole("TEACHER")).isTrue();
+        assertThat(user.hasAnyRole("ADMIN", "EXPERT")).isTrue();
+        assertThat(user.hasAnyRole("STUDENT")).isFalse();
+        assertThat(user.hasAnyRole()).isFalse();
     }
 }

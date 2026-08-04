@@ -4,12 +4,89 @@ import {
   TrainingApiRequestError,
   authApi,
   dataPrepareApi,
-  isDataPrepareConfigIncompleteError
+  isDataPrepareConfigIncompleteError,
+  trainingWorkspaceApi,
+  type AuthSession
 } from './trainingApi';
+import { createMockTrainingState } from '../data/mockSeed';
 
 afterEach(() => {
   authApi.logout();
   vi.unstubAllGlobals();
+});
+
+function createSession(role: 'teacher' | 'student'): AuthSession {
+  return {
+    token: `token-${role}`,
+    tokenType: 'Bearer',
+    expiresIn: 3600,
+    issuedAt: Date.now(),
+    user: {
+      userId: `${role}-001`,
+      tenantId: 'tenant-001',
+      username: `${role}01`,
+      displayName: role === 'teacher' ? '张老师' : '测试学生',
+      userType: role.toUpperCase(),
+      roles: [role],
+      orgIds: []
+    }
+  };
+}
+
+describe('登录用户工作区接口', () => {
+  it('教师从完整教学工作区接口加载数据', async () => {
+    const state = createMockTrainingState();
+    state.currentRole = 'teacher';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        code: 200,
+        message: 'OK',
+        result: state,
+        timestamp: Date.now()
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await trainingWorkspaceApi.load(createSession('teacher'));
+
+    expect(result?.currentRole).toBe('teacher');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('api/v1/training/workspace'),
+      expect.objectContaining({ headers: expect.any(Headers) })
+    );
+    expect(fetchMock.mock.calls[0][0]).not.toContain('/student/');
+  });
+
+  it('学生只向个人工作区接口保存学习进度', async () => {
+    const state = createMockTrainingState();
+    state.currentRole = 'student';
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        code: 200,
+        message: 'OK',
+        result: state,
+        timestamp: Date.now()
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await trainingWorkspaceApi.save(createSession('student'), state);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('api/v1/student/training/workspace'),
+      expect.objectContaining({
+        method: 'PUT',
+        body: JSON.stringify(state),
+        headers: expect.any(Headers)
+      })
+    );
+  });
 });
 
 describe('开发快捷登录', () => {
@@ -21,17 +98,17 @@ describe('开发快捷登录', () => {
         code: 200,
         message: 'OK',
         result: {
-          token: 'token-expert',
+          token: 'token-teacher-admin',
           tokenType: 'Bearer',
           expiresIn: 3600,
           user: {
-            userId: 'user-demo-expert-01',
+            userId: 'user-demo-teacher-02',
             tenantId: 'demo-tenant',
-            username: 'expert01',
+            username: 'teacher02',
             displayName: '孙专家',
-            userType: 'EXPERT',
-            roles: ['expert'],
-            orgIds: ['org-demo-expert-group']
+            userType: 'TEACHER',
+            roles: ['admin', 'teacher'],
+            orgIds: ['org-demo-class-b']
           }
         },
         timestamp: Date.now()
@@ -41,13 +118,13 @@ describe('开发快捷登录', () => {
 
     const session = await authApi.useDevelopmentSession('admin');
 
-    expect(session.user.username).toBe('expert01');
+    expect(session.user.username).toBe('teacher02');
     expect(authApi.getPortalRole(session)).toBe('admin');
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining('api/v1/auth/login'),
       expect.objectContaining({
         method: 'POST',
-        body: expect.stringContaining('"username":"expert01"')
+        body: expect.stringContaining('"username":"teacher02"')
       })
     );
   });

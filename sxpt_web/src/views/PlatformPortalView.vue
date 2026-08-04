@@ -74,9 +74,9 @@ async function openTrainingPlatform() {
 
 async function enterDevelopmentPortal(role: PortalRole) {
   try {
-    await authApi.useDevelopmentSession(role);
-    store.setRole(role);
-    await router.push(authApi.getHomePath());
+    const session = await authApi.useDevelopmentSession(role);
+    await store.initializeAuthenticatedWorkspace(session);
+    await router.push(authApi.getHomePath(session));
   } catch (error) {
     feedback.value =
       error instanceof Error ? error.message : '开发快捷入口不可用，请使用真实账号登录';

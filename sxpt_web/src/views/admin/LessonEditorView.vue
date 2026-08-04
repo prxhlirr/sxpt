@@ -33,6 +33,7 @@ import {
 } from '../../utils/elementSelector';
 
 type PanelTab = 'stage' | 'step' | 'lesson' | 'publish';
+type PickerToolbarPosition = 'top-right' | 'bottom-right' | 'bottom-left' | 'top-left';
 type TargetKey =
   | 'create'
   | 'subject'
@@ -118,10 +119,11 @@ const selectedStageId = ref('');
 const selectedStepId = ref('');
 const recording = ref(false);
 const controlsCollapsed = ref(false);
-const showStagePanel = ref(true);
+const showStagePanel = ref(false);
 const showConfigPanel = ref(false);
 const previewEnabled = ref(true);
 const panelTab = ref<PanelTab>('stage');
+const pickerToolbarPosition = ref<PickerToolbarPosition>('top-right');
 const feedback = ref('');
 const feedbackTone = ref<'success' | 'danger'>('success');
 const activityText = ref(
@@ -439,11 +441,23 @@ watch(
   { flush: 'post' }
 );
 
-onMounted(() => {
+onMounted(async () => {
   window.addEventListener('resize', updateHighlightPosition);
   window.addEventListener('message', handleBusinessPlatformMessage);
   window.addEventListener('keydown', handleElementPickerKeydown);
   void nextTick(updateHighlightPosition);
+  if (!store.remote.enabled) return;
+  try {
+    await store.syncBusinessPlatforms();
+    const current = lesson.value;
+    if (current) {
+      basicForm.businessPlatformId = current.businessPlatformId;
+      basicForm.businessPlatformModuleId = current.businessPlatformModuleId;
+    }
+  } catch (error) {
+    activityText.value =
+      error instanceof Error ? error.message : '业务平台同步失败，请稍后重试。';
+  }
 });
 
 onBeforeUnmount(() => {
@@ -531,6 +545,7 @@ function startElementPick(targetStepId = '') {
   pickTargetStepId.value = targetStepId;
   pickedElementLabel.value = '';
   elementPickerStyle.value = {};
+  closeAuthoringDrawers();
   elementPicking.value = true;
   if (!useEmbeddedBusinessSimulation.value) {
     captureFrameRef.value?.startElementPick();
@@ -835,6 +850,36 @@ function showFeedback(message: string, tone: 'success' | 'danger' = 'success') {
 function openPanel(tab: PanelTab) {
   panelTab.value = tab;
   showConfigPanel.value = true;
+  showStagePanel.value = false;
+}
+
+function toggleStagePanel() {
+  showStagePanel.value = !showStagePanel.value;
+  if (showStagePanel.value) showConfigPanel.value = false;
+}
+
+function toggleConfigPanel(tab: PanelTab = 'step') {
+  if (showConfigPanel.value && panelTab.value === tab) {
+    showConfigPanel.value = false;
+    return;
+  }
+  openPanel(tab);
+}
+
+function closeAuthoringDrawers() {
+  showStagePanel.value = false;
+  showConfigPanel.value = false;
+}
+
+function cyclePickerToolbarPosition() {
+  const positions: PickerToolbarPosition[] = [
+    'top-right',
+    'bottom-right',
+    'bottom-left',
+    'top-left'
+  ];
+  const currentIndex = positions.indexOf(pickerToolbarPosition.value);
+  pickerToolbarPosition.value = positions[(currentIndex + 1) % positions.length];
 }
 
 function saveBasicInformation() {
@@ -1028,7 +1073,7 @@ async function startRecording() {
       effectiveBusinessPlatformUrl.value
     );
     recording.value = true;
-    showConfigPanel.value = false;
+    closeAuthoringDrawers();
     captureFrameRef.value?.setRecording(true);
     await nextTick();
     startElementPick();
@@ -1243,6 +1288,7 @@ function numberValue(event: Event) {
         v-if="!useEmbeddedBusinessSimulation && businessPlatform"
         ref="captureFrameRef"
         class="configured-business-frame"
+        fit-mode="fill"
         :src="effectiveBusinessPlatformUrl"
         :title="`${businessPlatform.name}${businessPlatformModule ? ` / ${businessPlatformModule.name}` : ''}业务界面`"
         @frame-load="activityText = `业务模块“${businessPlatformModule?.name ?? businessPlatform.name}”已加载，可开始录制。`"
@@ -1447,10 +1493,16 @@ function numberValue(event: Event) {
       <span>{{ pickedElementLabel }}</span>
     </div>
 
-    <div v-if="elementPicking" class="element-picker-toolbar">
+    <div
+      v-if="elementPicking"
+      class="element-picker-toolbar"
+      :class="`position-${pickerToolbarPosition}`"
+    >
       <span>⌖ 元素选择模式</span>
       <strong>移动鼠标预览，点击任意业务元素进行绑定</strong>
       <small>录制中绑定后会自动继续选取；按 Esc 可结束连续选取</small>
+      <button type="button" @click="cyclePickerToolbarPosition">换个角落</button>
+      <button v-if="recording" type="button" @click="pauseRecording">暂停录制</button>
       <button type="button" @click="cancelElementPick">结束选取</button>
     </div>
 
@@ -1489,7 +1541,10 @@ function numberValue(event: Event) {
       </div>
     </div>
 
-    <header v-if="!controlsCollapsed" class="authoring-commandbar">
+    <header
+      v-if="!controlsCollapsed && !recording && !elementPicking && !showStagePanel && !showConfigPanel"
+      class="authoring-commandbar"
+    >
       <div class="authoring-heading">
         <span class="recording-dot" :class="{ active: recording }" />
         <div>
@@ -1559,7 +1614,10 @@ function numberValue(event: Event) {
           <small>FLOW & STEPS</small>
           <h2>教学点与节点</h2>
         </div>
-        <button type="button" :disabled="configurationLocked" @click="addStage">＋ 教学点</button>
+        <div class="panel-header-actions">
+          <button type="button" :disabled="configurationLocked" @click="addStage">＋ 教学点</button>
+          <button type="button" aria-label="关闭教学点目录" @click="showStagePanel = false">×</button>
+        </div>
       </div>
       <div class="stage-list">
         <article
@@ -1964,30 +2022,47 @@ function numberValue(event: Event) {
       </div>
     </aside>
 
-    <div v-if="!controlsCollapsed" class="quick-controls">
-      <button type="button" :class="{ active: showStagePanel }" @click="showStagePanel = !showStagePanel">
-        {{ showStagePanel ? '隐藏教学点' : '显示教学点' }}
+    <div
+      v-if="!controlsCollapsed && !elementPicking && !showStagePanel && !showConfigPanel"
+      class="quick-controls"
+      aria-label="编排快捷工具坞"
+    >
+      <button v-if="recording" type="button" class="recording-action" @click="startElementPick()">
+        ⌖ 继续选取
       </button>
-      <button type="button" :class="{ active: showConfigPanel }" @click="showConfigPanel = !showConfigPanel">
-        {{ showConfigPanel ? '隐藏配置' : '节点配置' }}
+      <button v-if="recording" type="button" @click="pauseRecording">Ⅱ 暂停录制</button>
+      <button type="button" @click="toggleStagePanel">
+        ☰ 教学点
+      </button>
+      <button type="button" @click="toggleConfigPanel('step')">
+        ◆ 节点配置
       </button>
       <button type="button" :class="{ active: previewEnabled }" @click="previewEnabled = !previewEnabled">
-        {{ previewEnabled ? '隐藏蒙版' : '显示蒙版' }}
+        {{ previewEnabled ? '◉ 隐藏蒙版' : '○ 显示蒙版' }}
       </button>
-      <button type="button" @click="openPanel('lesson')">教案设置</button>
-      <button type="button" @click="openPanel('publish')">发布校验</button>
+      <button type="button" @click="toggleConfigPanel('lesson')">⚙ 教案设置</button>
+      <button type="button" @click="toggleConfigPanel('publish')">✓ 发布校验</button>
     </div>
 
-    <footer v-if="!controlsCollapsed" class="authoring-status" aria-live="polite">
+    <footer
+      v-if="!controlsCollapsed && !recording && !elementPicking && !showStagePanel && !showConfigPanel"
+      class="authoring-status"
+      aria-live="polite"
+    >
       <span>{{ activityText }}</span>
       <strong>{{ statusSummary }}</strong>
     </footer>
 
-    <button class="collapse-controls" type="button" @click="controlsCollapsed = !controlsCollapsed">
-      {{ controlsCollapsed ? '展开编排操作' : '隐藏全部' }}
+    <button
+      v-if="!elementPicking && !showStagePanel && !showConfigPanel"
+      class="collapse-controls"
+      type="button"
+      @click="controlsCollapsed = !controlsCollapsed"
+    >
+      {{ controlsCollapsed ? '展开工具' : '隐藏工具' }}
     </button>
 
-    <div v-if="feedback && !controlsCollapsed" class="authoring-toast" :class="feedbackTone">
+    <div v-if="feedback && !controlsCollapsed && !elementPicking" class="authoring-toast" :class="feedbackTone">
       {{ feedback }}
       <button type="button" aria-label="关闭提示" @click="feedback = ''">×</button>
     </div>
@@ -2744,8 +2819,9 @@ function numberValue(event: Event) {
 }
 
 .stage-panel {
-  top: 73px;
-  bottom: 61px;
+  z-index: 30;
+  top: 12px;
+  bottom: 12px;
   left: 12px;
   width: 310px;
   overflow: hidden;
@@ -2781,6 +2857,18 @@ function numberValue(event: Event) {
   border-radius: 6px;
   padding: 0 8px;
   font-size: 8px;
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panel-header-actions button:last-child {
+  width: 28px;
+  padding: 0;
+  font-size: 16px;
 }
 
 .stage-list {
@@ -2956,9 +3044,10 @@ function numberValue(event: Event) {
 }
 
 .config-panel {
-  top: 73px;
+  z-index: 30;
+  top: 12px;
   right: 12px;
-  bottom: 61px;
+  bottom: 12px;
   width: 390px;
   overflow: hidden;
 }
@@ -3205,10 +3294,18 @@ function numberValue(event: Event) {
 }
 
 .quick-controls {
-  right: 117px;
-  bottom: 13px;
+  top: 50%;
+  right: 12px;
   display: flex;
+  flex-direction: column;
   gap: 5px;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 11px;
+  padding: 5px;
+  background: rgb(30 41 57 / 44%);
+  box-shadow: 0 12px 30px rgb(18 28 42 / 18%);
+  backdrop-filter: blur(12px);
+  transform: translateY(-50%);
 }
 
 .quick-controls button,
@@ -3222,6 +3319,19 @@ function numberValue(event: Event) {
   box-shadow: 0 6px 17px rgb(25 36 51 / 13%);
   backdrop-filter: blur(10px);
   font-size: 8px;
+}
+
+.quick-controls button {
+  display: flex;
+  width: 82px;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+}
+
+.quick-controls .recording-action {
+  border-color: rgb(156 140 255 / 58%);
+  background: rgb(91 73 224 / 90%);
 }
 
 .quick-controls button.active {
@@ -3327,18 +3437,36 @@ function numberValue(event: Event) {
   position: absolute;
   z-index: 45;
   top: 14px;
-  left: 50%;
+  right: 14px;
   display: flex;
+  max-width: min(560px, calc(100% - 28px));
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   border: 1px solid rgb(255 255 255 / 38%);
   border-radius: 10px;
-  padding: 8px 9px 8px 12px;
+  padding: 6px 7px 6px 10px;
   color: #fff;
   background: rgb(67 53 171 / 94%);
   box-shadow: 0 16px 36px rgb(40 28 127 / 30%);
-  transform: translateX(-50%);
   backdrop-filter: blur(12px);
+}
+
+.element-picker-toolbar.position-bottom-right {
+  top: auto;
+  right: 14px;
+  bottom: 14px;
+}
+
+.element-picker-toolbar.position-bottom-left {
+  top: auto;
+  right: auto;
+  bottom: 14px;
+  left: 14px;
+}
+
+.element-picker-toolbar.position-top-left {
+  right: auto;
+  left: 14px;
 }
 
 .element-picker-toolbar span {
@@ -3353,9 +3481,7 @@ function numberValue(event: Event) {
 }
 
 .element-picker-toolbar small {
-  color: rgb(255 255 255 / 72%);
-  font-size: 8px;
-  white-space: nowrap;
+  display: none;
 }
 
 .element-picker-toolbar button {
@@ -3725,9 +3851,9 @@ function numberValue(event: Event) {
 
   .stage-panel,
   .config-panel {
-    top: 69px;
+    top: 8px;
     right: 8px;
-    bottom: 55px;
+    bottom: 8px;
     left: 8px;
     width: auto;
   }
@@ -3737,12 +3863,23 @@ function numberValue(event: Event) {
   }
 
   .quick-controls {
-    right: 112px;
-    left: 8px;
-    overflow-x: auto;
+    right: 8px;
   }
 
-  .quick-controls button:nth-child(n + 4) {
+  .quick-controls button {
+    width: 74px;
+    padding-inline: 7px;
+  }
+
+  .quick-controls button:nth-child(n + 6) {
+    display: none;
+  }
+
+  .element-picker-toolbar {
+    gap: 5px;
+  }
+
+  .element-picker-toolbar strong {
     display: none;
   }
 

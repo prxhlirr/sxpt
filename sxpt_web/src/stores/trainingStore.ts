@@ -385,6 +385,20 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         );
         if (replacement) {
           lesson.businessPlatformId = replacement.id;
+          const previousModule = previous?.modules.find(
+            (businessModule) =>
+              businessModule.id === lesson.businessPlatformModuleId
+          );
+          const replacementModule = replacement.modules.find(
+            (businessModule) =>
+              businessModule.id === lesson.businessPlatformModuleId ||
+              (previousModule &&
+                businessModule.code.trim().toUpperCase() ===
+                  previousModule.code.trim().toUpperCase())
+          );
+          if (replacementModule) {
+            lesson.businessPlatformModuleId = replacementModule.id;
+          }
         }
       });
       state.businessPlatforms.splice(
@@ -1274,12 +1288,15 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     state.studentTasks = state.studentTasks.filter(
       (task) =>
         task.publishedTaskId !== id ||
+        task.mode !== mode ||
         assignedStudentIds.has(task.studentId)
     );
     membersByStudent.forEach((member) => {
       const existingAssignment = state.studentTasks.find(
         (task) =>
-          task.publishedTaskId === id && task.studentId === member.studentId
+          task.publishedTaskId === id &&
+          task.mode === mode &&
+          task.studentId === member.studentId
       );
       if (existingAssignment) {
         existingAssignment.studentName = member.studentName;
@@ -1370,7 +1387,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         binding.taskStepIdsByStepId;
       if (mode !== 'LEARNING') {
         const assignedStudentTasks = state.studentTasks.filter(
-          (task) => task.publishedTaskId === published.id
+          (task) =>
+            task.publishedTaskId === published.id && task.mode === mode
         );
         published.dataCount = await runRemote('自动准备原平台初始数据', () =>
           backend.prepareInitialDataForPublishedTask(
@@ -1384,7 +1402,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       published.syncStatus = 'SYNCED';
       delete published.syncError;
       state.studentTasks
-        .filter((task) => task.publishedTaskId === published.id)
+        .filter(
+          (task) =>
+            task.publishedTaskId === published.id && task.mode === mode
+        )
         .forEach((task) => {
           task.syncStatus = 'SYNCED';
           delete task.syncError;
@@ -1396,7 +1417,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       published.syncError =
         error instanceof Error ? error.message : `${mode}任务发布失败`;
       state.studentTasks
-        .filter((task) => task.publishedTaskId === published.id)
+        .filter(
+          (task) =>
+            task.publishedTaskId === published.id && task.mode === mode
+        )
         .forEach((task) => {
           task.syncStatus = 'FAILED';
           task.syncError = published.syncError;

@@ -45,7 +45,23 @@ export interface TeachUserOrg extends StatusRecord {
   relationType: string;
 }
 
+export interface StudentDirectoryItem {
+  studentId: string;
+  studentName: string;
+  username: string;
+  studentNo?: string;
+  unitId?: string;
+  unitName?: string;
+}
+
 export const usersApi = {
+  listStudents() {
+    return apiRequest<StudentDirectoryItem[]>({
+      method: 'GET',
+      url: '/user/students'
+    });
+  },
+
   listUsers(tenantId: string) {
     return apiRequest<TeachUser[]>({
       method: 'GET',

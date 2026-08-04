@@ -7,6 +7,7 @@ import {
   buildPublishedDataPrepareSnapshot,
   distributedScore,
   findOrganizationByIdOrCode,
+  mapBusinessModule,
   mapConnectorSystem,
   mapStepActionType,
   safeCode,
@@ -25,6 +26,7 @@ const connectorApiMock = vi.hoisted(() => ({
 const dataPrepareApiMock = vi.hoisted(() => ({
   listActiveBusinessModules: vi.fn(),
   listBusinessModules: vi.fn(),
+  listAllBusinessModules: vi.fn(),
   listActiveStrategies: vi.fn(),
   listTemplates: vi.fn(),
   listActiveTemplatesByModuleScene: vi.fn(),
@@ -45,6 +47,7 @@ vi.mock('./trainingApi', () => ({
 describe('后端训练接口映射', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dataPrepareApiMock.listAllBusinessModules.mockResolvedValue([]);
   });
 
   it('把后端 ACTIVE 平台映射为前端 ENABLED 并保留本地模块', () => {
@@ -91,6 +94,75 @@ describe('后端训练接口映射', () => {
       description: '本地维护的说明'
     });
     expect(mapped.modules).toHaveLength(1);
+  });
+
+  it('同步已接入平台时读取后端业务模块，使 OA 可以用于教案编排', async () => {
+    connectorApiMock.listSystems.mockResolvedValue([
+      {
+        id: 'origin-oa-system',
+        tenantId: 'demo-tenant',
+        systemCode: 'OA_DEMO',
+        systemName: 'OA 协同办公系统',
+        systemType: 'OA',
+        baseUrl: 'http://127.0.0.1:5174/oa',
+        authType: 'LAUNCH_TOKEN',
+        status: 'ACTIVE',
+        createTime: '2026-08-04T10:00:00',
+        updateTime: '2026-08-04T11:00:00'
+      }
+    ]);
+    dataPrepareApiMock.listAllBusinessModules.mockResolvedValue([
+      {
+        id: 'module-oa-approval',
+        tenantId: 'demo-tenant',
+        connectorSystemId: 'origin-oa-system',
+        moduleCode: 'OA_APPROVAL',
+        moduleName: 'OA 审批',
+        entryUrl: '/oa/approvals',
+        remark: 'OA 审批流程',
+        status: 'ACTIVE',
+        updateTime: '2026-08-04T11:00:00'
+      }
+    ]);
+
+    const platforms = await backendTrainingApi.listBusinessPlatforms([]);
+
+    expect(dataPrepareApiMock.listAllBusinessModules).toHaveBeenCalledWith({
+      tenantId: 'demo-tenant',
+      connectorSystemId: 'origin-oa-system'
+    });
+    expect(platforms).toEqual([
+      expect.objectContaining({
+        code: 'OA_DEMO',
+        status: 'ENABLED',
+        modules: [
+          expect.objectContaining({
+            id: 'module-oa-approval',
+            code: 'OA_APPROVAL',
+            path: '/oa/approvals',
+            status: 'ENABLED'
+          })
+        ]
+      })
+    ]);
+  });
+
+  it('把停用的后端业务模块映射为不可选模块', () => {
+    expect(
+      mapBusinessModule({
+        id: 'module-disabled',
+        tenantId: 'demo-tenant',
+        connectorSystemId: 'origin-oa-system',
+        moduleCode: 'OA_ARCHIVE',
+        moduleName: 'OA 归档',
+        entryUrl: '/oa/archive',
+        status: 'DISABLED'
+      })
+    ).toMatchObject({
+      code: 'OA_ARCHIVE',
+      path: '/oa/archive',
+      status: 'DISABLED'
+    });
   });
 
   it('发布任务时按不区分大小写的组织编码复用已有班级', () => {

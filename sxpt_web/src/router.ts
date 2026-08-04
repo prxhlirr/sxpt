@@ -224,9 +224,15 @@ export const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  if (to.path === '/login') {
+    authApi.logout();
+    useTrainingStore().clearAuthenticatedWorkspace();
+    useRuntimeContextStore().resetRuntimeContext();
+    return true;
+  }
   const session = authApi.getSession();
   if (to.meta.public || to.path === '/platforms') {
-    return session && to.path === '/login' ? '/platforms' : true;
+    return true;
   }
   if (!session) {
     return {

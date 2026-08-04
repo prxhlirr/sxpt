@@ -157,12 +157,52 @@ public final class CurrentUserContext {
             return roleCodes;
         }
 
+        /**
+         * 判断当前用户是否具备任一指定角色。
+         *
+         * 同时兼容用户类型和角色编码两种身份来源，并忽略大小写与首尾空格。
+         * 这样授权判断不会依赖调用方了解账号的具体角色存储方式。
+         *
+         * @param expectedRoleCodes 允许访问的角色编码
+         * @return 命中任一角色时返回 true
+         */
+        public boolean hasAnyRole(String... expectedRoleCodes) {
+            if (expectedRoleCodes == null || expectedRoleCodes.length == 0) {
+                return false;
+            }
+            if (matchesAnyRole(userType, expectedRoleCodes)) {
+                return true;
+            }
+            for (String roleCode : roleCodes) {
+                if (matchesAnyRole(roleCode, expectedRoleCodes)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         public List<String> getOrgIds() {
             return orgIds;
         }
 
         public List<IdentityBindingSummary> getIdentityBindings() {
             return identityBindings;
+        }
+
+        private static boolean matchesAnyRole(
+                String actualRoleCode,
+                String... expectedRoleCodes) {
+            if (!StringUtils.hasText(actualRoleCode)) {
+                return false;
+            }
+            String normalizedActualRoleCode = actualRoleCode.trim();
+            for (String expectedRoleCode : expectedRoleCodes) {
+                if (StringUtils.hasText(expectedRoleCode)
+                        && normalizedActualRoleCode.equalsIgnoreCase(expectedRoleCode.trim())) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private static List<String> immutableCopy(List<String> values) {

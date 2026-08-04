@@ -7,24 +7,31 @@ import type {
 import { createBusinessSnapshotDocument } from '../../utils/businessSnapshot';
 import {
   calculateContainedViewport,
+  mapRectToFilledViewport,
   mapRectToContainedViewport,
   normalizeViewport
 } from '../../utils/viewportScaling';
 
-const props = defineProps<{
-  snapshot?: BusinessPageSnapshot;
-  fallbackUrl?: string;
-  selector?: string;
-  selectorCandidates?: string[];
-  rect?: CaptureRect;
-  recordedViewport?: {
-    width: number;
-    height: number;
-  };
-  interactive?: boolean;
-  clearFormValues?: boolean;
-  title: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    snapshot?: BusinessPageSnapshot;
+    fallbackUrl?: string;
+    selector?: string;
+    selectorCandidates?: string[];
+    rect?: CaptureRect;
+    recordedViewport?: {
+      width: number;
+      height: number;
+    };
+    interactive?: boolean;
+    clearFormValues?: boolean;
+    fitMode?: 'fill' | 'contain';
+    title: string;
+  }>(),
+  {
+    fitMode: 'fill'
+  }
+);
 
 interface BusinessActionPayload {
   actionType: 'click' | 'input' | 'select' | 'submit';
@@ -80,6 +87,7 @@ const resolutionViewport = computed(() =>
 );
 const containedViewport = computed(() => {
   if (
+    props.fitMode !== 'contain' ||
     !resolutionViewport.value ||
     containerSize.value.width <= 0 ||
     containerSize.value.height <= 0
@@ -92,6 +100,14 @@ const containedViewport = computed(() => {
   );
 });
 const frameViewportStyle = computed(() => {
+  if (props.fitMode === 'fill') {
+    return {
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      transform: 'none'
+    };
+  }
   const viewport = resolutionViewport.value;
   const placement = containedViewport.value;
   if (!viewport || !placement) return undefined;
@@ -115,11 +131,10 @@ const recordedRectStyle = computed(() => {
   ) {
     return undefined;
   }
-  const mapped = mapRectToContainedViewport(
-    props.rect,
-    viewport,
-    containerSize.value
-  );
+  const mapped =
+    props.fitMode === 'fill'
+      ? mapRectToFilledViewport(props.rect, viewport, containerSize.value)
+      : mapRectToContainedViewport(props.rect, viewport, containerSize.value);
   return {
     left: `${mapped.left}px`,
     top: `${mapped.top}px`,
@@ -280,7 +295,8 @@ onBeforeUnmount(() => {
     :class="{
       'is-interactive': interactive && frameReady,
       'is-loading': interactive && !frameReady,
-      'has-recorded-viewport': Boolean(resolutionViewport)
+      'has-recorded-viewport': Boolean(resolutionViewport),
+      'fills-viewport': fitMode === 'fill'
     }"
   >
     <iframe
@@ -351,6 +367,16 @@ onBeforeUnmount(() => {
   position: absolute;
   max-width: none;
   max-height: none;
+}
+
+.business-snapshot-frame.fills-viewport iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  transform: none;
 }
 
 .business-snapshot-frame.is-interactive iframe {

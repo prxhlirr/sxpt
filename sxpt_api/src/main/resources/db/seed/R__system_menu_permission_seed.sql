@@ -2,7 +2,7 @@
 -- 业务边界：
 -- 1. 菜单来源对齐前端 AppShell 与 router 中已经存在的页面入口。
 -- 2. 动态教案路由统一落到 /admin/lessons 稳定入口，避免侧边栏生成不可用的 :lessonId 链接。
--- 3. 管理员授予全部菜单权限，教师授予教案编排和教学运行菜单，学生授予考试任务与成绩反馈菜单。
+-- 3. 管理员授予全部菜单权限，教师授予教案管理和教学运行菜单，学生授予考试任务与成绩反馈菜单。
 
 SET client_encoding = 'UTF8';
 
@@ -13,7 +13,7 @@ INSERT INTO teach_role (
     create_by, create_time, update_by, update_time, status, deleted
 ) VALUES
     ('role-demo-admin', 'demo-tenant', 'admin', '管理员', '查看全部菜单并维护平台基础配置、教案、数据准备和发布运行。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
-    ('role-demo-teacher', 'demo-tenant', 'teacher', '教师', '查看教案编排、考试设置、发布和评阅相关菜单。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('role-demo-teacher', 'demo-tenant', 'teacher', '教师', '查看教案管理、教学运行和评阅相关菜单。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('role-demo-student', 'demo-tenant', 'student', '学生', '查看考试任务、任务办理和成绩反馈相关菜单。', 'seed', now(), 'seed', now(), 'ACTIVE', false)
 ON CONFLICT (tenant_id, role_code) WHERE deleted = false
 DO UPDATE SET
@@ -108,6 +108,87 @@ DO UPDATE SET
     update_time = now(),
     status = 'ACTIVE';
 
+INSERT INTO teach_user_role (
+    id, tenant_id, user_id, role_id, grant_source,
+    create_by, create_time, update_by, update_time, status, deleted
+)
+SELECT
+    'ur-demo-teacher-02-admin',
+    role.tenant_id,
+    user_account.id,
+    role.id,
+    'SEED',
+    'seed',
+    now(),
+    'seed',
+    now(),
+    'ACTIVE',
+    false
+FROM teach_role role
+JOIN teach_user user_account
+  ON user_account.tenant_id = role.tenant_id
+ AND user_account.username = 'teacher02'
+ AND user_account.deleted = false
+WHERE role.tenant_id = 'demo-tenant'
+  AND role.role_code = 'admin'
+  AND role.deleted = false
+ON CONFLICT (tenant_id, user_id, role_id) WHERE deleted = false
+DO UPDATE SET
+    grant_source = EXCLUDED.grant_source,
+    update_by = 'seed',
+    update_time = now(),
+    status = 'ACTIVE';
+
+-- 教案内部流程由“教案管理”的操作入口进入，不再作为一级侧栏菜单重复展示。
+UPDATE sys_role_permission role_permission
+SET status = 'DISABLED',
+    deleted = true,
+    update_by = 'seed',
+    update_time = now()
+FROM sys_permission_config permission
+WHERE role_permission.tenant_id = 'demo-tenant'
+  AND role_permission.deleted = false
+  AND permission.id = role_permission.permission_id
+  AND permission.tenant_id = role_permission.tenant_id
+  AND permission.resource_code IN (
+      'lesson-editor',
+      'exam-setup',
+      'group-setup',
+      'exam-data',
+      'publish-center'
+  );
+
+UPDATE sys_permission_config
+SET status = 'DISABLED',
+    deleted = true,
+    update_by = 'seed',
+    update_time = now()
+WHERE tenant_id = 'demo-tenant'
+  AND deleted = false
+  AND resource_code IN (
+      'lesson-editor',
+      'exam-setup',
+      'group-setup',
+      'exam-data',
+      'publish-center'
+  );
+
+UPDATE sys_menu_config
+SET visible = false,
+    status = 'DISABLED',
+    deleted = true,
+    update_by = 'seed',
+    update_time = now()
+WHERE tenant_id = 'demo-tenant'
+  AND deleted = false
+  AND menu_code IN (
+      'lesson-editor',
+      'exam-setup',
+      'group-setup',
+      'exam-data',
+      'publish-center'
+  );
+
 INSERT INTO sys_menu_config (
     id, tenant_id, parent_id, menu_code, menu_name, menu_type,
     route_path, component_path, permission_code, icon, sort_no, visible,
@@ -127,16 +208,11 @@ FROM (
         ('menu-basic-role-permissions', 'demo-tenant', null, 'basic-role-permissions', '角色权限', 'MENU', '/admin/basic/role-permissions', 'views/admin/BasicConfigView.vue#rolePermissions', 'menu:basic-role-permissions:view', '09', 90, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-basic-dict-items', 'demo-tenant', null, 'basic-dict-items', '字典配置', 'MENU', '/admin/basic/dict-items', 'views/admin/BasicConfigView.vue#dictItems', 'menu:basic-dict-items:view', '10', 100, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-lesson-list', 'demo-tenant', null, 'lesson-list', '教案管理', 'MENU', '/admin/lessons', 'views/admin/LessonListView.vue', 'menu:lesson-list:view', '11', 110, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
-        ('menu-lesson-editor', 'demo-tenant', null, 'lesson-editor', '教案编排', 'MENU', '/admin/lessons', 'views/admin/LessonEditorView.vue', 'menu:lesson-editor:view', '12', 120, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
-        ('menu-exam-setup', 'demo-tenant', null, 'exam-setup', '考试设置', 'MENU', '/admin/lessons', 'views/admin/ExamSetupView.vue', 'menu:exam-setup:view', '13', 130, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
-        ('menu-group-setup', 'demo-tenant', null, 'group-setup', '分组设置', 'MENU', '/admin/lessons', 'views/admin/GroupSetupView.vue', 'menu:group-setup:view', '14', 140, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
-        ('menu-exam-data', 'demo-tenant', null, 'exam-data', '考试数据', 'MENU', '/admin/lessons', 'views/admin/ExamDataView.vue', 'menu:exam-data:view', '15', 150, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-data-prepare-systems', 'demo-tenant', null, 'data-prepare-systems', '平台接入', 'MENU', '/admin/data-prepare/systems', 'views/admin/DataPrepareSystemsView.vue', 'menu:data-prepare-systems:view', '16', 160, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-data-prepare-modules', 'demo-tenant', null, 'data-prepare-modules', '业务模块', 'MENU', '/admin/data-prepare/modules', 'views/admin/DataPrepareModulesView.vue', 'menu:data-prepare-modules:view', '17', 170, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-data-prepare-templates', 'demo-tenant', null, 'data-prepare-templates', '模板管理', 'MENU', '/admin/data-prepare/templates', 'views/admin/DataPrepareTemplatesView.vue', 'menu:data-prepare-templates:view', '18', 180, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-data-prepare-strategies', 'demo-tenant', null, 'data-prepare-strategies', '策略管理', 'MENU', '/admin/data-prepare/strategies', 'views/admin/DataPrepareStrategiesView.vue', 'menu:data-prepare-strategies:view', '19', 190, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-data-prepare', 'demo-tenant', null, 'data-prepare', '批次准备', 'MENU', '/admin/data-prepare', 'views/admin/DataPrepareView.vue', 'menu:data-prepare:view', '20', 200, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
-        ('menu-publish-center', 'demo-tenant', null, 'publish-center', '发布中心', 'MENU', '/admin/lessons', 'views/admin/PublishCenterView.vue', 'menu:publish-center:view', '21', 210, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-teacher-dashboard', 'demo-tenant', null, 'teacher-dashboard', '教学工作台', 'MENU', '/teacher/dashboard', 'views/teacher/TeacherDashboardView.vue', 'menu:teacher-dashboard:view', '01', 1010, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-teacher-review', 'demo-tenant', null, 'teacher-review', '评阅反馈', 'MENU', '/teacher/review', 'views/teacher/TeacherReviewView.vue', 'menu:teacher-review:view', '02', 1020, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-teacher-data-prepare', 'demo-tenant', null, 'teacher-data-prepare', '批次准备', 'MENU', '/teacher/data-prepare', 'views/admin/DataPrepareView.vue', 'menu:teacher-data-prepare:view', '03', 1030, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
@@ -227,12 +303,7 @@ teacher_permissions AS (
      AND permission.resource_code IN (
         'teacher-dashboard',
         'teacher-review',
-        'lesson-list',
-        'lesson-editor',
-        'exam-setup',
-        'group-setup',
-        'exam-data',
-        'publish-center'
+        'lesson-list'
      )
     WHERE role.tenant_id = 'demo-tenant'
       AND role.role_code = 'teacher'

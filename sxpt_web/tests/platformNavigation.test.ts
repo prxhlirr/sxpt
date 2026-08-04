@@ -6,6 +6,16 @@ const source = (path: string) =>
   readFileSync(resolve(process.cwd(), path), 'utf8');
 
 describe('登录后的平台入口与身份导航', () => {
+  it('沉浸式业务路由隐藏平台顶栏并让内容占满视口', () => {
+    const shell = source('src/layouts/AppShell.vue');
+    const styles = source('src/styles.css');
+
+    expect(shell).toContain('<header class="topbar">');
+    expect(shell).toContain("'app-shell--immersive': immersiveRoute");
+    expect(styles).toContain('.app-shell--immersive > .app-workspace > .topbar');
+    expect(styles).toContain('.app-shell--immersive .app-content--immersive');
+  });
+
   it('根入口先进入双平台选择页，并支持配置精品课堂外链', () => {
     const router = source('src/router.ts');
     const portal = source('src/views/PlatformPortalView.vue');
@@ -30,11 +40,11 @@ describe('登录后的平台入口与身份导航', () => {
     const api = source('src/services/trainingApi.ts');
 
     expect(portal).toContain('import.meta.env.DEV');
-    expect(portal).toContain('store.setRole(role)');
+    expect(portal).toContain('store.initializeAuthenticatedWorkspace(session)');
     expect(portal).toContain('authApi.useDevelopmentSession(role)');
     expect(api).toContain('api/v1/auth/login');
     expect(api).toContain('DEVELOPMENT_LOGIN_PROFILES');
-    expect(api).toContain("username: 'expert01'");
+    expect(api).toContain("username: 'teacher02'");
     expect(api).toContain("username: 'teacher01'");
     expect(api).toContain("username: 'student01'");
     expect(api).not.toContain('token: `dev-${role}-token`');
@@ -58,6 +68,10 @@ describe('登录后的平台入口与身份导航', () => {
     const router = source('src/router.ts');
 
     expect(router).toContain('router.beforeEach');
+    expect(router).toContain("if (to.path === '/login')");
+    expect(router).toContain('authApi.logout()');
+    expect(router).toContain('clearAuthenticatedWorkspace()');
+    expect(router).toContain('resetRuntimeContext()');
     expect(router).toContain('authApi.canAccess(requiredRole, session)');
     expect(router).toContain('authApi.getPortalRole(session)');
     expect(router).toContain("roles: ['admin', 'teacher']");
@@ -72,6 +86,13 @@ describe('登录后的平台入口与身份导航', () => {
     expect(shell).toContain("{ label: '业务模块'");
     expect(shell).toContain("{ label: '模板管理'");
     expect(shell).toContain("{ label: '策略管理'");
+    expect(shell).toContain("'lesson-editor'");
+    expect(shell).toContain('hiddenNavigationMenuCodes.has(menu.menuCode)');
+    expect(shell).not.toContain("label: '教案编排'");
+    expect(shell).not.toContain("label: '考试设置'");
+    expect(shell).not.toContain("label: '分组设置'");
+    expect(shell).not.toContain("label: '考试数据'");
+    expect(shell).not.toContain("label: '发布中心'");
     expect(shell).not.toContain('switchRole');
   });
 

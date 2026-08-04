@@ -32,10 +32,16 @@ interface TargetPayload {
   pageTitle: string;
 }
 
-const props = defineProps<{
-  src: string;
-  title: string;
-}>();
+const props = withDefaults(
+  defineProps<{
+    src: string;
+    title: string;
+    fitMode?: 'fill' | 'contain';
+  }>(),
+  {
+    fitMode: 'fill'
+  }
+);
 
 const emit = defineEmits<{
   'business-ready': [payload: BusinessReadyPayload];
@@ -63,6 +69,14 @@ const frameOrigin = computed(() => {
   }
 });
 const frameViewportStyle = computed(() => {
+  if (props.fitMode === 'fill') {
+    return {
+      inset: '0',
+      width: '100%',
+      height: '100%',
+      transform: 'none'
+    };
+  }
   const viewport = DEFAULT_RECORDING_VIEWPORT;
   if (containerSize.value.width <= 0 || containerSize.value.height <= 0) {
     return {
@@ -256,7 +270,11 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="containerRef" class="business-capture-frame">
+  <div
+    ref="containerRef"
+    class="business-capture-frame"
+    :class="`fit-${fitMode}`"
+  >
     <iframe
       :key="frameKey"
       ref="frameRef"
@@ -267,8 +285,8 @@ defineExpose({
       @load="handleLoad"
     />
     <span class="business-capture-frame__resolution">
-      标准录制视口 {{ DEFAULT_RECORDING_VIEWPORT.width }} ×
-      {{ DEFAULT_RECORDING_VIEWPORT.height }}
+      {{ fitMode === 'fill' ? '自适应全屏' : '等比例视口' }}
+      {{ Math.round(containerSize.width) }} × {{ Math.round(containerSize.height) }}
     </span>
   </div>
 </template>

@@ -148,6 +148,7 @@ INSERT INTO teach_user_role (
 ) VALUES
     ('ur-demo-teacher-01', 'demo-tenant', 'user-demo-teacher-01', 'role-demo-teacher', 'SEED', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('ur-demo-teacher-02', 'demo-tenant', 'user-demo-teacher-02', 'role-demo-teacher', 'SEED', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('ur-demo-teacher-02-admin', 'demo-tenant', 'user-demo-teacher-02', 'role-demo-admin', 'SEED', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('ur-demo-teacher-03', 'demo-tenant', 'user-demo-teacher-03', 'role-demo-teacher', 'SEED', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('ur-demo-student-01', 'demo-tenant', 'user-demo-student-01', 'role-demo-student', 'SEED', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('ur-demo-student-02', 'demo-tenant', 'user-demo-student-02', 'role-demo-student', 'SEED', 'seed', now(), 'seed', now(), 'ACTIVE', false),

@@ -41,7 +41,7 @@ async function submitLogin() {
   loading.value = true;
   errorMessage.value = '';
   try {
-    await authApi.login({
+    const session = await authApi.login({
       loginType: 'PASSWORD',
       tenantId: form.tenantId.trim(),
       username: form.username.trim(),

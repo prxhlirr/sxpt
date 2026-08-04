@@ -182,6 +182,9 @@ describe('业务平台维护、教案绑定与录制加载', () => {
       'src/components/lesson/BusinessCaptureFrame.vue'
     );
     const viewportScaling = source('src/utils/viewportScaling.ts');
+    const playback = source(
+      'src/components/lesson/LessonPlaybackPlayer.vue'
+    );
     const recording = source('src/views/admin/RecordingPreviewView.vue');
     const runner = source('src/views/student/StudentTaskRunnerView.vue');
 
@@ -190,39 +193,45 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(snapshotFrame).toContain('recorded-rect-highlight');
     expect(snapshotFrame).toContain('calculateContainedViewport');
     expect(snapshotFrame).toContain('mapRectToContainedViewport');
+    expect(snapshotFrame).toContain('mapRectToFilledViewport');
     expect(snapshotFrame).toContain('has-recorded-viewport');
+    expect(snapshotFrame).toContain("fitMode: 'fill'");
     expect(snapshotFrame).toContain('ResizeObserver');
     expect(captureFrame).toContain('DEFAULT_RECORDING_VIEWPORT');
-    expect(captureFrame).toContain('标准录制视口');
+    expect(captureFrame).toContain("fitMode: 'fill'");
+    expect(captureFrame).toContain('自适应全屏');
+    expect(playback).toContain('fit-mode="fill"');
     expect(viewportScaling).toContain('Math.min(');
     expect(viewportScaling).toContain('containerWidth / safeViewport.width');
     expect(viewportScaling).toContain('containerHeight / safeViewport.height');
-    expect(recording).toContain('currentStep.selectorCandidates');
-    expect(recording).toContain(
+    expect(viewportScaling).toContain('containerHeight / safeViewport.height');
+    expect(playback).toContain('currentStep.selectorCandidates');
+    expect(playback).toContain(
       ':selector="showStageIntroduction ? undefined : currentStep.selector"'
     );
-    expect(recording).toContain('本节点说明');
-    expect(recording).toContain('本教学点说明');
-    expect(recording).toContain('currentStep.teachingText ||');
-    expect(recording).toContain('showStageIntroduction');
-    expect(recording).toContain('进入本教学点');
-    expect(recording).toContain('隐藏其他讲解菜单');
-    expect(recording).toContain('class="explanation-panel lecture-step-prompt"');
-    expect(recording).toContain("'stage-prompt': showStageIntroduction");
-    expect(recording).toContain("'node-prompt': !showStageIntroduction");
-    expect(recording).toContain('下一步 →');
-    expect(recording).not.toContain('aria-label="下一步"');
-    expect(recording).not.toContain(
-      '<aside v-show="showLectureOverlay" class="explanation-panel">'
-    );
-    expect(runner).toContain('currentLearningStep?.step.selectorCandidates');
-    expect(runner).toContain('!showStageIntroduction &&');
-    expect(runner).toContain('@business-action="handleRecordedBusinessAction"');
-    expect(runner).toContain(':interactive=');
-    expect(runner).toContain('隐藏全部菜单');
-    expect(runner).toContain('stage-introduction-overlay');
-    expect(runner).toContain('本教学点说明');
-    expect(runner).toContain('@click="enterCurrentStage"');
+    expect(playback).toContain('本节点说明');
+    expect(playback).toContain('本教学点说明');
+    expect(playback).toContain('currentStep.teachingText ||');
+    expect(playback).toContain('showStageIntroduction');
+    expect(playback).toContain('进入本教学点');
+    expect(playback).toContain('class="playback-edge-toolbar"');
+    expect(playback).toContain('class="playback-navigation-drawer"');
+    expect(playback).toContain("'stage-prompt': showStageIntroduction");
+    expect(playback).toContain("'node-prompt': !showStageIntroduction");
+    expect(playback).toContain('下一步 →');
+    expect(playback).toContain('cyclePromptPosition');
+    expect(playback).toContain('AttachmentPanel');
+    expect(playback).toContain('教学点目标与注意事项');
+    expect(playback).toContain('<dt>pageTitle</dt>');
+    expect(playback).toContain('<dt>actionLabel</dt>');
+    expect(playback).toContain('<dt>selector</dt>');
+    expect(playback).toContain('<dt>durationSeconds</dt>');
+    expect(recording).toContain("import LessonPlaybackPlayer");
+    expect(recording).toContain('<LessonPlaybackPlayer');
+    expect(runner).toContain("import LessonPlaybackPlayer");
+    expect(runner).toContain('<LessonPlaybackPlayer');
+    expect(runner).toContain('v-if="isLearning"');
+    expect(runner).toContain('legacyLearningPlaybackEnabled = false');
     expect(runner).toContain(
       "() => [task.value?.id, task.value?.status] as const"
     );
@@ -238,19 +247,6 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(runner).toContain('selectLearningTeachingPoint');
     expect(runner).toContain('selectLearningStep');
     expect(runner).toContain('moveLearningPlayback');
-    expect(runner).toContain('AttachmentPanel');
-    expect(runner).toContain('隐藏其他学习菜单');
-    expect(runner).toContain(
-      'class="learning-explanation-panel learning-step-prompt"'
-    );
-    expect(runner).toContain("'stage-prompt': showStageIntroduction");
-    expect(runner).toContain("'node-prompt': !showStageIntroduction");
-    expect(runner).toContain('教学点目标与注意事项');
-    expect(runner).toContain('<dt>pageTitle</dt>');
-    expect(runner).toContain('<dt>actionLabel</dt>');
-    expect(runner).toContain('<dt>selector</dt>');
-    expect(runner).toContain('<dt>durationSeconds</dt>');
-    expect(runner).toContain('class="learning-segment-timeline"');
   });
 
   it('录制支持类似开发者工具的任意元素拾取并绑定说明节点', () => {
@@ -268,6 +264,10 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(editor).toContain('resumeContinuousElementPick');
     expect(editor).toContain('连续选取已保持开启');
     expect(editor).toContain('录制中绑定后会自动继续选取');
+    expect(editor).toContain('class="quick-controls"');
+    expect(editor).toContain('closeAuthoringDrawers');
+    expect(editor).toContain('cyclePickerToolbarPosition');
+    expect(editor).toContain('换个角落');
     expect(editor).toContain('@pointermove.capture="handleInternalPickMove"');
     expect(editor).toContain('@element-picked="handleElementPicked"');
     expect(editor).toContain("kind: 'guide'");

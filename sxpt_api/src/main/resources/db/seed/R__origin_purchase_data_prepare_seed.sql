@@ -109,12 +109,16 @@ INSERT INTO teach_user_org (
     ('uo-demo-student-01', 'demo-tenant', 'user-demo-student-01', 'org-demo-class-a', 'STUDENT', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('uo-demo-student-02', 'demo-tenant', 'user-demo-student-02', 'org-demo-class-a', 'STUDENT', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('uo-demo-student-03', 'demo-tenant', 'user-demo-student-03', 'org-demo-class-a', 'STUDENT', 'seed', now(), 'seed', now(), 'ACTIVE', false)
-ON CONFLICT (tenant_id, user_id, org_id) WHERE deleted = false
+ON CONFLICT (id)
 DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    user_id = EXCLUDED.user_id,
+    org_id = EXCLUDED.org_id,
     relation_type = EXCLUDED.relation_type,
     update_by = 'seed',
     update_time = now(),
-    status = 'ACTIVE';
+    status = 'ACTIVE',
+    deleted = false;
 
 INSERT INTO connector_system (
     id, tenant_id, system_code, system_name, system_type, base_url, auth_type, config_json,

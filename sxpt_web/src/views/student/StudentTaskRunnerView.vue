@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import AttachmentPanel from '../../components/lesson/AttachmentPanel.vue';
 import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
+import LessonPlaybackPlayer from '../../components/lesson/LessonPlaybackPlayer.vue';
 import type { RecordedStep } from '../../domain/models';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import {
@@ -21,6 +22,7 @@ interface BusinessActionPayload {
 }
 
 const store = useTrainingStore();
+const legacyLearningPlaybackEnabled = false;
 store.refreshPublishedTaskStatuses();
 const route = useRoute();
 const currentStudentId =
@@ -787,7 +789,7 @@ async function restartTrainingTask() {
     }"
   >
     <button
-      v-if="!isExam"
+      v-if="!isExam && !isLearning"
       class="runner-menu-toggle"
       type="button"
       @click="showRunnerMenu = !showRunnerMenu"
@@ -803,7 +805,7 @@ async function restartTrainingTask() {
       }}
     </button>
 
-    <header v-if="!isExam" v-show="showRunnerMenu" class="runner-header">
+    <header v-if="!isExam && !isLearning" v-show="showRunnerMenu" class="runner-header">
       <div>
         <RouterLink to="/student/tasks">← 返回任务中心</RouterLink>
         <span class="runner-divider"></span>
@@ -839,8 +841,37 @@ async function restartTrainingTask() {
       </div>
     </header>
 
-    <div
+    <LessonPlaybackPlayer
       v-if="isLearning"
+      :lesson="lesson"
+      :current-index="learningStepIndex"
+      :show-stage-introduction="showStageIntroduction"
+      return-to="/student/tasks"
+      return-label="返回任务中心"
+      :player-state="
+        task.status === 'TODO'
+          ? 'READY'
+          : task.status === 'SUBMITTED' || task.status === 'GRADED'
+            ? 'COMPLETED'
+            : 'PLAYING'
+      "
+      :start-label="syncing ? '正在创建会话…' : '开始流程学习'"
+      :finish-label="syncing ? '正在保存…' : '完成本次学习'"
+      restart-label="重新学习"
+      :action-disabled="syncing"
+      :feedback="errorMessage || message"
+      :feedback-tone="errorMessage ? 'danger' : 'success'"
+      @start="startTask"
+      @restart="restartTrainingTask"
+      @previous="moveLearningPlayback(-1)"
+      @next="moveLearningPlayback(1)"
+      @finish="finishLearningTask"
+      @select-step="selectLearningStep"
+      @select-stage="selectLearningTeachingPoint"
+    />
+
+    <div
+      v-if="task && lesson && isLearning && legacyLearningPlaybackEnabled"
       class="learning-lecture-view"
     >
       <section
@@ -1167,7 +1198,7 @@ async function restartTrainingTask() {
     </div>
 
     <div
-      v-else
+      v-if="!isLearning"
       class="runner-layout"
       :class="{
         'help-hidden': !showHelp,

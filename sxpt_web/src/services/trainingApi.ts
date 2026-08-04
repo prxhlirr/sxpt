@@ -50,7 +50,7 @@ const DEVELOPMENT_LOGIN_PROFILES: Record<
 > = {
   admin: {
     tenantId: 'demo-tenant',
-    username: 'expert01',
+    username: 'teacher02',
     password: 'Sxpt@123456'
   },
   teacher: {
@@ -815,6 +815,33 @@ export const authApi = {
 };
 
 /**
+ * 登录用户工作区 API。
+ *
+ * 教师/专家保存完整教学编排，学生只加载和回写后端按当前登录人裁剪后的
+ * 学习、练习与考试进度。接口地址由登录身份决定，页面无需自行拼接。
+ */
+export const trainingWorkspaceApi = {
+  async load(session: AuthSession): Promise<TrainingState | null> {
+    const result = await requestApi<unknown | null>(
+      resolveTrainingWorkspacePath(session)
+    );
+    if (result === null) return null;
+    return parseTrainingWorkspaceState(result, session);
+  },
+
+  async save(
+    session: AuthSession,
+    state: TrainingState
+  ): Promise<TrainingState> {
+    const result = await requestApi<unknown>(resolveTrainingWorkspacePath(session), {
+      method: 'PUT',
+      body: JSON.stringify(state)
+    });
+    return parseTrainingWorkspaceState(result, session);
+  }
+};
+
+/**
  * 数据准备后台 API。
  *
  * 业务功能：
@@ -1525,6 +1552,29 @@ export const dataPrepareApi = {
     );
   }
 };
+
+function resolveTrainingWorkspacePath(session: AuthSession): string {
+  return authApi.getPortalRole(session) === 'student'
+    ? 'api/v1/student/training/workspace'
+    : 'api/v1/training/workspace';
+}
+
+function parseTrainingWorkspaceState(
+  value: unknown,
+  session: AuthSession
+): TrainingState {
+  if (!isTrainingState(value)) {
+    throw new TrainingApiRequestError('后端返回的工作区数据格式错误');
+  }
+  const state = clone(value);
+  if (!Array.isArray(state.businessPlatforms)) {
+    state.businessPlatforms =
+      authApi.getPortalRole(session) === 'student'
+        ? []
+        : createDefaultBusinessPlatforms();
+  }
+  return state;
+}
 
 async function requestApi<T>(
   path: string,
