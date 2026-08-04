@@ -205,6 +205,8 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
         PracticeAttempt attempt = findPracticeAttemptByExecution(execution);
         PracticeAttempt update = new PracticeAttempt();
         update.setId(attempt.getId());
+        update.setTenantId(execution.getTenantId());
+        update.setStudentId(execution.getStudentId());
         update.setAttemptStatus(COMPLETED_STATUS);
         update.setEndTime(now);
         update.setScore(execution.getScore());

@@ -2,9 +2,11 @@
 import { computed, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { authApi } from '../services/trainingApi';
+import { useTrainingStore } from '../stores/trainingStore';
 
 const route = useRoute();
 const router = useRouter();
+const store = useTrainingStore();
 
 const form = reactive({
   tenantId: 'demo-tenant',
@@ -45,6 +47,7 @@ async function submitLogin() {
       username: form.username.trim(),
       password: form.password
     });
+    await store.initializeAuthenticatedWorkspace(session);
     const redirect = typeof route.query.redirect === 'string'
       ? route.query.redirect
       : '/platforms';

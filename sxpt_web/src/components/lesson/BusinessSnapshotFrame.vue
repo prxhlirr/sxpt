@@ -5,6 +5,11 @@ import type {
   CaptureRect
 } from '../../domain/models';
 import { createBusinessSnapshotDocument } from '../../utils/businessSnapshot';
+import {
+  calculateContainedViewport,
+  mapRectToContainedViewport,
+  normalizeViewport
+} from '../../utils/viewportScaling';
 
 const props = defineProps<{
   snapshot?: BusinessPageSnapshot;
@@ -32,10 +37,13 @@ const emit = defineEmits<{
   'business-action': [payload: BusinessActionPayload];
 }>();
 
+const containerRef = ref<HTMLElement | null>(null);
 const frameRef = ref<HTMLIFrameElement | null>(null);
 const frameReady = ref(false);
 const lastImmediateAction = ref<{ selector: string; at: number }>();
+const containerSize = ref({ width: 0, height: 0 });
 let frameReadyTimer: number | undefined;
+let resizeObserver: ResizeObserver | undefined;
 const selectors = computed(() =>
   [props.selector, ...(props.selectorCandidates ?? [])].filter(
     (selector): selector is string => Boolean(selector)
@@ -67,15 +75,56 @@ const snapshotDocument = computed(() =>
       )
     : undefined
 );
+const resolutionViewport = computed(() =>
+  normalizeViewport(props.recordedViewport ?? props.snapshot?.viewport)
+);
+const containedViewport = computed(() => {
+  if (
+    !resolutionViewport.value ||
+    containerSize.value.width <= 0 ||
+    containerSize.value.height <= 0
+  ) {
+    return undefined;
+  }
+  return calculateContainedViewport(
+    resolutionViewport.value,
+    containerSize.value
+  );
+});
+const frameViewportStyle = computed(() => {
+  const viewport = resolutionViewport.value;
+  const placement = containedViewport.value;
+  if (!viewport || !placement) return undefined;
+  return {
+    width: `${viewport.width}px`,
+    height: `${viewport.height}px`,
+    left: `${placement.left}px`,
+    top: `${placement.top}px`,
+    transform: `scale(${placement.scale})`,
+    transformOrigin: 'top left'
+  };
+});
 const recordedRectStyle = computed(() => {
   if (!snapshotDocument.value) return undefined;
-  const viewport = props.recordedViewport ?? props.snapshot?.viewport;
-  if (!props.rect || !viewport?.width || !viewport.height) return undefined;
+  const viewport = resolutionViewport.value;
+  if (
+    !props.rect ||
+    !viewport ||
+    containerSize.value.width <= 0 ||
+    containerSize.value.height <= 0
+  ) {
+    return undefined;
+  }
+  const mapped = mapRectToContainedViewport(
+    props.rect,
+    viewport,
+    containerSize.value
+  );
   return {
-    left: `${Math.max(0, (props.rect.x / viewport.width) * 100)}%`,
-    top: `${Math.max(0, (props.rect.y / viewport.height) * 100)}%`,
-    width: `${Math.min(100, (props.rect.width / viewport.width) * 100)}%`,
-    height: `${Math.min(100, (props.rect.height / viewport.height) * 100)}%`
+    left: `${mapped.left}px`,
+    top: `${mapped.top}px`,
+    width: `${mapped.width}px`,
+    height: `${mapped.height}px`
   };
 });
 const replayUrl = computed(() => {
@@ -186,6 +235,15 @@ function handleMessage(event: MessageEvent) {
   }
 }
 
+function updateContainerSize() {
+  const rect = containerRef.value?.getBoundingClientRect();
+  if (!rect) return;
+  containerSize.value = {
+    width: rect.width,
+    height: rect.height
+  };
+}
+
 watch(
   () => [snapshotFrameKey.value, fallbackFrameKey.value],
   () => {
@@ -198,19 +256,31 @@ watch(
   }
 );
 
-onMounted(() => window.addEventListener('message', handleMessage));
+onMounted(() => {
+  window.addEventListener('message', handleMessage);
+  window.addEventListener('resize', updateContainerSize);
+  updateContainerSize();
+  if (typeof ResizeObserver !== 'undefined' && containerRef.value) {
+    resizeObserver = new ResizeObserver(updateContainerSize);
+    resizeObserver.observe(containerRef.value);
+  }
+});
 onBeforeUnmount(() => {
   if (frameReadyTimer !== undefined) window.clearTimeout(frameReadyTimer);
+  resizeObserver?.disconnect();
+  window.removeEventListener('resize', updateContainerSize);
   window.removeEventListener('message', handleMessage);
 });
 </script>
 
 <template>
   <div
+    ref="containerRef"
     class="business-snapshot-frame"
     :class="{
       'is-interactive': interactive && frameReady,
-      'is-loading': interactive && !frameReady
+      'is-loading': interactive && !frameReady,
+      'has-recorded-viewport': Boolean(resolutionViewport)
     }"
   >
     <iframe
@@ -220,6 +290,7 @@ onBeforeUnmount(() => {
       :srcdoc="snapshotDocument"
       :title="title"
       :sandbox="interactive ? 'allow-scripts' : ''"
+      :style="frameViewportStyle"
       referrerpolicy="no-referrer"
       @load="handleFrameLoad"
     />
@@ -230,6 +301,7 @@ onBeforeUnmount(() => {
       :src="replayUrl"
       :title="title"
       sandbox="allow-scripts allow-same-origin"
+      :style="frameViewportStyle"
       referrerpolicy="no-referrer"
       @load="handleFrameLoad"
     />
@@ -273,6 +345,12 @@ onBeforeUnmount(() => {
   border: 0;
   pointer-events: none;
   background: #eef2f7;
+}
+
+.business-snapshot-frame.has-recorded-viewport iframe {
+  position: absolute;
+  max-width: none;
+  max-height: none;
 }
 
 .business-snapshot-frame.is-interactive iframe {

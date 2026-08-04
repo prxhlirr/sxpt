@@ -9,6 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.util.Date;
+import java.util.Collections;
+import java.util.List;
 
 /**
  * JWT 服务。
@@ -29,6 +31,10 @@ public class JwtService {
 
     private static final String USERNAME_CLAIM = "username";
 
+    private static final String TENANT_ID_CLAIM = "tenantId";
+
+    private static final String ROLES_CLAIM = "roles";
+
     private final JwtProperties jwtProperties;
 
     public JwtService(JwtProperties jwtProperties) {
@@ -43,11 +49,20 @@ public class JwtService {
      * @return JWT 字符串。
      */
     public String generateToken(String userId, String username) {
+        return generateToken(userId, username, null, Collections.<String>emptyList());
+    }
+
+    public String generateToken(String userId, String username, String tenantId, List<String> roles) {
         Date now = new Date();
         Date expiresAt = new Date(now.getTime() + jwtProperties.getExpireSeconds() * 1000);
         return JWT.create()
                 .withClaim(USER_ID_CLAIM, userId)
                 .withClaim(USERNAME_CLAIM, username)
+                .withClaim(TENANT_ID_CLAIM, tenantId)
+                .withArrayClaim(
+                        ROLES_CLAIM,
+                        roles == null ? new String[0] : roles.toArray(new String[0])
+                )
                 .withIssuedAt(now)
                 .withExpiresAt(expiresAt)
                 .sign(algorithm());
@@ -67,7 +82,9 @@ public class JwtService {
         DecodedJWT decodedJWT = verifier.verify(token);
         return new JwtPrincipal(
                 decodedJWT.getClaim(USER_ID_CLAIM).asString(),
-                decodedJWT.getClaim(USERNAME_CLAIM).asString()
+                decodedJWT.getClaim(USERNAME_CLAIM).asString(),
+                decodedJWT.getClaim(TENANT_ID_CLAIM).asString(),
+                decodedJWT.getClaim(ROLES_CLAIM).asList(String.class)
         );
     }
 

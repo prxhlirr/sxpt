@@ -49,8 +49,8 @@ logging:
 
 sxpt:
   cors:
-    allowed-origins: "${SXPT_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}"
+    allowed-origins: "${SXPT_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:5175,http://127.0.0.1:5175}"
   demo-identity:
-    # The frontend currently simulates login and uses fixed teacher/student IDs.
-    # Disable this bootstrap when the formal user system is connected.
-    enabled: "${SXPT_DEMO_IDENTITY_ENABLED:true}"
+    # Formal authentication is connected. Demo identities must be enabled
+    # explicitly when a developer needs the legacy simulated-login environment.
+    enabled: "${SXPT_DEMO_IDENTITY_ENABLED:false}"

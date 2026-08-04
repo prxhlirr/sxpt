@@ -1,39 +1,25 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed } from 'vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { authApi } from '../../services/trainingApi';
 
 const store = useTrainingStore();
-
-const learners = computed(() => {
-  const map = new Map<string, string>();
-  store.state.studentTasks.forEach((task) =>
-    map.set(task.studentId, task.studentName)
-  );
-  return [...map.entries()].map(([id, name]) => ({ id, name }));
-});
-const selectedStudentId = ref(
-  store.state.studentTasks.find(
-    (task) => task.status === 'SUBMITTED' || task.status === 'GRADED'
-  )?.studentId ??
-    learners.value[0]?.id ??
-    ''
-);
-watch(
-  learners,
-  (items) => {
-    if (!items.some((item) => item.id === selectedStudentId.value)) {
-      selectedStudentId.value = items[0]?.id ?? '';
-    }
-  },
-  { immediate: true }
-);
+const currentStudentId =
+  authApi.getSession()?.user.userId ??
+  (typeof window === 'undefined'
+    ? store.state.studentTasks.find(
+        (task) => task.status === 'SUBMITTED' || task.status === 'GRADED'
+      )?.studentId ??
+      store.state.studentTasks[0]?.studentId ??
+      ''
+    : '');
 
 const resultTasks = computed(() =>
   store.state.studentTasks.filter(
     (task) =>
-      task.studentId === selectedStudentId.value &&
+      task.studentId === currentStudentId &&
       (task.status === 'SUBMITTED' || task.status === 'GRADED')
   )
 );
@@ -85,18 +71,6 @@ function subjectiveMax(lessonId: string) {
       title="成绩与教师反馈"
       description="客观分由平台根据流程性操作自动计算；主观分和批语由教师评阅后推送。两部分共同构成最终考试结果。"
     >
-      <label v-if="learners.length > 1" class="result-student-select">
-        <span>演示学员会话</span>
-        <select v-model="selectedStudentId">
-          <option
-            v-for="learner in learners"
-            :key="learner.id"
-            :value="learner.id"
-          >
-            {{ learner.name }}（{{ learner.id }}）
-          </option>
-        </select>
-      </label>
     </PageHeader>
 
     <div class="result-summary">
@@ -150,7 +124,7 @@ function subjectiveMax(lessonId: string) {
             <span>系统客观分</span>
             <strong>{{ task.objectiveScore ?? 0 }}</strong>
             <small>/ {{ objectiveMax(task.lessonId) }}</small>
-            <p>依据页面访问、流程按钮和阶段时序自动评分</p>
+              <p>依据页面访问、流程按钮和教学点时序自动评分</p>
           </div>
           <div class="subjective">
             <span>教师主观分</span>

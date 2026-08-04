@@ -178,22 +178,40 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     const snapshotFrame = source(
       'src/components/lesson/BusinessSnapshotFrame.vue'
     );
+    const captureFrame = source(
+      'src/components/lesson/BusinessCaptureFrame.vue'
+    );
+    const viewportScaling = source('src/utils/viewportScaling.ts');
     const recording = source('src/views/admin/RecordingPreviewView.vue');
     const runner = source('src/views/student/StudentTaskRunnerView.vue');
 
     expect(snapshot).toContain('sxpt-recorded-operation-target');
     expect(snapshot).toContain("target.classList.add('sxpt-recorded-operation-target')");
     expect(snapshotFrame).toContain('recorded-rect-highlight');
+    expect(snapshotFrame).toContain('calculateContainedViewport');
+    expect(snapshotFrame).toContain('mapRectToContainedViewport');
+    expect(snapshotFrame).toContain('has-recorded-viewport');
+    expect(snapshotFrame).toContain('ResizeObserver');
+    expect(captureFrame).toContain('DEFAULT_RECORDING_VIEWPORT');
+    expect(captureFrame).toContain('标准录制视口');
+    expect(viewportScaling).toContain('Math.min(');
+    expect(viewportScaling).toContain('containerWidth / safeViewport.width');
+    expect(viewportScaling).toContain('containerHeight / safeViewport.height');
     expect(recording).toContain('currentStep.selectorCandidates');
     expect(recording).toContain(
       ':selector="showStageIntroduction ? undefined : currentStep.selector"'
     );
     expect(recording).toContain('本节点说明');
-    expect(recording).toContain('本阶段说明');
+    expect(recording).toContain('本教学点说明');
+    expect(recording).toContain('currentStep.teachingText ||');
     expect(recording).toContain('showStageIntroduction');
-    expect(recording).toContain('进入本阶段');
+    expect(recording).toContain('进入本教学点');
     expect(recording).toContain('隐藏其他讲解菜单');
-    expect(recording).toContain('<aside class="explanation-panel">');
+    expect(recording).toContain('class="explanation-panel lecture-step-prompt"');
+    expect(recording).toContain("'stage-prompt': showStageIntroduction");
+    expect(recording).toContain("'node-prompt': !showStageIntroduction");
+    expect(recording).toContain('下一步 →');
+    expect(recording).not.toContain('aria-label="下一步"');
     expect(recording).not.toContain(
       '<aside v-show="showLectureOverlay" class="explanation-panel">'
     );
@@ -203,12 +221,67 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(runner).toContain(':interactive=');
     expect(runner).toContain('隐藏全部菜单');
     expect(runner).toContain('stage-introduction-overlay');
-    expect(runner).toContain('本阶段说明');
+    expect(runner).toContain('本教学点说明');
     expect(runner).toContain('@click="enterCurrentStage"');
     expect(runner).toContain(
       "() => [task.value?.id, task.value?.status] as const"
     );
     expect(runner).toContain('正在初始化任务');
+    expect(runner).toContain("if (task.value.mode === 'LEARNING')");
+    expect(runner).toContain('return lesson.value.stages');
+    expect(runner).toContain(
+      "if (task.value?.mode === 'LEARNING')"
+    );
+    expect(runner).toContain('playbackStages.value.map((stage) => stage.id)');
+    expect(runner).toContain('currentLearningInstruction');
+    expect(runner).toContain('学习内容与教师讲解一致');
+    expect(runner).toContain('selectLearningTeachingPoint');
+    expect(runner).toContain('selectLearningStep');
+    expect(runner).toContain('moveLearningPlayback');
+    expect(runner).toContain('AttachmentPanel');
+    expect(runner).toContain('隐藏其他学习菜单');
+    expect(runner).toContain(
+      'class="learning-explanation-panel learning-step-prompt"'
+    );
+    expect(runner).toContain("'stage-prompt': showStageIntroduction");
+    expect(runner).toContain("'node-prompt': !showStageIntroduction");
+    expect(runner).toContain('教学点目标与注意事项');
+    expect(runner).toContain('<dt>pageTitle</dt>');
+    expect(runner).toContain('<dt>actionLabel</dt>');
+    expect(runner).toContain('<dt>selector</dt>');
+    expect(runner).toContain('<dt>durationSeconds</dt>');
+    expect(runner).toContain('class="learning-segment-timeline"');
+  });
+
+  it('录制支持类似开发者工具的任意元素拾取并绑定说明节点', () => {
+    const editor = source('src/views/admin/LessonEditorView.vue');
+    const captureFrame = source(
+      'src/components/lesson/BusinessCaptureFrame.vue'
+    );
+    const selector = source('src/utils/elementSelector.ts');
+    const businessPage = source('public/lesson-business-capture.html');
+
+    expect(editor).toContain('⌖ 元素选择模式');
+    expect(editor).toContain('● 开始录制并选取元素');
+    expect(editor).toContain('startElementPick();');
+    expect(editor).toContain('已进入连续元素选择模式');
+    expect(editor).toContain('resumeContinuousElementPick');
+    expect(editor).toContain('连续选取已保持开启');
+    expect(editor).toContain('录制中绑定后会自动继续选取');
+    expect(editor).toContain('@pointermove.capture="handleInternalPickMove"');
+    expect(editor).toContain('@element-picked="handleElementPicked"');
+    expect(editor).toContain("kind: 'guide'");
+    expect(editor).toContain('selectorCandidates: payload.selectorCandidates');
+    expect(editor).toContain('⌖ 重新选择元素');
+    expect(captureFrame).toContain("post({ type: 'SXPT_START_ELEMENT_PICK' })");
+    expect(captureFrame).toContain("post({ type: 'START_ELEMENT_PICK' })");
+    expect(captureFrame).toContain("message.type === 'ELEMENT_PICKED'");
+    expect(selector).toContain('buildStableElementSelector');
+    expect(selector).toContain(':nth-of-type(');
+    expect(businessPage).toContain('body.picking *');
+    expect(businessPage).toContain('"pointermove"');
+    expect(businessPage).toContain('getPickedElement(event.target)');
+    expect(businessPage).toContain('pageSnapshot: createPageSnapshot()');
   });
 
   it('练习清空备案表单值，并在点击或录入后按节点自动推进', () => {
@@ -240,9 +313,7 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     const runner = source('src/views/student/StudentTaskRunnerView.vue');
 
     expect(runner).toContain('v-if="!isExam && showRunnerMenu" class="stage-sidebar"');
-    expect(runner).toContain(
-      'v-if="showRunnerMenu && !isExam && !showStageIntroduction"'
-    );
+    expect(runner).toContain("task.mode === 'PRACTICE'");
     expect(runner).toContain('v-if="isExam && showHelp" class="exam-task-panel"');
     expect(runner).toContain('显示考试说明');
     expect(runner).toContain("task.value?.mode === 'EXAM'");

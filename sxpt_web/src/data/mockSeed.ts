@@ -17,6 +17,26 @@ const DEMO_NOW = relativeDemoTime(0);
 const DEMO_START = relativeDemoTime(-60);
 const DEMO_END = relativeDemoTime(180);
 
+/**
+ * Clean workspace used by the real authenticated application.
+ * Business-platform definitions are retained because they are application
+ * configuration, while lesson, assignment and learner data start empty.
+ */
+export function createEmptyTrainingState(): TrainingState {
+  return {
+    currentRole: 'admin',
+    businessPlatforms: createDefaultBusinessPlatforms(),
+    lessons: [],
+    examSettings: {},
+    groupPlans: {},
+    unitDataPlans: {},
+    dataItems: {},
+    publishedTasks: [],
+    studentTasks: [],
+    activities: []
+  };
+}
+
 export function createMockTrainingState(): TrainingState {
   const businessPlatforms = createDefaultBusinessPlatforms();
   const lessons = createLessons();
@@ -284,7 +304,7 @@ function createLessons(): LessonPlan[] {
       moduleName: '合同管理',
       businessPlatformId: 'business-platform-contract',
       businessPlatformModuleId: 'business-module-contract-filing',
-      description: '正在配置业务阶段和录制内容。',
+      description: '正在配置教学点和录制内容。',
       version: 1,
       status: 'DRAFT',
       teacherName: '陈老师',
@@ -609,7 +629,7 @@ function createActivities(): ActivityEvent[] {
     activity(
       'activity-2',
       'STUDENT_TASK_SUBMITTED',
-      '周昕已提交审核阶段',
+      '周昕已提交审核教学点',
       '等待教师主观评分'
     ),
     activity(
@@ -622,7 +642,7 @@ function createActivities(): ActivityEvent[] {
       'activity-4',
       'LESSON_PUBLISHED',
       '采购申请教案 V3 已发布',
-      '已冻结三个串行阶段'
+      '已冻结三个串行教学点'
     )
   ];
 }

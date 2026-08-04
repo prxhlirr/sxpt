@@ -6,8 +6,10 @@ import {
   backendTrainingApi,
   buildPublishedDataPrepareSnapshot,
   distributedScore,
+  findOrganizationByIdOrCode,
   mapConnectorSystem,
   mapStepActionType,
+  safeCode,
   serializeRecordedStepSnapshot,
   toLocalDateTime
 } from './backendTrainingApi';
@@ -89,6 +91,37 @@ describe('后端训练接口映射', () => {
       description: '本地维护的说明'
     });
     expect(mapped.modules).toHaveLength(1);
+  });
+
+  it('发布任务时按不区分大小写的组织编码复用已有班级', () => {
+    const existing = findOrganizationByIdOrCode(
+      [
+        {
+          id: 'org-1',
+          orgCode: 'DEMO-CLASS'
+        }
+      ],
+      'demo-class',
+      'DEMO-CLASS'
+    );
+
+    expect(existing?.id).toBe('org-1');
+  });
+
+  it('长节点编码保留稳定哈希后缀，避免前缀相同的步骤发生碰撞', () => {
+    const first = safeCode(
+      'PRACTICE-record-stage-9b0a7b17-3e46-44e7-8e3a-15eb4da133de-1785399069998',
+      64
+    );
+    const second = safeCode(
+      'PRACTICE-record-stage-9b0a7b17-3e46-44e7-8e3a-15eb4da133de-1785399070798',
+      64
+    );
+
+    expect(first).toHaveLength(64);
+    expect(second).toHaveLength(64);
+    expect(first).not.toBe(second);
+    expect(safeCode('demo-class', 64)).toBe('DEMO-CLASS');
   });
 
   it.each([

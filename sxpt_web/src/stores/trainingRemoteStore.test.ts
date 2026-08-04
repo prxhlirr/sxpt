@@ -146,6 +146,18 @@ describe('训练 Store 后端同步', () => {
   });
 
   it('完成教师讲解、发布学习练习并提交学生学习任务的后端闭环', async () => {
+    const publishLesson = vi.fn(async (lesson: LessonPlan) => ({
+      teachingPointId: 'teaching-point-1',
+      finishedCaptureSession: true,
+      resourceIdsByStepId: Object.fromEntries(
+        lesson.stages.flatMap((stage) =>
+          stage.recordedSteps.map((step) => [
+            step.id,
+            `resource-${step.id}`
+          ])
+        )
+      )
+    }));
     const publishTeachingTask = vi.fn(
       async (
         lesson: LessonPlan,
@@ -198,7 +210,7 @@ describe('训练 Store 后端同步', () => {
       setBusinessPlatformStatus: vi.fn(),
       startCaptureSession: vi.fn(),
       reportRecordedStep: vi.fn(),
-      publishLesson: vi.fn(),
+      publishLesson,
       publishTeachingTask,
       prepareInitialDataForPublishedTask,
       startStudentTaskExecution,
@@ -214,11 +226,19 @@ describe('训练 Store 后端同步', () => {
     const lesson = store.state.lessons.find(
       (candidate) => candidate.id === 'lesson-purchase-v3'
     )!;
-    lesson.teachingPointId = 'teaching-point-1';
+    lesson.stages.forEach((stage) =>
+      stage.recordedSteps.forEach((step) => {
+        step.remoteDraftId = `draft-${step.id}`;
+        step.syncStatus = 'SYNCED';
+      })
+    );
 
     store.markLessonLectureCompleted(lesson.id);
     const published = await store.publishLearningAndPracticeRemote(lesson.id);
 
+    expect(publishLesson).toHaveBeenCalledOnce();
+    expect(lesson.teachingPointId).toBe('teaching-point-1');
+    expect(lesson.captureSessionFinished).toBe(true);
     expect(published.map((task) => task.mode)).toEqual([
       'LEARNING',
       'PRACTICE'

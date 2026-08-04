@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import WorkflowStepper from '../../components/exam/WorkflowStepper.vue';
@@ -13,6 +13,8 @@ import type {
   RoleGroup
 } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { usersApi } from '../../api/users';
+import { getApiConfig } from '../../config/api';
 
 interface EditableRole extends RoleGroup {
   responsibility: string;
@@ -33,7 +35,9 @@ const lessonId = String(route.params.lessonId);
 const lesson = computed(() => store.getLesson(lessonId));
 const saved = store.state.groupPlans[lessonId];
 const configurationLocked = computed(() =>
-  store.state.publishedTasks.some((task) => task.lessonId === lessonId)
+  store.state.publishedTasks.some(
+    (task) => task.lessonId === lessonId && task.mode === 'EXAM'
+  )
 );
 
 const defaultStudents: DemoStudent[] = [
@@ -80,9 +84,14 @@ const defaultStudents: DemoStudent[] = [
     defaultAccount: 'zhouning'
   }
 ];
+const directoryStudents = ref<DemoStudent[]>(
+  getApiConfig().enabled ? [] : defaultStudents
+);
 
 const allStudents = computed<DemoStudent[]>(() => {
-  const byId = new Map(defaultStudents.map((student) => [student.studentId, student]));
+  const byId = new Map(
+    directoryStudents.value.map((student) => [student.studentId, student])
+  );
   (saved?.members ?? []).forEach((member) => {
     byId.set(member.studentId, {
       studentId: member.studentId,
@@ -100,7 +109,7 @@ const roles = ref<EditableRole[]>(
     ...role,
     responsibility:
       (role as EditableRole).responsibility ||
-      `负责${role.name}相关业务阶段的流程操作与结果提交`
+      `负责${role.name}相关教学点的流程操作与结果提交`
   }))
 );
 const members = ref<GroupMember[]>(
@@ -115,6 +124,23 @@ const newRole = reactive({
 const showRoleCreator = ref(false);
 const feedback = ref('');
 const saving = ref(false);
+
+onMounted(async () => {
+  if (!getApiConfig().enabled) return;
+  try {
+    const students = await usersApi.listStudents();
+    directoryStudents.value = students.map((student) => ({
+      studentId: student.studentId,
+      studentName: student.studentName,
+      unitId: student.unitId || 'unassigned',
+      unitName: student.unitName || '未分班',
+      defaultAccount: student.username
+    }));
+  } catch (error) {
+    feedback.value =
+      error instanceof Error ? error.message : '真实学生目录加载失败';
+  }
+});
 
 const examStages = computed(() => lesson.value?.stages ?? []);
 const coveredStageIds = computed(
@@ -150,11 +176,11 @@ const validationErrors = computed(() => {
     (stage) => !coveredStageIds.value.has(stage.id)
   );
   if (uncovered.length) {
-    errors.push(`尚有 ${uncovered.length} 个教案阶段未映射角色`);
+    errors.push(`尚有 ${uncovered.length} 个教学点未映射角色`);
   }
   const mappedStageIds = roles.value.flatMap((role) => role.stageIds);
   if (new Set(mappedStageIds).size !== mappedStageIds.length) {
-    errors.push('同一教案阶段只能由一个角色负责');
+    errors.push('同一教学点只能由一个角色负责');
   }
   roles.value.forEach((role) => {
     if (!members.value.some((member) => member.groupKey === role.key)) {
@@ -221,7 +247,7 @@ function addRole() {
     stageIds: []
   });
   showRoleCreator.value = false;
-  feedback.value = `已添加角色「${newRole.name.trim()}」，请映射业务阶段并分配成员。`;
+  feedback.value = `已添加角色「${newRole.name.trim()}」，请映射教学点并分配成员。`;
 }
 
 function removeRole(roleKey: string) {
@@ -304,7 +330,7 @@ function save(next = false) {
       members: members.value.map((member) => ({ ...member }))
     };
     store.saveGroupPlan(lessonId, plan);
-    feedback.value = '分组方案已保存，成员将按所在单位参与对应业务阶段。';
+    feedback.value = '分组方案已保存，成员将按所在单位参与对应教学点。';
     if (next) {
       void router.push({ name: 'exam-data', params: { lessonId } });
     }
@@ -321,7 +347,7 @@ function save(next = false) {
     <PageHeader
       eyebrow="LESSON BUSINESS CHAIN · 03"
       title="分组设置"
-      description="依据教案阶段动态建立任意数量的业务角色，完成单位、学员与业务账号映射。"
+      description="依据教学点动态建立任意数量的业务角色，完成单位、学员与业务账号映射。"
     >
       <button class="secondary" type="button" @click="router.push({ name: 'exam-setup', params: { lessonId } })">
         上一步
@@ -354,7 +380,7 @@ function save(next = false) {
         <article><span>业务角色</span><strong>{{ roles.length }}</strong><small>可继续动态添加</small></article>
         <article><span>参与学员</span><strong>{{ uniqueLearners }}</strong><small>{{ members.length }} 条角色关系</small></article>
         <article><span>多角色学员</span><strong>{{ multiRoleLearners }}</strong><small>可由一人走完整流程</small></article>
-        <article :class="{ warning: coveragePercent < 100 }"><span>阶段覆盖</span><strong>{{ coveragePercent }}%</strong><small>{{ coveredStageIds.size }}/{{ examStages.length }} 个教案阶段</small></article>
+        <article :class="{ warning: coveragePercent < 100 }"><span>教学点覆盖</span><strong>{{ coveragePercent }}%</strong><small>{{ coveredStageIds.size }}/{{ examStages.length }} 个教学点</small></article>
       </section>
 
       <div class="group-layout">
@@ -362,8 +388,8 @@ function save(next = false) {
           <article class="card">
             <div class="card-header">
               <div>
-                <h2>业务角色与阶段映射</h2>
-                <p>角色来自教案的 groupKey，也可继续增加；每个阶段由一个业务角色负责。</p>
+                <h2>业务角色与教学点映射</h2>
+                <p>角色来自教学点的 groupKey，也可继续增加；每个教学点由一个业务角色负责。</p>
               </div>
               <button class="secondary" type="button" @click="openRoleCreator">＋ 新增角色</button>
             </div>
@@ -390,7 +416,7 @@ function save(next = false) {
                   <input v-model.trim="role.responsibility" placeholder="说明该角色在业务流程中的职责" />
                 </label>
                 <div class="stage-mapping">
-                  <span>负责阶段</span>
+                  <span>负责教学点</span>
                   <label
                     v-for="stage in examStages"
                     :key="stage.id"
@@ -406,12 +432,12 @@ function save(next = false) {
                   </label>
                 </div>
                 <footer>
-                  <span>{{ role.stageIds.length }} 个阶段</span>
+                  <span>{{ role.stageIds.length }} 个教学点</span>
                   <span>{{ roleMemberCount(role.key) }} 名成员</span>
                 </footer>
               </article>
               <div v-if="!roles.length" class="inline-empty">
-                当前教案尚未产生角色。请新增角色并将其映射到考试阶段。
+                当前教案尚未产生角色。请新增角色并将其映射到考试教学点。
               </div>
             </div>
           </article>
@@ -496,7 +522,7 @@ function save(next = false) {
             <div class="card-body role-summary">
               <div v-for="role in roles" :key="role.key">
                 <i :style="{ background: role.color }" />
-                <span><strong>{{ role.name }}</strong><small>{{ role.stageIds.length }} 阶段 · {{ roleMemberCount(role.key) }} 人</small></span>
+                <span><strong>{{ role.name }}</strong><small>{{ role.stageIds.length }} 教学点 · {{ roleMemberCount(role.key) }} 人</small></span>
               </div>
             </div>
             <div class="validation-panel" :class="{ valid: !validationErrors.length }">
@@ -504,7 +530,7 @@ function save(next = false) {
               <ul v-if="validationErrors.length">
                 <li v-for="error in validationErrors" :key="error">{{ error }}</li>
               </ul>
-              <p v-else>角色、阶段、成员和账号均已覆盖，可按单位生成考试数据。</p>
+              <p v-else>角色、教学点、成员和账号均已覆盖，可按单位生成考试数据。</p>
             </div>
           </article>
         </aside>

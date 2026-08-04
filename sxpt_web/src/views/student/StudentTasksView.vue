@@ -1,38 +1,26 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
 import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { authApi } from '../../services/trainingApi';
 
 const store = useTrainingStore();
 const router = useRouter();
 store.refreshPublishedTaskStatuses();
 const statusFilter = ref('ALL');
-
-const learners = computed(() => {
-  const map = new Map<string, string>();
-  store.state.studentTasks.forEach((task) =>
-    map.set(task.studentId, task.studentName)
-  );
-  return [...map.entries()].map(([id, name]) => ({ id, name }));
-});
-const selectedStudentId = ref(learners.value[0]?.id ?? '');
-
-watch(
-  learners,
-  (items) => {
-    if (!items.some((item) => item.id === selectedStudentId.value)) {
-      selectedStudentId.value = items[0]?.id ?? '';
-    }
-  },
-  { immediate: true }
-);
+const session = authApi.getSession();
+const currentStudentId =
+  session?.user.userId ??
+  (typeof window === 'undefined'
+    ? store.state.studentTasks[0]?.studentId ?? ''
+    : '');
 
 const myTasks = computed(() =>
   store.state.studentTasks.filter(
-    (task) => task.studentId === selectedStudentId.value
+    (task) => task.studentId === currentStudentId
   )
 );
 const visibleTasks = computed(() =>
@@ -41,9 +29,10 @@ const visibleTasks = computed(() =>
       statusFilter.value === 'ALL' || task.status === statusFilter.value
   )
 );
-const currentLearner = computed(() =>
-  learners.value.find((item) => item.id === selectedStudentId.value)
-);
+const currentLearner = computed(() => ({
+  id: currentStudentId,
+  name: session?.user.displayName || session?.user.username || '学员'
+}));
 const todoCount = computed(
   () => myTasks.value.filter((task) => task.status === 'TODO').length
 );
@@ -112,20 +101,8 @@ async function restartTrainingTask(taskId: string) {
     <PageHeader
       eyebrow="MY TRAINING DESK"
       :title="`${currentLearner?.name ?? '学员'}，开始今天的业务实训`"
-      description="根据你承担的业务角色进入任务。平台只记录页面访问和流程操作，完成当前角色阶段后将自动移交给下一角色。"
+      description="根据你承担的业务角色进入任务。平台只记录页面访问和流程操作，完成当前角色教学点后将自动移交给下一角色。"
     >
-      <label v-if="learners.length > 1" class="student-session">
-        <span>演示学员会话</span>
-        <select v-model="selectedStudentId">
-          <option
-            v-for="learner in learners"
-            :key="learner.id"
-            :value="learner.id"
-          >
-            {{ learner.name }}（{{ learner.id }}）
-          </option>
-        </select>
-      </label>
     </PageHeader>
 
     <div class="metric-grid student-metrics">
@@ -211,7 +188,7 @@ async function restartTrainingTask(taskId: string) {
             </b>
           </div>
           <small v-if="task.groupKeys.length > 1">
-            本次由同一学员承担多个角色，请按阶段顺序完成完整业务。
+                  本次由同一学员承担多个角色，请按教学点顺序完成完整业务。
           </small>
         </div>
         <dl>
@@ -219,7 +196,7 @@ async function restartTrainingTask(taskId: string) {
             <dt>流程完成</dt>
             <dd>
               {{ task.completedStageIds.length }} /
-              {{ lessonFor(task.lessonId)?.stages.length ?? 0 }} 阶段
+                  {{ lessonFor(task.lessonId)?.stages.length ?? 0 }} 教学点
             </dd>
           </div>
           <div>

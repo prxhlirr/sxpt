@@ -166,6 +166,8 @@ class PracticeAttemptServiceImplTests {
     private PracticeAttempt buildFinishAttempt() {
         PracticeAttempt attempt = new PracticeAttempt();
         attempt.setId("attempt_001");
+        attempt.setTenantId("tenant_001");
+        attempt.setStudentId("student_001");
         attempt.setAttemptStatus("COMPLETED");
         attempt.setEndTime(LocalDateTime.of(2026, 7, 16, 14, 15, 30));
         attempt.setScore(new BigDecimal("85.50"));

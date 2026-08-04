@@ -26,7 +26,7 @@ const identityProfiles: Record<
   },
   teacher: {
     label: '授课教师',
-    name: '薛老师',
+    name: '张老师',
     destination: '/teacher/dashboard',
     destinationLabel: '教师端'
   },

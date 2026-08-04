@@ -1,6 +1,7 @@
 package com.sxpt.module.execution.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.execution.dto.CreateTaskExecutionContextRequest;
 import com.sxpt.module.execution.entity.TaskExecutionContext;
 import com.sxpt.module.execution.service.TaskExecutionContextService;
@@ -67,8 +68,10 @@ public class TaskExecutionContextController {
                                                                 @RequestParam(required = false) String executionId,
                                                                 @RequestParam(required = false) String taskId,
                                                                 @RequestParam(required = false) String studentId) {
-        return ApiResult.success(toVOList(
-                taskExecutionContextService.listContexts(tenantId, executionId, taskId, studentId)));
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        String scopedStudentId = user.hasAnyRole("STUDENT") ? user.getUserId() : studentId;
+        return ApiResult.success(toVOList(taskExecutionContextService.listContexts(
+                user.getTenantId(), executionId, taskId, scopedStudentId)));
     }
 
     /**
@@ -80,10 +83,11 @@ public class TaskExecutionContextController {
     private TaskExecutionContext toEntity(CreateTaskExecutionContextRequest request) {
         TaskExecutionContext context = new TaskExecutionContext();
         context.setId(generateId());
-        context.setTenantId(request.getTenantId());
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        context.setTenantId(user.getTenantId());
         context.setExecutionId(request.getExecutionId());
         context.setTaskId(request.getTaskId());
-        context.setStudentId(request.getStudentId());
+        context.setStudentId(user.hasAnyRole("STUDENT") ? user.getUserId() : request.getStudentId());
         context.setSdkMode(request.getSdkMode());
         context.setContextJson(request.getContextJson());
         context.setOverlayPolicyJson(request.getOverlayPolicyJson());
@@ -91,8 +95,8 @@ public class TaskExecutionContextController {
         context.setResourceSnapshotJson(request.getResourceSnapshotJson());
         context.setEvaluationSnapshotJson(request.getEvaluationSnapshotJson());
         context.setExpireTime(request.getExpireTime());
-        context.setCreateBy(request.getCreateBy());
-        context.setUpdateBy(request.getCreateBy());
+        context.setCreateBy(user.getUserId());
+        context.setUpdateBy(user.getUserId());
         return context;
     }
 

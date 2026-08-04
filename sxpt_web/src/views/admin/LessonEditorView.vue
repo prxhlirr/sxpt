@@ -10,16 +10,27 @@ import {
 } from 'vue';
 import { useRoute } from 'vue-router';
 import type {
+  BusinessPageSnapshot,
+  CaptureRect,
   CompletionMethod,
   LessonStage,
   RecordedStep,
   RunMode
 } from '../../domain/models';
+import BusinessCaptureFrame from '../../components/lesson/BusinessCaptureFrame.vue';
 import { useTrainingStore } from '../../stores/trainingStore';
 import {
   captureBusinessPageSnapshot,
   normalizeBusinessPageSnapshot
 } from '../../utils/businessSnapshot';
+import {
+  createTrainingAttachments,
+  formatAttachmentSize
+} from '../../utils/trainingAttachments';
+import {
+  buildStableElementSelector,
+  describePickedElement
+} from '../../utils/elementSelector';
 
 type PanelTab = 'stage' | 'step' | 'lesson' | 'publish';
 type TargetKey =
@@ -58,6 +69,27 @@ interface CaptureTarget {
   note: string;
 }
 
+interface PickedElementPayload {
+  actionType: 'click' | 'input' | 'select' | 'submit';
+  url: string;
+  pageTitle: string;
+  selector: string;
+  selectorCandidates?: string[];
+  text: string;
+  rect: CaptureRect;
+  recordedViewport?: {
+    width: number;
+    height: number;
+  };
+  pageSnapshot?: BusinessPageSnapshot;
+}
+
+interface BusinessCaptureFrameApi {
+  setRecording: (enabled: boolean) => void;
+  startElementPick: () => void;
+  cancelElementPick: () => void;
+}
+
 const route = useRoute();
 const store = useTrainingStore();
 const lessonId = computed(() => String(route.params.lessonId ?? ''));
@@ -92,10 +124,18 @@ const previewEnabled = ref(true);
 const panelTab = ref<PanelTab>('stage');
 const feedback = ref('');
 const feedbackTone = ref<'success' | 'danger'>('success');
-const activityText = ref('选择业务阶段后，点击“开始录制”即可在下层业务系统中采集操作。');
+const activityText = ref(
+  '选择教学点后，点击“开始录制”将直接进入元素选择模式。'
+);
 const workspaceRef = ref<HTMLElement | null>(null);
 const businessLayerRef = ref<HTMLElement | null>(null);
+const captureFrameRef = ref<BusinessCaptureFrameApi | null>(null);
 const highlightStyle = ref<Record<string, string>>({});
+const elementPicking = ref(false);
+const pickTargetStepId = ref('');
+const pickedElementLabel = ref('');
+const elementPickerStyle = ref<Record<string, string>>({});
+let continuousPickResumeToken = 0;
 
 const configurationLocked = computed(() =>
   store.state.publishedTasks.some((task) => task.lessonId === lessonId.value)
@@ -341,9 +381,9 @@ const previewText = computed(
     '在下层业务系统中完成高亮区域的操作。'
 );
 const statusSummary = computed(() => {
-  if (!selectedStage.value) return '尚未选择业务阶段';
+  if (!selectedStage.value) return '尚未选择教学点';
   const state = recording.value ? '录制中' : '已暂停';
-  return `${state} · 第 ${activeStageIndex.value + 1} 阶段 · ${selectedStage.value.recordedSteps.length} 个节点`;
+  return `${state} · 第 ${activeStageIndex.value + 1} 教学点 · ${selectedStage.value.recordedSteps.length} 个节点`;
 });
 
 watch(
@@ -387,6 +427,8 @@ watch(
 );
 
 watch(selectedStageId, () => {
+  continuousPickResumeToken += 1;
+  if (elementPicking.value) cancelElementPick();
   loadStageDraft();
   selectedStepId.value = selectedStage.value?.recordedSteps[0]?.id ?? '';
 });
@@ -400,12 +442,16 @@ watch(
 onMounted(() => {
   window.addEventListener('resize', updateHighlightPosition);
   window.addEventListener('message', handleBusinessPlatformMessage);
+  window.addEventListener('keydown', handleElementPickerKeydown);
   void nextTick(updateHighlightPosition);
 });
 
 onBeforeUnmount(() => {
+  continuousPickResumeToken += 1;
+  if (elementPicking.value) captureFrameRef.value?.cancelElementPick();
   window.removeEventListener('resize', updateHighlightPosition);
   window.removeEventListener('message', handleBusinessPlatformMessage);
+  window.removeEventListener('keydown', handleElementPickerKeydown);
 });
 
 function loadStageDraft() {
@@ -420,7 +466,8 @@ function loadStageDraft() {
         required: stage.required,
         score: stage.score,
         completionMethod: stage.completionMethod,
-        visibility: { ...stage.visibility }
+        visibility: { ...stage.visibility },
+        attachments: [...(stage.attachments ?? [])]
       }
     : null;
 }
@@ -473,6 +520,229 @@ function resolvePreviewTargetSelector(selector: string) {
   if (selector.includes('date')) return '[data-business-field="date"]';
   if (selector.includes('reason')) return '[data-business-field="reason"]';
   return '[data-business-target="form"]';
+}
+
+function startElementPick(targetStepId = '') {
+  if (!lesson.value || !selectedStage.value) {
+    showFeedback('请先选择或添加一个教学点，再选取页面元素。', 'danger');
+    return;
+  }
+  if (configurationLocked.value) return;
+  pickTargetStepId.value = targetStepId;
+  pickedElementLabel.value = '';
+  elementPickerStyle.value = {};
+  elementPicking.value = true;
+  if (!useEmbeddedBusinessSimulation.value) {
+    captureFrameRef.value?.startElementPick();
+  }
+  activityText.value = targetStepId
+    ? '正在重新绑定节点：移动鼠标预览，点击业务页面中的任意元素，按 Esc 取消。'
+    : '元素选择模式已开启：移动鼠标预览，点击任意元素后填写该元素的讲解说明。';
+}
+
+function finishElementPickState() {
+  elementPicking.value = false;
+  pickTargetStepId.value = '';
+  pickedElementLabel.value = '';
+  elementPickerStyle.value = {};
+}
+
+function resumeContinuousElementPick(label: string) {
+  const resumeToken = ++continuousPickResumeToken;
+  void nextTick(() => {
+    if (
+      resumeToken !== continuousPickResumeToken ||
+      !recording.value ||
+      elementPicking.value ||
+      configurationLocked.value ||
+      !lesson.value ||
+      !selectedStage.value
+    ) {
+      return;
+    }
+    showConfigPanel.value = false;
+    startElementPick();
+    activityText.value = `已绑定“${label}”，连续选取已保持开启，请继续选择下一个业务元素。`;
+  });
+}
+
+function cancelElementPick() {
+  continuousPickResumeToken += 1;
+  if (!elementPicking.value) return;
+  if (!useEmbeddedBusinessSimulation.value) {
+    captureFrameRef.value?.cancelElementPick();
+  }
+  finishElementPickState();
+  activityText.value = '已取消元素选取，未修改教案节点。';
+}
+
+function handleElementPickCancelled() {
+  continuousPickResumeToken += 1;
+  if (!elementPicking.value) return;
+  finishElementPickState();
+  activityText.value = '业务页面已取消元素选取，未修改教案节点。';
+}
+
+function handleElementPickerKeydown(event: KeyboardEvent) {
+  if (elementPicking.value && event.key === 'Escape') {
+    event.preventDefault();
+    cancelElementPick();
+  }
+}
+
+function handleInternalPickMove(event: PointerEvent) {
+  if (!elementPicking.value || !useEmbeddedBusinessSimulation.value) return;
+  const workspace = workspaceRef.value;
+  const businessLayer = businessLayerRef.value;
+  const target = event.target;
+  if (
+    !workspace ||
+    !businessLayer ||
+    !(target instanceof Element) ||
+    target === businessLayer
+  ) {
+    pickedElementLabel.value = '';
+    elementPickerStyle.value = {};
+    return;
+  }
+  const targetRect = target.getBoundingClientRect();
+  if (targetRect.width < 2 || targetRect.height < 2) return;
+  const workspaceRect = workspace.getBoundingClientRect();
+  const selectorData = buildStableElementSelector(target, businessLayer);
+  pickedElementLabel.value = `${target.tagName.toLowerCase()}  ${selectorData.selector}  ${Math.round(
+    targetRect.width
+  )} × ${Math.round(targetRect.height)}`;
+  elementPickerStyle.value = {
+    left: `${targetRect.left - workspaceRect.left}px`,
+    top: `${targetRect.top - workspaceRect.top}px`,
+    width: `${targetRect.width}px`,
+    height: `${targetRect.height}px`
+  };
+}
+
+function handleInternalPickClick(event: MouseEvent) {
+  if (!elementPicking.value || !useEmbeddedBusinessSimulation.value) return;
+  const businessLayer = businessLayerRef.value;
+  const target = event.target;
+  if (
+    !businessLayer ||
+    !(target instanceof Element) ||
+    target === businessLayer
+  ) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  const targetRect = target.getBoundingClientRect();
+  const businessRect = businessLayer.getBoundingClientRect();
+  const selectorData = buildStableElementSelector(target, businessLayer);
+  const pageTitle = businessScenario.value.pageTitle;
+  const pageUrl = effectiveBusinessPlatformUrl.value;
+  handleElementPicked({
+    actionType: 'click',
+    url: pageUrl,
+    pageTitle,
+    selector: selectorData.selector,
+    selectorCandidates: selectorData.selectorCandidates,
+    text: describePickedElement(target),
+    rect: {
+      x: Math.round(targetRect.left - businessRect.left),
+      y: Math.round(targetRect.top - businessRect.top),
+      width: Math.round(targetRect.width),
+      height: Math.round(targetRect.height)
+    },
+    recordedViewport: {
+      width: Math.round(businessRect.width),
+      height: Math.round(businessRect.height)
+    },
+    pageSnapshot: captureBusinessPageSnapshot(businessLayer, {
+      pageUrl,
+      pageTitle,
+      viewport: {
+        width: Math.round(businessRect.width),
+        height: Math.round(businessRect.height)
+      }
+    })
+  });
+}
+
+function handleElementPicked(payload: PickedElementPayload) {
+  if (
+    !elementPicking.value ||
+    !lesson.value ||
+    !selectedStage.value ||
+    configurationLocked.value
+  ) {
+    return;
+  }
+  const label = payload.text?.trim() || '页面元素';
+  const pageUrl = payload.url || effectiveBusinessPlatformUrl.value;
+  const pageTitle = payload.pageTitle || businessScenario.value.pageTitle;
+  const pageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
+    pageUrl,
+    pageTitle,
+    viewport: payload.recordedViewport
+  });
+  const targetStepId = pickTargetStepId.value;
+
+  if (targetStepId) {
+    continuousPickResumeToken += 1;
+    updateRecordedStep(targetStepId, {
+      selector: payload.selector,
+      selectorCandidates: payload.selectorCandidates,
+      rect: payload.rect,
+      url: pageUrl,
+      pageTitle,
+      pageSnapshot,
+      recordedViewport: payload.recordedViewport
+    });
+    selectedStepId.value = targetStepId;
+    finishElementPickState();
+    previewEnabled.value = true;
+    showFeedback(`已将节点重新绑定到“${label}”。`);
+    queueStepSync(selectedStage.value.id, targetStepId);
+    return;
+  }
+
+  const order = selectedStage.value.recordedSteps.length + 1;
+  const explanation = `请说明“${label}”在当前业务流程中的作用和操作要求。`;
+  const step: RecordedStep = {
+    id: `guide-${selectedStage.value.id}-${Date.now()}`,
+    title: `元素说明 ${order}：${label}`,
+    pageTitle,
+    actionLabel: `查看“${label}”说明`,
+    selector: payload.selector,
+    selectorCandidates: payload.selectorCandidates,
+    durationSeconds: 8,
+    note: explanation,
+    kind: 'guide',
+    actionType: 'guide',
+    url: pageUrl,
+    rect: payload.rect,
+    pageSnapshot,
+    recordedViewport: payload.recordedViewport,
+    teachingText: explanation,
+    practiceHint: '观察高亮元素并阅读本节点说明。',
+    examGoal: `理解“${label}”的业务含义`,
+    required: false,
+    failurePolicy: 'skip'
+  };
+  store.updateStage(lesson.value.id, selectedStage.value.id, {
+    recordedSteps: [...selectedStage.value.recordedSteps, step]
+  });
+  selectedStepId.value = step.id;
+  const shouldContinuePicking = recording.value;
+  finishElementPickState();
+  previewEnabled.value = true;
+  if (shouldContinuePicking) {
+    showConfigPanel.value = false;
+    showFeedback(`已绑定“${label}”，可继续选择下一个业务元素。`);
+  } else {
+    openPanel('step');
+    showFeedback(`已绑定“${label}”，请在节点配置中完善逐步讲解。`);
+  }
+  queueStepSync(selectedStage.value.id, step.id);
+  if (shouldContinuePicking) resumeContinuousElementPick(label);
 }
 
 function handleBusinessPlatformMessage(event: MessageEvent) {
@@ -605,11 +875,12 @@ function saveStage() {
       required: stageForm.value.required,
       score: Number(stageForm.value.score),
       completionMethod: stageForm.value.completionMethod,
-      visibility: { ...stageForm.value.visibility }
+      visibility: { ...stageForm.value.visibility },
+      attachments: [...(stageForm.value.attachments ?? [])]
     });
-    showFeedback(`“${stageForm.value.name}”阶段规则已保存。`);
+    showFeedback(`“${stageForm.value.name}”教学点规则已保存。`);
   } catch (error) {
-    showFeedback(error instanceof Error ? error.message : '阶段保存失败', 'danger');
+    showFeedback(error instanceof Error ? error.message : '教学点保存失败', 'danger');
   }
 }
 
@@ -623,21 +894,96 @@ function addStage() {
   try {
     const stage = store.addStage(lesson.value.id, {
       stageKey: `stage_${index}`,
-      name: `业务阶段 ${index}`,
+      name: `教学点 ${index}`,
       groupKey: `role_${index}`,
-      description: '说明本阶段的业务目标、移交条件和操作注意事项。',
+      description: '说明本教学点的业务目标、移交条件和操作注意事项。',
       required: true,
       score: remaining,
       completionMethod: 'mixed',
       visibility: { LEARNING: true, PRACTICE: true, EXAM: true },
-      recordedSteps: []
+      recordedSteps: [],
+      attachments: []
     });
     selectedStageId.value = stage.id;
     openPanel('stage');
     showFeedback(`已添加“${stage.name}”。`);
   } catch (error) {
-    showFeedback(error instanceof Error ? error.message : '阶段添加失败', 'danger');
+    showFeedback(error instanceof Error ? error.message : '教学点添加失败', 'danger');
   }
+}
+
+async function uploadTeachingPointAttachments(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (
+    !lesson.value ||
+    !selectedStage.value ||
+    !input.files?.length ||
+    configurationLocked.value
+  ) {
+    input.value = '';
+    return;
+  }
+  try {
+    const additions = await createTrainingAttachments(input.files);
+    const attachments = [
+      ...(selectedStage.value.attachments ?? []),
+      ...additions
+    ];
+    store.updateStage(lesson.value.id, selectedStage.value.id, {
+      attachments
+    });
+    if (stageForm.value) stageForm.value.attachments = [...attachments];
+    showFeedback(`已为教学点添加 ${additions.length} 个附件。`);
+  } catch (error) {
+    showFeedback(
+      error instanceof Error ? error.message : '教学点附件上传失败',
+      'danger'
+    );
+  } finally {
+    input.value = '';
+  }
+}
+
+function removeTeachingPointAttachment(attachmentId: string) {
+  if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
+  const attachments = (selectedStage.value.attachments ?? []).filter(
+    (attachment) => attachment.id !== attachmentId
+  );
+  store.updateStage(lesson.value.id, selectedStage.value.id, { attachments });
+  if (stageForm.value) stageForm.value.attachments = [...attachments];
+  showFeedback('教学点附件已移除。');
+}
+
+async function uploadStepAttachments(event: Event) {
+  const input = event.target as HTMLInputElement;
+  if (!selectedStep.value || !input.files?.length || configurationLocked.value) {
+    input.value = '';
+    return;
+  }
+  try {
+    const additions = await createTrainingAttachments(input.files);
+    updateRecordedStep(selectedStep.value.id, {
+      attachments: [...(selectedStep.value.attachments ?? []), ...additions]
+    });
+    showFeedback(`已为节点添加 ${additions.length} 个附件。`);
+  } catch (error) {
+    showFeedback(
+      error instanceof Error ? error.message : '节点附件上传失败',
+      'danger'
+    );
+  } finally {
+    input.value = '';
+  }
+}
+
+function removeStepAttachment(attachmentId: string) {
+  if (!selectedStep.value || configurationLocked.value) return;
+  updateRecordedStep(selectedStep.value.id, {
+    attachments: (selectedStep.value.attachments ?? []).filter(
+      (attachment) => attachment.id !== attachmentId
+    )
+  });
+  showFeedback('节点附件已移除。');
 }
 
 function removeSelectedStage() {
@@ -652,9 +998,9 @@ function removeSelectedStage() {
       lesson.value.stages[Math.max(0, currentIndex - 1)]?.id ??
       lesson.value.stages[0]?.id ??
       '';
-    showFeedback('阶段已删除。');
+    showFeedback('教学点已删除。');
   } catch (error) {
-    showFeedback(error instanceof Error ? error.message : '阶段删除失败', 'danger');
+    showFeedback(error instanceof Error ? error.message : '教学点删除失败', 'danger');
   }
 }
 
@@ -662,26 +1008,31 @@ function moveSelectedStage(direction: 'up' | 'down') {
   if (!lesson.value || !selectedStage.value || configurationLocked.value) return;
   try {
     store.moveStage(lesson.value.id, selectedStage.value.id, direction);
-    showFeedback(direction === 'up' ? '阶段已上移。' : '阶段已下移。');
+    showFeedback(direction === 'up' ? '教学点已上移。' : '教学点已下移。');
   } catch (error) {
-    showFeedback(error instanceof Error ? error.message : '阶段排序失败', 'danger');
+    showFeedback(error instanceof Error ? error.message : '教学点排序失败', 'danger');
   }
 }
 
 async function startRecording() {
   if (!selectedStage.value) {
-    showFeedback('请先选择或添加一个业务阶段。', 'danger');
+    showFeedback('请先选择或添加一个教学点。', 'danger');
     return;
   }
   if (configurationLocked.value) return;
   try {
     if (!lesson.value) return;
+    continuousPickResumeToken += 1;
     await store.startCaptureSessionRemote(
       lesson.value.id,
       effectiveBusinessPlatformUrl.value
     );
     recording.value = true;
-    activityText.value = `正在录制“${selectedStage.value.name}”，请直接操作下层业务系统。`;
+    showConfigPanel.value = false;
+    captureFrameRef.value?.setRecording(true);
+    await nextTick();
+    startElementPick();
+    activityText.value = `正在录制“${selectedStage.value.name}”：已进入连续元素选择模式，请依次点击需要绑定说明的业务元素。`;
   } catch (error) {
     showFeedback(
       error instanceof Error ? error.message : '后端采集会话创建失败',
@@ -692,7 +1043,10 @@ async function startRecording() {
 
 function pauseRecording() {
   recording.value = false;
-  activityText.value = '录制已暂停，可编辑节点、调整顺序或保存当前阶段。';
+  continuousPickResumeToken += 1;
+  if (elementPicking.value) cancelElementPick();
+  captureFrameRef.value?.setRecording(false);
+  activityText.value = '录制已暂停，可编辑节点、调整顺序或保存当前教学点。';
 }
 
 async function captureBusinessAction(targetKey: TargetKey) {
@@ -702,10 +1056,19 @@ async function captureBusinessAction(targetKey: TargetKey) {
     return;
   }
   await nextTick();
-  const pageSnapshot = businessLayerRef.value
-    ? captureBusinessPageSnapshot(businessLayerRef.value, {
+  const businessLayer = businessLayerRef.value;
+  const businessRect = businessLayer?.getBoundingClientRect();
+  const recordedViewport = businessRect
+    ? {
+        width: Math.round(businessRect.width),
+        height: Math.round(businessRect.height)
+      }
+    : undefined;
+  const pageSnapshot = businessLayer
+    ? captureBusinessPageSnapshot(businessLayer, {
         pageUrl: effectiveBusinessPlatformUrl.value,
-        pageTitle: target.pageTitle
+        pageTitle: target.pageTitle,
+        viewport: recordedViewport
       })
     : undefined;
   const step: RecordedStep = {
@@ -720,10 +1083,7 @@ async function captureBusinessAction(targetKey: TargetKey) {
     actionType: targetKey === 'submit' ? 'submit' : targetKey === 'category' ? 'select' : 'click',
     url: effectiveBusinessPlatformUrl.value,
     pageSnapshot,
-    recordedViewport: {
-      width: window.innerWidth,
-      height: window.innerHeight
-    },
+    recordedViewport,
     teachingText: target.note,
     practiceHint: `请完成“${target.actionLabel}”操作。`,
     examGoal: `正确完成${target.title}`,
@@ -821,7 +1181,7 @@ function moveRecordedStep(direction: 'up' | 'down') {
 function undoLastStep() {
   const lastStep = selectedStage.value?.recordedSteps.at(-1);
   if (!lastStep) {
-    showFeedback('当前阶段没有可撤销的节点。', 'danger');
+    showFeedback('当前教学点没有可撤销的节点。', 'danger');
     return;
   }
   removeRecordedStep(lastStep.id);
@@ -871,13 +1231,23 @@ function numberValue(event: Event) {
 
 <template>
   <section v-if="lesson" ref="workspaceRef" class="authoring-workspace">
-    <main ref="businessLayerRef" class="business-layer" aria-label="下层业务系统操作界面">
-      <iframe
+    <main
+      ref="businessLayerRef"
+      class="business-layer"
+      :class="{ 'element-picking': elementPicking }"
+      aria-label="下层业务系统操作界面"
+      @pointermove.capture="handleInternalPickMove"
+      @click.capture="handleInternalPickClick"
+    >
+      <BusinessCaptureFrame
         v-if="!useEmbeddedBusinessSimulation && businessPlatform"
+        ref="captureFrameRef"
         class="configured-business-frame"
         :src="effectiveBusinessPlatformUrl"
         :title="`${businessPlatform.name}${businessPlatformModule ? ` / ${businessPlatformModule.name}` : ''}业务界面`"
-        @load="activityText = `业务模块“${businessPlatformModule?.name ?? businessPlatform.name}”已加载，可开始录制。`"
+        @frame-load="activityText = `业务模块“${businessPlatformModule?.name ?? businessPlatform.name}”已加载，可开始录制。`"
+        @element-picked="handleElementPicked"
+        @element-pick-cancelled="handleElementPickCancelled"
       />
       <template v-else>
       <header class="business-header">
@@ -894,8 +1264,8 @@ function numberValue(event: Event) {
         </label>
         <div class="business-user">
           <span class="business-user__status">业务系统已连接</span>
-          <span class="business-avatar">薛</span>
-          <span><strong>薛老师</strong><small>业务操作员</small></span>
+          <span class="business-avatar">张</span>
+          <span><strong>张老师</strong><small>业务操作员</small></span>
         </div>
       </header>
 
@@ -1069,7 +1439,23 @@ function numberValue(event: Event) {
     </main>
 
     <div
-      v-if="!controlsCollapsed && previewEnabled && selectedStep"
+      v-if="elementPicking && useEmbeddedBusinessSimulation && elementPickerStyle.width"
+      class="element-picker-highlight"
+      :style="elementPickerStyle"
+      aria-hidden="true"
+    >
+      <span>{{ pickedElementLabel }}</span>
+    </div>
+
+    <div v-if="elementPicking" class="element-picker-toolbar">
+      <span>⌖ 元素选择模式</span>
+      <strong>移动鼠标预览，点击任意业务元素进行绑定</strong>
+      <small>录制中绑定后会自动继续选取；按 Esc 可结束连续选取</small>
+      <button type="button" @click="cancelElementPick">结束选取</button>
+    </div>
+
+    <div
+      v-if="!elementPicking && !controlsCollapsed && previewEnabled && selectedStep"
       class="teaching-mask"
       aria-label="录制节点蒙版预览"
     >
@@ -1126,7 +1512,7 @@ function numberValue(event: Event) {
           :disabled="configurationLocked || !selectedStage"
           @click="startRecording"
         >
-          ● 开始录制
+          ● 开始录制并选取元素
         </button>
         <button v-else type="button" @click="pauseRecording">Ⅱ 暂停</button>
         <button type="button" :disabled="configurationLocked" @click="undoLastStep">
@@ -1135,8 +1521,16 @@ function numberValue(event: Event) {
         <button type="button" :disabled="configurationLocked" @click="addRecordedStep">
           ＋ 插入说明
         </button>
+        <button
+          type="button"
+          :class="{ active: elementPicking }"
+          :disabled="configurationLocked || !selectedStage"
+          @click="elementPicking ? cancelElementPick() : startElementPick()"
+        >
+          ⌖ {{ elementPicking ? '取消选取' : '选取元素' }}
+        </button>
         <button type="button" :disabled="configurationLocked || !selectedStage" @click="saveCurrentStage">
-          保存本阶段
+          保存本教学点
         </button>
         <button class="command-primary" type="button" :disabled="configurationLocked" @click="publishLesson">
           发布教案
@@ -1163,9 +1557,9 @@ function numberValue(event: Event) {
       <div class="panel-header">
         <div>
           <small>FLOW & STEPS</small>
-          <h2>业务阶段与节点</h2>
+          <h2>教学点与节点</h2>
         </div>
-        <button type="button" :disabled="configurationLocked" @click="addStage">＋ 阶段</button>
+        <button type="button" :disabled="configurationLocked" @click="addStage">＋ 教学点</button>
       </div>
       <div class="stage-list">
         <article
@@ -1199,12 +1593,12 @@ function numberValue(event: Event) {
               <b v-if="step.id === selectedStepId">●</b>
             </button>
             <div v-if="!stage.recordedSteps.length" class="step-empty">
-              开始录制后，操作下层业务系统即可自动生成节点。
+              开始录制后会进入连续元素选择模式，可依次点击目标元素生成说明节点。
             </div>
           </div>
         </article>
         <div v-if="!lesson.stages.length" class="stage-empty">
-          暂无业务阶段，请先添加阶段。
+          暂无教学点，请先添加教学点。
         </div>
       </div>
       <div class="stage-panel-actions">
@@ -1218,13 +1612,13 @@ function numberValue(event: Event) {
         >
           ↓ 下移
         </button>
-        <button type="button" @click="openPanel('stage')">阶段配置</button>
+        <button type="button" @click="openPanel('stage')">教学点配置</button>
       </div>
     </aside>
 
     <aside v-if="!controlsCollapsed && showConfigPanel" class="glass-panel config-panel">
       <div class="config-tabs">
-        <button :class="{ active: panelTab === 'stage' }" type="button" @click="panelTab = 'stage'">阶段</button>
+        <button :class="{ active: panelTab === 'stage' }" type="button" @click="panelTab = 'stage'">教学点</button>
         <button :class="{ active: panelTab === 'step' }" type="button" @click="panelTab = 'step'">节点</button>
         <button :class="{ active: panelTab === 'lesson' }" type="button" @click="panelTab = 'lesson'">教案</button>
         <button :class="{ active: panelTab === 'publish' }" type="button" @click="panelTab = 'publish'">校验</button>
@@ -1233,16 +1627,16 @@ function numberValue(event: Event) {
 
       <div v-if="panelTab === 'stage' && stageForm" class="config-content">
         <div class="config-title">
-          <div><small>STAGE RULE</small><h2>阶段规则</h2></div>
+          <div><small>TEACHING POINT</small><h2>教学点规则</h2></div>
           <button class="danger-text" type="button" @click="removeSelectedStage">删除</button>
         </div>
         <label>
-          <span>阶段名称</span>
+          <span>教学点名称</span>
           <input v-model="stageForm.name" :disabled="configurationLocked" />
         </label>
         <div class="config-grid">
           <label>
-            <span>阶段标识 stageKey</span>
+            <span>教学点标识 stageKey</span>
             <input v-model="stageForm.stageKey" :disabled="configurationLocked" />
           </label>
           <label>
@@ -1250,7 +1644,7 @@ function numberValue(event: Event) {
             <input v-model="stageForm.groupKey" :disabled="configurationLocked" />
           </label>
           <label>
-            <span>阶段分值</span>
+            <span>教学点分值</span>
             <input v-model.number="stageForm.score" type="number" min="0" :disabled="configurationLocked" />
           </label>
           <label>
@@ -1266,6 +1660,40 @@ function numberValue(event: Event) {
           <span>教学说明</span>
           <textarea v-model="stageForm.description" rows="4" :disabled="configurationLocked" />
         </label>
+        <section class="attachment-editor">
+          <div class="attachment-editor__heading">
+            <span>教学点附件</span>
+            <label class="attachment-upload">
+              <input
+                type="file"
+                multiple
+                :disabled="configurationLocked"
+                @change="uploadTeachingPointAttachments"
+              />
+              ＋ 上传附件
+            </label>
+          </div>
+          <small>支持图片、PDF、文档等文件；单个文件不超过 5 MB。</small>
+          <div v-if="stageForm.attachments?.length" class="attachment-editor__list">
+            <article v-for="attachment in stageForm.attachments" :key="attachment.id">
+              <span>附件</span>
+              <div>
+                <strong>{{ attachment.name }}</strong>
+                <small>
+                  {{ attachment.mimeType }} · {{ formatAttachmentSize(attachment.size) }}
+                </small>
+              </div>
+              <button
+                type="button"
+                :disabled="configurationLocked"
+                @click="removeTeachingPointAttachment(attachment.id)"
+              >
+                移除
+              </button>
+            </article>
+          </div>
+          <p v-else>尚未上传教学点附件。</p>
+        </section>
         <div class="visibility-editor">
           <span>模式可见性 visibility</span>
           <label v-for="mode in modes" :key="mode.key">
@@ -1275,10 +1703,10 @@ function numberValue(event: Event) {
         </div>
         <label class="checkbox-row">
           <input v-model="stageForm.required" type="checkbox" :disabled="configurationLocked" />
-          必做业务阶段
+          必做教学点
         </label>
         <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveStage">
-          保存阶段规则
+          保存教学点规则
         </button>
       </div>
 
@@ -1323,6 +1751,21 @@ function numberValue(event: Event) {
               @change="updateRecordedStep(selectedStep.id, { selector: inputValue($event) })"
             />
           </label>
+          <section class="element-binding-editor">
+            <div>
+              <strong>页面元素绑定</strong>
+              <small>
+                可像 Chrome 检查元素一样重新选择页面上的任意标题、文字、表格或控件。
+              </small>
+            </div>
+            <button
+              type="button"
+              :disabled="configurationLocked"
+              @click="startElementPick(selectedStep.id)"
+            >
+              ⌖ 重新选择元素
+            </button>
+          </section>
           <label>
             <span>逐步讲解</span>
             <textarea
@@ -1378,6 +1821,40 @@ function numberValue(event: Event) {
             />
             必做节点
           </label>
+          <section class="attachment-editor">
+            <div class="attachment-editor__heading">
+              <span>节点附件</span>
+              <label class="attachment-upload">
+                <input
+                  type="file"
+                  multiple
+                  :disabled="configurationLocked"
+                  @change="uploadStepAttachments"
+                />
+                ＋ 上传附件
+              </label>
+            </div>
+            <small>附件将在教师讲解与学生学习该节点时显示，可随时收起。</small>
+            <div v-if="selectedStep.attachments?.length" class="attachment-editor__list">
+              <article v-for="attachment in selectedStep.attachments" :key="attachment.id">
+                <span>附件</span>
+                <div>
+                  <strong>{{ attachment.name }}</strong>
+                  <small>
+                    {{ attachment.mimeType }} · {{ formatAttachmentSize(attachment.size) }}
+                  </small>
+                </div>
+                <button
+                  type="button"
+                  :disabled="configurationLocked"
+                  @click="removeStepAttachment(attachment.id)"
+                >
+                  移除
+                </button>
+              </article>
+            </div>
+            <p v-else>尚未上传节点附件。</p>
+          </section>
           <div class="node-actions">
             <button
               v-if="
@@ -1455,7 +1932,7 @@ function numberValue(event: Event) {
         <label><span>标签（逗号分隔）</span><input v-model="basicForm.tags" :disabled="configurationLocked" /></label>
         <div class="score-strip">
           <span><small>教案总分</small><strong>{{ totalScore }}</strong></span>
-          <span><small>阶段分合计</small><strong>{{ objectiveStageScore }}</strong></span>
+          <span><small>教学点分合计</small><strong>{{ objectiveStageScore }}</strong></span>
           <span><small>录制节点</small><strong>{{ recordedStepCount }}</strong></span>
         </div>
         <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveBasicInformation">
@@ -1469,7 +1946,7 @@ function numberValue(event: Event) {
           <span>{{ validationMessages.length ? `${validationMessages.length} 项待处理` : '校验通过' }}</span>
         </div>
         <p class="publish-description">
-          发布前检查基础信息、阶段分值、角色与录制步骤；通过后再进入考试设置。
+          发布前检查基础信息、教学点分值、角色与录制步骤；通过后再进入考试设置。
         </p>
         <div v-if="validationMessages.length" class="validation-list">
           <span v-for="message in validationMessages" :key="message">! {{ message }}</span>
@@ -1489,7 +1966,7 @@ function numberValue(event: Event) {
 
     <div v-if="!controlsCollapsed" class="quick-controls">
       <button type="button" :class="{ active: showStagePanel }" @click="showStagePanel = !showStagePanel">
-        {{ showStagePanel ? '隐藏阶段' : '显示阶段' }}
+        {{ showStagePanel ? '隐藏教学点' : '显示教学点' }}
       </button>
       <button type="button" :class="{ active: showConfigPanel }" @click="showConfigPanel = !showConfigPanel">
         {{ showConfigPanel ? '隐藏配置' : '节点配置' }}
@@ -1540,11 +2017,120 @@ function numberValue(event: Event) {
   background: #eef2f7;
 }
 
+.attachment-editor {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e2e5ee;
+  border-radius: 10px;
+  padding: 11px;
+  background: #fafbfe;
+}
+
+.attachment-editor__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.attachment-editor__heading > span {
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.attachment-upload {
+  display: inline-flex !important;
+  min-height: 28px;
+  align-items: center;
+  border: 1px solid #d9d3ff;
+  border-radius: 7px;
+  padding: 0 9px;
+  color: #5d4bd8;
+  background: #f0edff;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.attachment-upload input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.attachment-editor > small,
+.attachment-editor > p {
+  margin: 0;
+  color: #8b94a5;
+  font-size: 9px;
+}
+
+.attachment-editor__list {
+  display: grid;
+  gap: 6px;
+}
+
+.attachment-editor__list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 7px;
+  background: #fff;
+}
+
+.attachment-editor__list article > span {
+  border-radius: 6px;
+  padding: 7px 5px;
+  color: #6553df;
+  background: #efecff;
+  font-size: 8px;
+  font-weight: 850;
+}
+
+.attachment-editor__list article > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.attachment-editor__list strong,
+.attachment-editor__list small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-editor__list strong {
+  font-size: 10px;
+}
+
+.attachment-editor__list small {
+  color: #8992a2;
+  font-size: 8px;
+}
+
+.attachment-editor__list button {
+  border: 0;
+  color: #b33a55;
+  background: transparent;
+  font-size: 9px;
+  font-weight: 800;
+}
+
 .business-layer {
   position: absolute;
   inset: 0;
   overflow: hidden;
   background: #f2f5f9;
+}
+
+.business-layer.element-picking,
+.business-layer.element-picking * {
+  cursor: crosshair !important;
 }
 
 .configured-business-frame {
@@ -2144,6 +2730,11 @@ function numberValue(event: Event) {
   background: rgb(91 73 224 / 88%);
 }
 
+.command-actions button.active {
+  border-color: #7765ef;
+  background: #604ddd;
+}
+
 .glass-panel {
   border: 1px solid rgb(207 216 226 / 86%);
   border-radius: 10px;
@@ -2414,6 +3005,43 @@ function numberValue(event: Event) {
   padding: 14px;
 }
 
+.element-binding-editor {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #dcd6ff;
+  border-radius: 9px;
+  padding: 10px;
+  background: #f4f2ff;
+}
+
+.element-binding-editor > div {
+  display: grid;
+  gap: 3px;
+}
+
+.element-binding-editor strong {
+  color: #4938bd;
+  font-size: 10px;
+}
+
+.element-binding-editor small {
+  color: #746b9a;
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.element-binding-editor button {
+  min-height: 30px;
+  flex: none;
+  border-color: #cfc6ff;
+  color: #5542ce;
+  background: #fff;
+  font-size: 8px;
+  font-weight: 850;
+}
+
 .config-title {
   display: flex;
   align-items: center;
@@ -2666,6 +3294,78 @@ function numberValue(event: Event) {
   padding: 0 4px;
   color: inherit;
   background: transparent;
+}
+
+.element-picker-highlight {
+  position: absolute;
+  z-index: 42;
+  border: 2px solid #6d5dfc;
+  border-radius: 4px;
+  background: rgb(109 93 252 / 12%);
+  box-shadow:
+    0 0 0 1px rgb(255 255 255 / 84%),
+    0 0 0 5px rgb(109 93 252 / 14%);
+  pointer-events: none;
+}
+
+.element-picker-highlight > span {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: -2px;
+  overflow: hidden;
+  max-width: min(520px, 76vw);
+  border-radius: 5px 5px 5px 0;
+  padding: 5px 8px;
+  color: #fff;
+  background: #5948dc;
+  font: 700 10px/1.35 Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.element-picker-toolbar {
+  position: absolute;
+  z-index: 45;
+  top: 14px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgb(255 255 255 / 38%);
+  border-radius: 10px;
+  padding: 8px 9px 8px 12px;
+  color: #fff;
+  background: rgb(67 53 171 / 94%);
+  box-shadow: 0 16px 36px rgb(40 28 127 / 30%);
+  transform: translateX(-50%);
+  backdrop-filter: blur(12px);
+}
+
+.element-picker-toolbar span {
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.element-picker-toolbar strong {
+  font-size: 9px;
+  white-space: nowrap;
+}
+
+.element-picker-toolbar small {
+  color: rgb(255 255 255 / 72%);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
+.element-picker-toolbar button {
+  min-height: 27px;
+  border-color: rgb(255 255 255 / 26%);
+  color: #fff;
+  background: rgb(255 255 255 / 13%);
+  font-size: 8px;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 .teaching-mask {

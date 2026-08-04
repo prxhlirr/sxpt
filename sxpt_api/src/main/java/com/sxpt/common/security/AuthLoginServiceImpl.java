@@ -213,9 +213,11 @@ public class AuthLoginServiceImpl implements AuthLoginService {
      */
     private AuthLoginResponse buildLoginResponse(TeachUser teachUser) {
         AuthLoginResponse response = new AuthLoginResponse();
-        response.setToken(jwtService.generateToken(teachUser.getId(), teachUser.getUsername()));
-        response.setTokenType("Bearer");
-        response.setExpiresIn(jwtProperties.getExpireSeconds());
+        List<String> roleCodes = new ArrayList<String>(listRoleCodes(teachUser));
+        if (StringUtils.hasText(teachUser.getUserType())
+                && !containsIgnoreCase(roleCodes, teachUser.getUserType())) {
+            roleCodes.add(teachUser.getUserType());
+        }
 
         AuthLoginResponse.UserSummary user = new AuthLoginResponse.UserSummary();
         user.setUserId(teachUser.getId());
@@ -225,10 +227,27 @@ public class AuthLoginServiceImpl implements AuthLoginService {
         user.setUserType(teachUser.getUserType());
         user.setStudentNo(teachUser.getStudentNo());
         user.setEmployeeNo(teachUser.getEmployeeNo());
-        user.setRoles(listRoleCodes(teachUser));
+        user.setRoles(roleCodes);
         user.setOrgIds(listOrgIds(teachUser));
         response.setUser(user);
+        response.setToken(jwtService.generateToken(
+                teachUser.getId(),
+                teachUser.getUsername(),
+                teachUser.getTenantId(),
+                roleCodes
+        ));
+        response.setTokenType("Bearer");
+        response.setExpiresIn(jwtProperties.getExpireSeconds());
         return response;
+    }
+
+    private boolean containsIgnoreCase(List<String> values, String expected) {
+        for (String value : values) {
+            if (value != null && value.equalsIgnoreCase(expected)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

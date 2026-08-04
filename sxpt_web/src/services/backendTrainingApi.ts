@@ -664,20 +664,49 @@ export function serializeRecordedStepSnapshot(step: RecordedStep) {
 
 async function ensureSimulatedPublishOrg(preferredIdOrCode: string) {
   const config = getApiConfig();
+  const preferredCode = safeCode(preferredIdOrCode || 'DEMO-CLASS', 64);
   const organizations = await usersApi.listOrgs(config.tenantId);
-  const existing = organizations.find(
-    (organization) =>
-      organization.id === preferredIdOrCode ||
-      organization.orgCode === preferredIdOrCode
+  const existing = findOrganizationByIdOrCode(
+    organizations,
+    preferredIdOrCode,
+    preferredCode
   );
   if (existing) return existing.id;
-  const created = await usersApi.createOrg({
-    tenantId: config.tenantId,
-    orgCode: safeCode(preferredIdOrCode || 'DEMO-CLASS', 64),
-    orgName: '模拟班级',
-    orgType: 'CLASS'
-  });
-  return created.id;
+  try {
+    const created = await usersApi.createOrg({
+      tenantId: config.tenantId,
+      orgCode: preferredCode,
+      orgName: '模拟班级',
+      orgType: 'CLASS'
+    });
+    return created.id;
+  } catch (error) {
+    // 多标签页或并发发布可能在“查询后、创建前”写入同一组织。
+    // 重新查询并复用可保证学习/练习任务发布具有幂等性。
+    const refreshed = await usersApi.listOrgs(config.tenantId);
+    const concurrentlyCreated = findOrganizationByIdOrCode(
+      refreshed,
+      preferredIdOrCode,
+      preferredCode
+    );
+    if (!concurrentlyCreated) throw error;
+    return concurrentlyCreated.id;
+  }
+}
+
+export function findOrganizationByIdOrCode<
+  T extends { id: string; orgCode: string }
+>(
+  organizations: T[],
+  preferredIdOrCode: string,
+  normalizedPreferredCode = normalizeCode(preferredIdOrCode)
+): T | undefined {
+  return organizations.find(
+    (organization) =>
+      organization.id === preferredIdOrCode ||
+      normalizeCode(organization.orgCode) ===
+        normalizeCode(normalizedPreferredCode)
+  );
 }
 
 export function mapConnectorSystem(
@@ -722,13 +751,32 @@ function serializePlatformConfig(platform: BusinessPlatform): string {
   });
 }
 
-function safeCode(value: string, maxLength: number): string {
+export function safeCode(value: string, maxLength: number): string {
   const normalized = value
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9_-]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  return (normalized || `RESOURCE_${Date.now()}`).slice(0, maxLength);
+  const fallback = normalized || `RESOURCE_${Date.now()}`;
+  if (fallback.length <= maxLength) return fallback;
+
+  // 教案节点 ID 的差异通常位于时间戳尾部。直接截断会让多个资源、
+  // task_step 和 evaluation_item 共用同一业务编码，进而丢失轨迹与分数。
+  const hash = stableCodeHash(fallback);
+  if (maxLength <= hash.length) return hash.slice(0, maxLength);
+  const prefixLength = maxLength - hash.length - 1;
+  const prefix =
+    fallback.slice(0, prefixLength).replace(/[-_]+$/g, '') || 'CODE';
+  return `${prefix}-${hash}`.slice(0, maxLength);
+}
+
+function stableCodeHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).toUpperCase().padStart(8, '0');
 }
 
 function normalizeCode(value: string): string {

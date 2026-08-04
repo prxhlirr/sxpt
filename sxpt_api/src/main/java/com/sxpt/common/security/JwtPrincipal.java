@@ -1,5 +1,8 @@
 package com.sxpt.common.security;
 
+import java.util.Collections;
+import java.util.List;
+
 /**
  * JWT 认证主体。
  *
@@ -17,9 +20,21 @@ public class JwtPrincipal {
 
     private final String username;
 
+    private final String tenantId;
+
+    private final List<String> roles;
+
     public JwtPrincipal(String userId, String username) {
+        this(userId, username, null, Collections.<String>emptyList());
+    }
+
+    public JwtPrincipal(String userId, String username, String tenantId, List<String> roles) {
         this.userId = userId;
         this.username = username;
+        this.tenantId = tenantId;
+        this.roles = roles == null
+                ? Collections.<String>emptyList()
+                : Collections.unmodifiableList(roles);
     }
 
     public String getUserId() {
@@ -28,5 +43,13 @@ public class JwtPrincipal {
 
     public String getUsername() {
         return username;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public List<String> getRoles() {
+        return roles;
     }
 }

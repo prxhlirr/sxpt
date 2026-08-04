@@ -16,6 +16,9 @@
   var recordingEnabled = config.record;
   var isPlayingBack = false;
   var elementPickActive = false;
+  var pickedHoverElement = null;
+  var pickerOverlay = null;
+  var pickerLabel = null;
   var lastSentAction = { signature: '', at: 0 };
   var routeGeneration = 0;
 
@@ -121,13 +124,22 @@
   function getSelectorCandidates(actionElement) {
     var candidates = [];
     var tagName = actionElement.tagName.toLowerCase();
-    if (actionElement.dataset.action) {
+    var preferredAttributes = [
+      'data-training-id',
+      'data-business-field',
+      'data-action',
+      'data-testid',
+      'data-test'
+    ];
+    preferredAttributes.forEach(function (attribute) {
+      var value = actionElement.getAttribute(attribute);
+      if (!value) return;
       pushUniqueSelector(
         candidates,
-        '[data-action="' + escapeSelector(actionElement.dataset.action) + '"]',
+        '[' + attribute + '="' + escapeSelector(value) + '"]',
         actionElement
       );
-    }
+    });
     if (actionElement.id) {
       pushUniqueSelector(candidates, '#' + escapeSelector(actionElement.id), actionElement);
     }
@@ -201,6 +213,144 @@
       width: window.innerWidth,
       height: window.innerHeight,
       devicePixelRatio: window.devicePixelRatio || 1
+    };
+  }
+
+  function ensurePickerUi() {
+    if (pickerOverlay && document.body.contains(pickerOverlay)) return;
+    var style = document.createElement('style');
+    style.setAttribute('data-sxpt-element-picker', 'true');
+    style.textContent =
+      'html.sxpt-element-picking,html.sxpt-element-picking *{cursor:crosshair!important}' +
+      '.sxpt-element-picker-overlay{position:fixed;z-index:2147483646;display:none;' +
+      'border:2px solid #6d5dfc;border-radius:4px;background:rgba(109,93,252,.12);' +
+      'box-shadow:0 0 0 1px rgba(255,255,255,.84),0 0 0 5px rgba(109,93,252,.14);' +
+      'pointer-events:none}' +
+      '.sxpt-element-picker-overlay.sxpt-visible{display:block}' +
+      '.sxpt-element-picker-label{position:absolute;top:-28px;left:-2px;max-width:80vw;' +
+      'overflow:hidden;border-radius:5px 5px 5px 0;padding:5px 8px;color:#fff;' +
+      'background:#5948dc;font:700 11px/1.35 Consolas,monospace;text-overflow:ellipsis;' +
+      'white-space:nowrap}';
+    document.head.appendChild(style);
+    pickerOverlay = document.createElement('div');
+    pickerOverlay.className = 'sxpt-element-picker-overlay';
+    pickerOverlay.setAttribute('data-sxpt-element-picker', 'true');
+    pickerOverlay.setAttribute('aria-hidden', 'true');
+    pickerLabel = document.createElement('span');
+    pickerLabel.className = 'sxpt-element-picker-label';
+    pickerOverlay.appendChild(pickerLabel);
+    document.body.appendChild(pickerOverlay);
+  }
+
+  function getPickedElement(target) {
+    if (!(target instanceof Element)) return null;
+    if (target.closest('[data-sxpt-element-picker]')) return null;
+    if (target === document.body || target === document.documentElement) return null;
+    var rect = target.getBoundingClientRect();
+    if (rect.width < 2 || rect.height < 2) return null;
+    return target;
+  }
+
+  function updatePickerOverlay(target) {
+    ensurePickerUi();
+    pickedHoverElement = target;
+    if (!target) {
+      pickerOverlay.classList.remove('sxpt-visible');
+      return;
+    }
+    var rect = target.getBoundingClientRect();
+    var selectors = getSelectorCandidates(target);
+    var selector = selectors[0] || getUniqueCssPath(target) || target.tagName.toLowerCase();
+    pickerOverlay.style.left = Math.round(rect.left) + 'px';
+    pickerOverlay.style.top = Math.round(rect.top) + 'px';
+    pickerOverlay.style.width = Math.round(rect.width) + 'px';
+    pickerOverlay.style.height = Math.round(rect.height) + 'px';
+    pickerLabel.textContent =
+      target.tagName.toLowerCase() + '  ' + selector + '  ' +
+      Math.round(rect.width) + ' × ' + Math.round(rect.height);
+    pickerLabel.style.top = rect.top < 34 ? Math.round(rect.height + 5) + 'px' : '-28px';
+    pickerOverlay.classList.add('sxpt-visible');
+  }
+
+  function setElementPickActive(enabled, notifyCancelled) {
+    elementPickActive = enabled;
+    document.documentElement.classList.toggle('sxpt-element-picking', enabled);
+    if (enabled) {
+      ensurePickerUi();
+    } else {
+      pickedHoverElement = null;
+      updatePickerOverlay(null);
+    }
+    if (notifyCancelled) {
+      window.parent.postMessage(
+        { type: 'ELEMENT_PICK_CANCELLED', url: getCurrentBusinessUrl() },
+        config.parentOrigin
+      );
+    }
+  }
+
+  function copyPickerSnapshotFormState(source, clone) {
+    var sourceControls = source.querySelectorAll('input, textarea, select');
+    var cloneControls = clone.querySelectorAll('input, textarea, select');
+    Array.prototype.forEach.call(sourceControls, function (control, index) {
+      var cloneControl = cloneControls[index];
+      if (!cloneControl) return;
+      if (control.matches('input')) {
+        cloneControl.value =
+          control.type === 'password' && control.value ? '••••••••' : control.value;
+        cloneControl.setAttribute('value', cloneControl.value);
+        cloneControl.toggleAttribute('checked', control.checked);
+      } else if (control.matches('textarea')) {
+        cloneControl.value = control.value;
+        cloneControl.textContent = control.value;
+      } else {
+        Array.prototype.forEach.call(cloneControl.options, function (option, optionIndex) {
+          option.toggleAttribute('selected', optionIndex === control.selectedIndex);
+        });
+      }
+    });
+  }
+
+  function createPickerPageSnapshot() {
+    var clone = document.body.cloneNode(true);
+    copyPickerSnapshotFormState(document.body, clone);
+    clone.querySelectorAll(
+      'script,noscript,iframe,object,embed,[data-sxpt-element-picker]'
+    ).forEach(function (element) {
+      element.remove();
+    });
+    clone.querySelectorAll('*').forEach(function (element) {
+      Array.prototype.slice.call(element.attributes).forEach(function (attribute) {
+        if (
+          attribute.name.toLowerCase().indexOf('on') === 0 ||
+          attribute.name.toLowerCase() === 'srcdoc'
+        ) {
+          element.removeAttribute(attribute.name);
+        }
+      });
+      if (element.matches('input,textarea,select,button')) {
+        element.setAttribute('data-sxpt-original-disabled', String(element.disabled));
+        element.setAttribute('disabled', '');
+      }
+    });
+    var cssText = Array.prototype.flatMap.call(document.styleSheets, function (sheet) {
+      try {
+        return Array.prototype.map.call(sheet.cssRules, function (rule) {
+          return rule.cssText;
+        });
+      } catch (error) {
+        return [];
+      }
+    }).join('\n').slice(0, 400000);
+    return {
+      version: 1,
+      format: 'DOM',
+      pageUrl: getCurrentBusinessUrl(),
+      pageTitle: document.title,
+      capturedAt: new Date().toISOString(),
+      html: clone.outerHTML.slice(0, 700000),
+      cssText: cssText,
+      viewport: getViewport()
     };
   }
 
@@ -508,28 +658,45 @@
   }
 
   function handleElementPick(event) {
-    if (!elementPickActive || !event.target || !event.target.closest) return false;
-    var target = event.target.closest('[data-action], input, textarea, select, button, a');
-    if (!target) return false;
+    if (!elementPickActive) return false;
+    var target = getPickedElement(event.target) || pickedHoverElement;
     event.preventDefault();
-    event.stopPropagation();
-    elementPickActive = false;
+    event.stopImmediatePropagation();
+    if (!target) return true;
     var selectorCandidates = getSelectorCandidates(target);
+    var selector =
+      selectorCandidates[0] || getUniqueCssPath(target) || target.tagName.toLowerCase();
+    setElementPickActive(false, false);
     window.parent.postMessage(
       {
         type: 'ELEMENT_PICKED',
+        actionType: 'click',
         url: getCurrentBusinessUrl(),
-        selector: selectorCandidates[0] || target.tagName.toLowerCase(),
+        pageTitle: document.title,
+        selector: selector,
         selectorCandidates: selectorCandidates,
-        text: String(getActionText(target, getActionKey(target)) || '').trim(),
+        text: String(getActionText(target, getActionKey(target)) || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 80),
         rect: getRect(target),
-        recordedViewport: getViewport()
+        recordedViewport: getViewport(),
+        pageSnapshot: createPickerPageSnapshot()
       },
       config.parentOrigin
     );
     return true;
   }
 
+  document.addEventListener('pointermove', function (event) {
+    if (!elementPickActive) return;
+    updatePickerOverlay(getPickedElement(event.target));
+  }, true);
+  document.addEventListener('keydown', function (event) {
+    if (!elementPickActive || event.key !== 'Escape') return;
+    event.preventDefault();
+    setElementPickActive(false, true);
+  }, true);
   document.addEventListener('click', function (event) {
     if (handleElementPick(event)) return;
     sendAction(event.target, 'click');
@@ -571,11 +738,19 @@
       sendReady();
       return;
     }
-    if (event.data.type === 'START_ELEMENT_PICK') {
-      elementPickActive = true;
+    if (
+      event.data.type === 'START_ELEMENT_PICK' ||
+      event.data.type === 'SXPT_START_ELEMENT_PICK'
+    ) {
+      setElementPickActive(true, false);
       return;
     }
-    if (event.data.type === 'CANCEL_ELEMENT_PICK') elementPickActive = false;
+    if (
+      event.data.type === 'CANCEL_ELEMENT_PICK' ||
+      event.data.type === 'SXPT_CANCEL_ELEMENT_PICK'
+    ) {
+      setElementPickActive(false, false);
+    }
   });
 
   function createId(prefix) {

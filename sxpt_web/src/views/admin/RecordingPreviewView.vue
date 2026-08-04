@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import AttachmentPanel from '../../components/lesson/AttachmentPanel.vue';
 import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import type { LessonStage, RecordedStep } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
@@ -16,6 +17,11 @@ const route = useRoute();
 const store = useTrainingStore();
 const lessonId = computed(() => String(route.params.lessonId ?? ''));
 const lesson = computed(() => store.getLesson(lessonId.value));
+const openedFromPublishCenter = computed(() => route.query.from === 'publish');
+const returnRoute = computed(() => ({
+  name: openedFromPublishCenter.value ? 'publish-center' : 'lesson-editor',
+  params: { lessonId: lessonId.value }
+}));
 const currentIndex = ref(0);
 const lectureFeedback = ref('');
 const lectureFeedbackSuccess = ref(false);
@@ -34,15 +40,13 @@ const previewSteps = computed<PreviewStep[]>(() =>
 );
 const current = computed(() => previewSteps.value[currentIndex.value]);
 const currentStep = computed(() => current.value?.step);
+const lectureTeachingPoints = computed(() =>
+  (lesson.value?.stages ?? []).filter((stage) => stage.recordedSteps.length)
+);
 const canMovePrevious = computed(
   () =>
     currentIndex.value > 0 ||
     (!showStageIntroduction.value && current.value?.stepIndex === 0)
-);
-const canMoveNext = computed(
-  () =>
-    showStageIntroduction.value ||
-    currentIndex.value < previewSteps.value.length - 1
 );
 const totalDuration = computed(() =>
   previewSteps.value.reduce((total, item) => total + item.step.durationSeconds, 0)
@@ -69,10 +73,15 @@ function formatDuration(seconds: number) {
 }
 
 function selectStep(index: number) {
-  const previousStageId = current.value?.stage.id;
   currentIndex.value = Math.max(0, Math.min(index, previewSteps.value.length - 1));
-  showStageIntroduction.value =
-    Boolean(previousStageId) && current.value?.stage.id !== previousStageId;
+  showStageIntroduction.value = false;
+}
+
+function selectTeachingPoint(stageId: string) {
+  const index = previewSteps.value.findIndex((item) => item.stage.id === stageId);
+  if (index < 0) return;
+  currentIndex.value = index;
+  showStageIntroduction.value = true;
 }
 
 function move(direction: -1 | 1) {
@@ -135,16 +144,16 @@ function finishLecture() {
       <div class="preview-header__actions">
         <RouterLink
           class="button secondary"
-          :to="{ name: 'lesson-editor', params: { lessonId: lesson.id } }"
+          :to="returnRoute"
         >
-          ← 返回编辑
+          ← {{ openedFromPublishCenter ? '返回发布中心' : '返回编辑' }}
         </RouterLink>
         <span class="demo-badge">● 安全演示</span>
       </div>
     </header>
 
     <section v-show="showLectureOverlay" class="preview-metrics">
-      <span><small>业务阶段</small><strong>{{ lesson.stages.length }}</strong></span>
+      <span><small>教学点</small><strong>{{ lesson.stages.length }}</strong></span>
       <span><small>录制片段</small><strong>{{ previewSteps.length }}</strong></span>
       <span><small>总时长</small><strong>{{ formatDuration(totalDuration) }}</strong></span>
       <span><small>当前进度</small><strong>{{ progress }}%</strong></span>
@@ -177,53 +186,45 @@ function finishLecture() {
         />
 
         <div v-show="showLectureOverlay" class="playback-bar">
-          <button
-            class="icon-button"
-            type="button"
-            :disabled="!canMovePrevious"
-            aria-label="上一步"
-            @click="move(-1)"
-          >
-            ‹
-          </button>
           <span>{{ formatDuration(elapsedDuration) }}</span>
           <div><i :style="{ width: `${progress}%` }"></i></div>
           <span>{{ formatDuration(totalDuration) }}</span>
-          <button
-            class="icon-button"
-            type="button"
-            :disabled="!canMoveNext"
-            aria-label="下一步"
-            @click="move(1)"
-          >
-            ›
-          </button>
         </div>
       </main>
 
-      <aside class="explanation-panel">
+      <aside
+        class="explanation-panel lecture-step-prompt"
+        :class="{
+          'stage-prompt': showStageIntroduction,
+          'node-prompt': !showStageIntroduction
+        }"
+      >
         <template v-if="showStageIntroduction">
           <div class="explanation-heading stage-introduction-heading">
             <span>
-              本阶段说明 · 阶段 {{ current.stageIndex + 1 }} /
+              本教学点说明 · 教学点 {{ current.stageIndex + 1 }} /
               {{ lesson.stages.length }}
             </span>
             <strong>{{ current.stage.name }}</strong>
             <small>{{ current.stage.groupKey || '未指定业务角色' }}</small>
           </div>
           <div class="instruction stage-introduction">
-            <span>阶段目标与注意事项</span>
+            <span>教学点目标与注意事项</span>
             <p>
               {{
                 current.stage.description ||
-                '本阶段暂无补充说明，请按照录制节点顺序完成业务操作。'
+                '本教学点暂无补充说明，可按需选择任意节点进行讲解。'
               }}
             </p>
           </div>
+          <AttachmentPanel
+            :attachments="current.stage.attachments"
+            title="教学点附件"
+          />
           <dl>
-            <div><dt>阶段节点</dt><dd>{{ current.stage.recordedSteps.length }} 个</dd></div>
+            <div><dt>教学点节点</dt><dd>{{ current.stage.recordedSteps.length }} 个</dd></div>
             <div><dt>负责角色</dt><dd>{{ current.stage.groupKey || '未指定' }}</dd></div>
-            <div><dt>阶段分值</dt><dd>{{ current.stage.score }} 分</dd></div>
+            <div><dt>教学点分值</dt><dd>{{ current.stage.score }} 分</dd></div>
             <div>
               <dt>完成依据</dt>
               <dd>{{ current.stage.completionMethod }}</dd>
@@ -238,8 +239,18 @@ function finishLecture() {
           </div>
           <div class="instruction">
             <span>逐步讲解</span>
-            <p>{{ currentStep.note || '请观察页面变化，并理解该动作在业务流程中的作用。' }}</p>
+            <p>
+              {{
+                currentStep.teachingText ||
+                currentStep.note ||
+                '请观察页面变化，并理解该动作在业务流程中的作用。'
+              }}
+            </p>
           </div>
+          <AttachmentPanel
+            :attachments="currentStep.attachments"
+            title="节点附件"
+          />
           <dl>
             <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
             <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
@@ -261,7 +272,7 @@ function finishLecture() {
             type="button"
             @click="move(1)"
           >
-            进入本阶段 →
+            进入本教学点 →
           </button>
           <button
             v-else-if="currentIndex < previewSteps.length - 1"
@@ -302,13 +313,13 @@ function finishLecture() {
       <div class="empty-state">
         <div>
           <strong>暂无可回看的录制步骤</strong><br />
-          请返回教案编排，为任意业务阶段添加录制步骤。
+          请返回教案编排，为任意教学点添加录制步骤。
           <div class="empty-action">
             <RouterLink
               class="button primary"
-              :to="{ name: 'lesson-editor', params: { lessonId: lesson.id } }"
+              :to="returnRoute"
             >
-              返回编辑
+              {{ openedFromPublishCenter ? '返回发布中心' : '返回编辑' }}
             </RouterLink>
           </div>
         </div>
@@ -322,9 +333,24 @@ function finishLecture() {
     >
       <div class="card-header">
         <div>
-          <h2>录制片段时间线</h2>
-          <p>阶段与角色由教案动态生成；点击任意片段可直接定位。</p>
+          <h2>教学点与节点导航</h2>
+          <p>可直接选择任意教学点查看说明，或选择任意节点开始讲解。</p>
         </div>
+      </div>
+      <div class="teaching-point-list">
+        <button
+          v-for="(stage, index) in lectureTeachingPoints"
+          :key="stage.id"
+          type="button"
+          :class="{
+            active: stage.id === current?.stage.id && showStageIntroduction
+          }"
+          @click="selectTeachingPoint(stage.id)"
+        >
+          <span>{{ index + 1 }}</span>
+          <strong>{{ stage.name }}</strong>
+          <small>{{ stage.recordedSteps.length }} 个节点</small>
+        </button>
       </div>
       <div class="segment-list">
         <button
@@ -464,7 +490,7 @@ function finishLecture() {
   position: absolute;
   z-index: 60;
   top: 14px;
-  right: 380px;
+  right: 14px;
   min-height: 34px;
   border: 1px solid rgb(255 255 255 / 78%);
   border-radius: 999px;
@@ -709,7 +735,7 @@ function finishLecture() {
 
 .playback-bar {
   display: grid;
-  grid-template-columns: auto auto minmax(80px, 1fr) auto auto;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
   align-items: center;
   gap: 10px;
   min-height: 52px;
@@ -761,6 +787,10 @@ function finishLecture() {
   border-radius: 11px;
   padding: 14px;
   background: #f7f5ff;
+}
+
+.explanation-panel :deep(.attachment-panel) {
+  margin: 0 16px 14px;
 }
 
 .stage-introduction-heading {
@@ -824,6 +854,54 @@ function finishLecture() {
 
 .segment-timeline {
   overflow: hidden;
+}
+
+.teaching-point-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid #eceef4;
+  padding: 10px 13px 8px;
+}
+
+.teaching-point-list button {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr);
+  flex: 0 0 180px;
+  align-items: center;
+  gap: 2px 7px;
+  border-color: #e2e5ec;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.teaching-point-list button.active {
+  border-color: #9185f8;
+  background: #f4f2ff;
+}
+
+.teaching-point-list span {
+  display: grid;
+  grid-row: 1 / 3;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border-radius: 7px;
+  color: #6656dd;
+  background: #ece9ff;
+  font-size: 9px;
+}
+
+.teaching-point-list strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teaching-point-list small {
+  color: #8a94a6;
+  font-size: 8px;
 }
 
 .segment-list {
@@ -991,7 +1069,7 @@ function finishLecture() {
 .preview-header {
   top: 14px;
   left: 14px;
-  width: min(620px, calc(100vw - 420px));
+  width: min(620px, calc(100vw - 28px));
   align-items: center;
   border-radius: 14px;
   padding: 12px 14px;
@@ -1010,7 +1088,7 @@ function finishLecture() {
 .preview-metrics {
   top: 92px;
   left: 14px;
-  width: min(430px, calc(100vw - 420px));
+  width: min(430px, calc(100vw - 28px));
 }
 
 .preview-metrics > span {
@@ -1022,7 +1100,7 @@ function finishLecture() {
 }
 
 .segment-timeline {
-  right: 380px;
+  right: 14px;
   bottom: 66px;
   left: 14px;
   border-radius: 13px;
@@ -1041,12 +1119,28 @@ function finishLecture() {
 }
 
 .explanation-panel {
-  top: 14px;
-  right: 14px;
-  bottom: 14px;
-  width: 350px;
+  z-index: 30;
+  width: min(430px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
   overflow-y: auto;
   border-radius: 16px;
+}
+
+.lecture-step-prompt.stage-prompt {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(500px, calc(100vw - 36px));
+  transform: translate(-50%, -50%);
+}
+
+.lecture-step-prompt.node-prompt {
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 18px;
+  transform: translateY(-50%);
 }
 
 .lecture-feedback {
@@ -1076,6 +1170,46 @@ function finishLecture() {
   text-align: center;
 }
 
+@media (max-height: 720px) {
+  .preview-metrics {
+    display: none;
+  }
+
+  .segment-timeline {
+    bottom: 58px;
+  }
+
+  .teaching-point-list {
+    display: none;
+  }
+
+  .explanation-heading {
+    padding: 14px;
+  }
+
+  .instruction {
+    margin: 10px 14px;
+    padding: 10px;
+  }
+
+  .explanation-panel dl > div {
+    padding: 7px 0;
+  }
+}
+
+@media (max-height: 560px) {
+  .preview-header p,
+  .segment-timeline,
+  .explanation-panel dl,
+  .explanation-panel :deep(.attachment-panel) {
+    display: none;
+  }
+
+  .explanation-panel {
+    max-height: calc(100vh - 24px);
+  }
+}
+
 @media (max-width: 880px) {
   .lecture-overlay-toggle {
     top: 10px;
@@ -1101,6 +1235,7 @@ function finishLecture() {
     left: 12px;
     width: auto;
     max-height: 46vh;
+    transform: none;
   }
 
   .explanation-panel dl,

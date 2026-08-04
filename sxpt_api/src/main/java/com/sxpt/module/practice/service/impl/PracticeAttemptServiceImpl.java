@@ -72,6 +72,10 @@ public class PracticeAttemptServiceImpl implements PracticeAttemptService {
     public PracticeAttempt finishAttempt(PracticeAttempt attempt) {
         validateFinishFields(attempt);
         PracticeAttempt existed = getActiveAttemptById(attempt.getId());
+        if (!attempt.getTenantId().equals(existed.getTenantId())
+                || !attempt.getStudentId().equals(existed.getStudentId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
         if (!RUNNING_STATUS.equals(existed.getAttemptStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
@@ -127,6 +131,8 @@ public class PracticeAttemptServiceImpl implements PracticeAttemptService {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
         requireText(attempt.getId());
+        requireText(attempt.getTenantId());
+        requireText(attempt.getStudentId());
         requireText(attempt.getAttemptStatus());
         if (!COMPLETED_STATUS.equals(attempt.getAttemptStatus())
                 && !ABANDONED_STATUS.equals(attempt.getAttemptStatus())

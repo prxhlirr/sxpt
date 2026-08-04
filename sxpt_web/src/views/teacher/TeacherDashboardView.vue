@@ -92,7 +92,7 @@ function currentStageName(task: (typeof allStudentTasks.value)[number]) {
       (stage) => !task.completedStageIds.includes(stage.id)
     )?.name ??
     (task.status === 'SUBMITTED' || task.status === 'GRADED'
-      ? '本人阶段已提交'
+      ? '本人教学点已提交'
       : '等待提交')
   );
 }
@@ -195,7 +195,7 @@ function formatTime(value: string) {
           <div class="card-header">
             <div>
               <h2>学员实时状态</h2>
-              <p>按学员会话查看角色、阶段与平台轨迹判定结果</p>
+          <p>按学员会话查看角色、教学点与平台轨迹判定结果</p>
             </div>
             <div class="status-tabs" role="tablist">
               <button
@@ -221,7 +221,7 @@ function formatTime(value: string) {
                 <tr>
                   <th>学员</th>
                   <th>承担角色</th>
-                  <th>当前业务阶段</th>
+                <th>当前教学点</th>
                   <th>流程完成度</th>
                   <th>状态</th>
                   <th>作答</th>
@@ -332,7 +332,7 @@ function formatTime(value: string) {
                         task.groupKeys.includes(role.key)
                       ).length
                     }}
-                    人 · 负责 {{ role.stageIds.length }} 个阶段
+                      人 · 负责 {{ role.stageIds.length }} 个教学点
                   </small>
                 </div>
                 <b>

@@ -212,7 +212,7 @@ function save(next = false) {
               <input v-model="draft.showProgress" type="checkbox" />
               <span>
                 <strong>向学员显示流程进度</strong>
-                <small>显示当前阶段、已完成阶段和下一步角色</small>
+              <small>显示当前教学点、已完成教学点和下一步角色</small>
               </span>
             </label>
             <label class="field compact-field">
@@ -239,7 +239,7 @@ function save(next = false) {
           </div>
           <div class="card-body score-grid">
             <label class="score-field">
-              <span><strong>客观评分</strong><small>流程操作、阶段完成、提交凭证</small></span>
+              <span><strong>客观评分</strong><small>流程操作、教学点完成、提交凭证</small></span>
               <div><input v-model.number="draft.objectiveWeight" type="number" min="0" max="100" /><b>%</b></div>
             </label>
             <label class="score-field subjective">

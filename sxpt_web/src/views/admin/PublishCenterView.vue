@@ -143,6 +143,14 @@ function goTo(routeName: string) {
   void router.push({ name: routeName, params: { lessonId } });
 }
 
+function startLecture() {
+  void router.push({
+    name: 'lesson-recording',
+    params: { lessonId },
+    query: { from: 'publish' }
+  });
+}
+
 async function publishTrainingTasks() {
   feedback.value = '';
   feedbackSuccess.value = false;
@@ -151,7 +159,7 @@ async function publishTrainingTasks() {
     await store.publishLearningAndPracticeRemote(lessonId);
     feedbackSuccess.value = true;
     feedback.value =
-      '学习任务和练习任务已发布到后端，模拟学生现在可以先看一遍流程，再完成练习。';
+      '学习任务和练习任务已发布到后端，分组内学生现在可以先看一遍流程，再完成练习。';
   } catch (error) {
     feedback.value =
       error instanceof Error ? error.message : '学习、练习任务发布失败';
@@ -206,7 +214,7 @@ async function publishExam() {
       <div class="card-header">
         <div>
           <h2>先发布学习与练习任务</h2>
-          <p>备案教案完成教师讲解后，生成一条“看一遍流程”的学习任务和一条可操作的练习任务；身份与班级暂用模拟配置。</p>
+          <p>可直接从发布中心进入教师讲解；讲解完成后，为真实分组学生生成流程学习和操作练习任务。</p>
         </div>
         <button
           class="primary"
@@ -224,21 +232,31 @@ async function publishExam() {
         </button>
       </div>
       <div class="training-release__modes">
-        <div>
+        <div class="training-release__mode">
           <span>LEARNING</span>
           <strong>流程学习</strong>
           <small>{{ learningTask?.syncStatus ?? '未发布' }}</small>
         </div>
-        <div>
+        <div class="training-release__mode">
           <span>PRACTICE</span>
           <strong>流程练习</strong>
           <small>{{ practiceTask?.syncStatus ?? '未发布' }}</small>
         </div>
-        <div>
+        <button
+          class="training-release__mode training-release__lecture"
+          type="button"
+          @click="startLecture"
+        >
           <span>LECTURE</span>
           <strong>教师讲解</strong>
-          <small>{{ lesson?.lectureCompletedAt ? '已完成' : '待完成' }}</small>
-        </div>
+          <small>
+            {{
+              lesson?.lectureCompletedAt
+                ? '已完成 · 点击重新讲解 →'
+                : '待完成 · 点击开始讲解 →'
+            }}
+          </small>
+        </button>
       </div>
     </section>
 
@@ -313,7 +331,7 @@ async function publishExam() {
           <div class="business-chain">
             <div>
               <span class="chain-icon purple">教</span>
-              <span><strong>{{ lesson?.title ?? '未配置教案' }}</strong><small>{{ lesson?.stages.length ?? 0 }} 个串行业务阶段 · V{{ lesson?.version ?? '-' }}</small></span>
+          <span><strong>{{ lesson?.title ?? '未配置教案' }}</strong><small>{{ lesson?.stages.length ?? 0 }} 个教学点 · V{{ lesson?.version ?? '-' }}</small></span>
             </div>
             <i>→</i>
             <div>
@@ -335,7 +353,7 @@ async function publishExam() {
 
         <article v-if="activeTask" class="card task-result-card">
           <div class="card-header">
-            <div><h2>已发布任务</h2><p>任务与学生子任务已写入平台 Mock 状态。</p></div>
+            <div><h2>已发布任务</h2><p>任务与学生子任务已同步到后端工作区。</p></div>
             <StatusPill :status="activeTask.status" :label="activeTask.status === 'RUNNING' ? '进行中' : activeTask.status === 'SCHEDULED' ? '待开始' : '已结束'" />
           </div>
           <div class="task-result">

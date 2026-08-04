@@ -135,7 +135,7 @@ describe('trainingApi repository', () => {
     const storage = createMemoryStorage();
     storage.setItem(TRAINING_STORAGE_KEY, '{broken-json');
 
-    const api = createTrainingApi(storage);
+    const api = createTrainingApi(storage, createMockTrainingState);
     const recovered = api.loadState();
 
     expect(recovered.lessons.length).toBeGreaterThan(1);
@@ -148,7 +148,7 @@ describe('trainingApi repository', () => {
     broken.lessons = [null];
     storage.setItem(TRAINING_STORAGE_KEY, JSON.stringify(broken));
 
-    const recovered = createTrainingApi(storage).loadState();
+    const recovered = createTrainingApi(storage, createMockTrainingState).loadState();
 
     expect(recovered.lessons.length).toBeGreaterThan(1);
     expect(recovered.lessons.every((lesson) => lesson?.id && lesson?.title)).toBe(
@@ -158,7 +158,7 @@ describe('trainingApi repository', () => {
 
   it('persists a detached state snapshot and can reset to the seed', () => {
     const storage = createMemoryStorage();
-    const api = createTrainingApi(storage);
+    const api = createTrainingApi(storage, createMockTrainingState);
     const changed = api.loadState();
     changed.lessons[0].title = '已修改但未保存';
     expect(api.loadState().lessons[0].title).not.toBe('已修改但未保存');
@@ -216,7 +216,7 @@ describe('lesson authoring', () => {
     });
 
     expect(() => store.publishLesson(lesson.id)).toThrowError(TrainingValidationError);
-    expect(store.validateLesson(lesson.id)).toContain('每个阶段至少需要一个录制步骤');
+    expect(store.validateLesson(lesson.id)).toContain('每个教学点至少需要一个录制步骤');
   });
 
   it('rejects unreasonable total scores and publishes a complete lesson', () => {
@@ -224,7 +224,7 @@ describe('lesson authoring', () => {
     const lesson = editableLesson(store);
     const stage = store.addStage(lesson.id, recordedStage('handler', 70));
 
-    expect(() => store.publishLesson(lesson.id)).toThrow('阶段客观分合计必须等于教案客观分');
+    expect(() => store.publishLesson(lesson.id)).toThrow('教学点客观分合计必须等于教案客观分');
 
     store.updateStage(lesson.id, stage.id, { score: 80 });
     const published = store.publishLesson(lesson.id);
@@ -646,7 +646,7 @@ describe('published exam business chain', () => {
 
     store.startStudentTask(reviewerTask.id);
     expect(() => store.completeStudentStage(reviewerTask.id, second.id)).toThrow(
-      '必须先完成前序阶段'
+      '必须先完成前序教学点'
     );
 
     store.startStudentTask(handlerTask.id);

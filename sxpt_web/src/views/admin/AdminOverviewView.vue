@@ -47,7 +47,7 @@ const chain = computed(() => {
     {
       index: '01',
       title: '教案编排',
-      description: `${activeLesson.value.stages.length} 个业务阶段 · ${activeLesson.value.version}.0 版`,
+    description: `${activeLesson.value.stages.length} 个教学点 · ${activeLesson.value.version}.0 版`,
       done: activeLesson.value.status === 'PUBLISHED',
       label:
         activeLesson.value.status === 'PUBLISHED' ? '已发布' : '待完善',
@@ -68,7 +68,7 @@ const chain = computed(() => {
       title: '动态分组',
       description: groups
         ? `${groups.roles.length} 个角色组 · ${groups.members.length} 条成员分配`
-        : '按业务阶段设置多角色协作',
+      : '按教学点设置多角色协作',
       done: Boolean(groups?.roles.length && groups?.members.length),
       label:
         groups?.roles.length && groups?.members.length ? '已分组' : '待分组',
@@ -115,8 +115,8 @@ function formatTime(value: string) {
   }).format(new Date(value));
 }
 
-function resetDemo() {
-  if (!window.confirm('确认恢复为初始 Mock 演示数据吗？当前页面中的演示操作将被清除。')) {
+function resetWorkspace() {
+  if (!window.confirm('确认清空当前浏览器中的工作区缓存吗？未同步的数据将被清除。')) {
     return;
   }
   store.resetDemo();
@@ -130,8 +130,8 @@ function resetDemo() {
       title="实训平台运营总览"
       description="从录制教案到考试发布，以同一条业务链检查编排、分组、业务数据和学员任务的就绪状态。"
     >
-      <button class="secondary" type="button" @click="resetDemo">
-        恢复演示数据
+      <button class="secondary" type="button" @click="resetWorkspace">
+        清空本地工作区
       </button>
       <RouterLink class="button primary" to="/admin/lessons">
         进入教案管理
@@ -294,7 +294,7 @@ function resetDemo() {
             <tr>
               <th>教案</th>
               <th>业务模块</th>
-              <th>阶段</th>
+                  <th>教学点</th>
               <th>客观 / 主观分</th>
               <th>状态</th>
               <th>最近更新</th>

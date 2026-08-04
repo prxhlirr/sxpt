@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BusinessPageSnapshot, CaptureRect } from '../../domain/models';
+import {
+  calculateContainedViewport,
+  DEFAULT_RECORDING_VIEWPORT
+} from '../../utils/viewportScaling';
 
 interface BusinessReadyPayload {
   url: string;
@@ -38,13 +42,47 @@ const emit = defineEmits<{
   'business-action': [payload: BusinessActionPayload];
   'target-resolved': [payload: TargetPayload];
   'element-picked': [payload: BusinessActionPayload];
+  'element-pick-cancelled': [];
   'frame-load': [];
 }>();
 
+const containerRef = ref<HTMLElement | null>(null);
 const frameRef = ref<HTMLIFrameElement | null>(null);
 const frameSrc = ref(props.src);
 const frameKey = ref(0);
 const ready = ref(false);
+const recordingEnabled = ref(false);
+const elementPickRequested = ref(false);
+const containerSize = ref({ width: 0, height: 0 });
+let resizeObserver: ResizeObserver | undefined;
+const frameOrigin = computed(() => {
+  try {
+    return new URL(frameSrc.value, window.location.href).origin;
+  } catch {
+    return '';
+  }
+});
+const frameViewportStyle = computed(() => {
+  const viewport = DEFAULT_RECORDING_VIEWPORT;
+  if (containerSize.value.width <= 0 || containerSize.value.height <= 0) {
+    return {
+      width: `${viewport.width}px`,
+      height: `${viewport.height}px`
+    };
+  }
+  const placement = calculateContainedViewport(
+    viewport,
+    containerSize.value
+  );
+  return {
+    width: `${viewport.width}px`,
+    height: `${viewport.height}px`,
+    left: `${placement.left}px`,
+    top: `${placement.top}px`,
+    transform: `scale(${placement.scale})`,
+    transformOrigin: 'top left'
+  };
+});
 
 watch(
   () => props.src,
@@ -56,7 +94,12 @@ watch(
 );
 
 function isMessageFromFrame(event: MessageEvent) {
-  return Boolean(frameRef.value?.contentWindow) && event.source === frameRef.value?.contentWindow;
+  return (
+    Boolean(frameRef.value?.contentWindow) &&
+    event.source === frameRef.value?.contentWindow &&
+    Boolean(frameOrigin.value) &&
+    event.origin === frameOrigin.value
+  );
 }
 
 function handleMessage(event: MessageEvent) {
@@ -64,14 +107,31 @@ function handleMessage(event: MessageEvent) {
     return;
   }
 
-  const message = event.data as { type?: string; payload?: unknown };
-  if (message.type === 'SXPT_BUSINESS_READY') {
+  const message = event.data as {
+    type?: string;
+    payload?: unknown;
+    [key: string]: unknown;
+  };
+  if (message.type === 'SXPT_BUSINESS_READY' || message.type === 'BUSINESS_READY') {
     ready.value = true;
-    emit('business-ready', message.payload as BusinessReadyPayload);
+    syncFrameControls();
+    const payload =
+      message.type === 'SXPT_BUSINESS_READY'
+        ? (message.payload as BusinessReadyPayload)
+        : {
+            url: String(message.url ?? frameSrc.value),
+            pageTitle: String(message.pageTitle ?? message.title ?? props.title)
+          };
+    emit('business-ready', payload);
     return;
   }
-  if (message.type === 'SXPT_BUSINESS_ACTION') {
-    emit('business-action', message.payload as BusinessActionPayload);
+  if (message.type === 'SXPT_BUSINESS_ACTION' || message.type === 'BUSINESS_ACTION') {
+    emit(
+      'business-action',
+      (message.type === 'SXPT_BUSINESS_ACTION'
+        ? message.payload
+        : message) as BusinessActionPayload
+    );
     return;
   }
   if (message.type === 'SXPT_TARGET_RECT') {
@@ -79,16 +139,37 @@ function handleMessage(event: MessageEvent) {
     return;
   }
   if (message.type === 'SXPT_ELEMENT_PICKED') {
+    elementPickRequested.value = false;
     emit('element-picked', message.payload as BusinessActionPayload);
+    return;
+  }
+  if (message.type === 'ELEMENT_PICKED') {
+    elementPickRequested.value = false;
+    emit('element-picked', {
+      ...(message as unknown as BusinessActionPayload),
+      actionType: (message.actionType as BusinessActionPayload['actionType']) ?? 'click',
+      url: String(message.url ?? frameSrc.value),
+      pageTitle: String(message.pageTitle ?? props.title)
+    });
+    return;
+  }
+  if (
+    message.type === 'SXPT_ELEMENT_PICK_CANCELLED' ||
+    message.type === 'ELEMENT_PICK_CANCELLED'
+  ) {
+    elementPickRequested.value = false;
+    emit('element-pick-cancelled');
   }
 }
 
 function post(message: unknown) {
-  frameRef.value?.contentWindow?.postMessage(message, window.location.origin);
+  if (!frameOrigin.value) return;
+  frameRef.value?.contentWindow?.postMessage(message, frameOrigin.value);
 }
 
 function setRecording(enabled: boolean) {
-  post({ type: 'SXPT_SET_RECORDING', enabled });
+  recordingEnabled.value = enabled;
+  if (ready.value) postRecordingState();
 }
 
 function resolveTarget(selector: string, url?: string) {
@@ -96,11 +177,30 @@ function resolveTarget(selector: string, url?: string) {
 }
 
 function startElementPick() {
+  elementPickRequested.value = true;
+  if (!ready.value) return;
+  postElementPickState();
+}
+
+function postElementPickState() {
   post({ type: 'SXPT_START_ELEMENT_PICK' });
+  post({ type: 'START_ELEMENT_PICK' });
 }
 
 function cancelElementPick() {
+  elementPickRequested.value = false;
   post({ type: 'SXPT_CANCEL_ELEMENT_PICK' });
+  post({ type: 'CANCEL_ELEMENT_PICK' });
+}
+
+function postRecordingState() {
+  post({ type: 'SXPT_SET_RECORDING', enabled: recordingEnabled.value });
+  post({ type: 'SET_RECORDING_STATE', enabled: recordingEnabled.value });
+}
+
+function syncFrameControls() {
+  postRecordingState();
+  if (elementPickRequested.value) postElementPickState();
 }
 
 function previewStep(selector: string, url?: string) {
@@ -109,6 +209,7 @@ function previewStep(selector: string, url?: string) {
 
 function reload() {
   ready.value = false;
+  elementPickRequested.value = false;
   frameKey.value += 1;
 }
 
@@ -116,10 +217,32 @@ function handleLoad() {
   ready.value = false;
   emit('frame-load');
   post({ type: 'SXPT_REQUEST_READY' });
+  post({ type: 'REQUEST_BUSINESS_READY' });
 }
 
-onMounted(() => window.addEventListener('message', handleMessage));
-onBeforeUnmount(() => window.removeEventListener('message', handleMessage));
+function updateContainerSize() {
+  const rect = containerRef.value?.getBoundingClientRect();
+  if (!rect) return;
+  containerSize.value = {
+    width: rect.width,
+    height: rect.height
+  };
+}
+
+onMounted(() => {
+  window.addEventListener('message', handleMessage);
+  window.addEventListener('resize', updateContainerSize);
+  updateContainerSize();
+  if (typeof ResizeObserver !== 'undefined' && containerRef.value) {
+    resizeObserver = new ResizeObserver(updateContainerSize);
+    resizeObserver.observe(containerRef.value);
+  }
+});
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect();
+  window.removeEventListener('resize', updateContainerSize);
+  window.removeEventListener('message', handleMessage);
+});
 
 defineExpose({
   ready,
@@ -133,23 +256,54 @@ defineExpose({
 </script>
 
 <template>
-  <iframe
-    :key="frameKey"
-    ref="frameRef"
-    class="business-capture-frame"
-    :src="frameSrc"
-    :title="title"
-    @load="handleLoad"
-  />
+  <div ref="containerRef" class="business-capture-frame">
+    <iframe
+      :key="frameKey"
+      ref="frameRef"
+      class="business-capture-frame__viewport"
+      :src="frameSrc"
+      :style="frameViewportStyle"
+      :title="title"
+      @load="handleLoad"
+    />
+    <span class="business-capture-frame__resolution">
+      标准录制视口 {{ DEFAULT_RECORDING_VIEWPORT.width }} ×
+      {{ DEFAULT_RECORDING_VIEWPORT.height }}
+    </span>
+  </div>
 </template>
 
 <style scoped>
 .business-capture-frame {
-  display: block;
+  position: relative;
   width: 100%;
   height: 100%;
-  min-height: 620px;
+  min-height: 0;
+  overflow: hidden;
+  background: #18202d;
+}
+
+.business-capture-frame__viewport {
+  position: absolute;
+  display: block;
+  max-width: none;
+  max-height: none;
   border: 0;
   background: #eef2f7;
+}
+
+.business-capture-frame__resolution {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  border: 1px solid rgb(255 255 255 / 45%);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #eef4ff;
+  background: rgb(20 28 45 / 68%);
+  backdrop-filter: blur(8px);
+  font-size: 8px;
+  font-weight: 800;
+  pointer-events: none;
 }
 </style>

@@ -56,6 +56,15 @@ export interface BusinessPageSnapshot {
   };
 }
 
+export interface TrainingAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  size: number;
+  dataUrl: string;
+  uploadedAt: string;
+}
+
 export interface RecordedStep {
   id: string;
   title: string;
@@ -86,9 +95,10 @@ export interface RecordedStep {
     width: number;
     height: number;
   };
+  attachments?: TrainingAttachment[];
 }
 
-export interface LessonStage {
+export interface LessonTeachingPoint {
   id: string;
   stageKey: string;
   name: string;
@@ -99,7 +109,11 @@ export interface LessonStage {
   completionMethod: CompletionMethod;
   visibility: Record<RunMode, boolean>;
   recordedSteps: RecordedStep[];
+  attachments?: TrainingAttachment[];
 }
+
+/** @deprecated 内部兼容旧字段命名，界面与业务概念统一使用“教学点”。 */
+export type LessonStage = LessonTeachingPoint;
 
 export interface LessonPlan {
   id: string;

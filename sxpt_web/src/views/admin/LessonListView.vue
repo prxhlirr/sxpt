@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  watch
+} from 'vue';
 import { useRouter } from 'vue-router';
 import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
@@ -15,6 +23,15 @@ const statusFilter = ref<'ALL' | LessonStatus>('ALL');
 const moduleFilter = ref('ALL');
 const feedback = ref('');
 const feedbackTone = ref<'success' | 'danger'>('success');
+const publishingLessonId = ref('');
+const activeActionsLessonId = ref('');
+const actionsMenu = ref<HTMLElement | null>(null);
+const actionsMenuTriggers = new Map<string, HTMLElement>();
+const actionsMenuStyle = reactive({
+  top: '0px',
+  left: '0px',
+  visibility: 'hidden' as 'hidden' | 'visible'
+});
 const createForm = reactive({
   code: '',
   title: '',
@@ -109,6 +126,100 @@ onMounted(async () => {
   }
 });
 
+onMounted(() => {
+  document.addEventListener('pointerdown', handleOutsideActionsMenu);
+  document.addEventListener('keydown', handleActionsMenuKeydown);
+  window.addEventListener('resize', positionActionsMenu);
+  window.addEventListener('scroll', positionActionsMenu, true);
+});
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handleOutsideActionsMenu);
+  document.removeEventListener('keydown', handleActionsMenuKeydown);
+  window.removeEventListener('resize', positionActionsMenu);
+  window.removeEventListener('scroll', positionActionsMenu, true);
+});
+
+watch(filteredLessons, (lessons) => {
+  if (
+    activeActionsLessonId.value &&
+    !lessons.some((lesson) => lesson.id === activeActionsLessonId.value)
+  ) {
+    closeActionsMenu();
+  }
+});
+
+function setActionsMenuTrigger(lessonId: string, element: unknown) {
+  if (element instanceof HTMLElement) {
+    actionsMenuTriggers.set(lessonId, element);
+  } else {
+    actionsMenuTriggers.delete(lessonId);
+  }
+}
+
+function toggleActionsMenu(lessonId: string) {
+  if (activeActionsLessonId.value === lessonId) {
+    closeActionsMenu();
+    return;
+  }
+  activeActionsLessonId.value = lessonId;
+  actionsMenuStyle.visibility = 'hidden';
+  void nextTick(positionActionsMenu);
+}
+
+function positionActionsMenu() {
+  if (!activeActionsLessonId.value) return;
+  const trigger = actionsMenuTriggers.get(activeActionsLessonId.value);
+  const menu = actionsMenu.value;
+  if (!trigger || !menu) return;
+
+  const viewportPadding = 12;
+  const gap = 7;
+  const triggerRect = trigger.getBoundingClientRect();
+  const menuWidth = Math.min(280, window.innerWidth - viewportPadding * 2);
+  const menuHeight = menu.offsetHeight;
+  const left = Math.min(
+    window.innerWidth - menuWidth - viewportPadding,
+    Math.max(viewportPadding, triggerRect.right - menuWidth)
+  );
+  const spaceBelow = window.innerHeight - triggerRect.bottom - viewportPadding;
+  const openAbove =
+    spaceBelow < menuHeight + gap &&
+    triggerRect.top - viewportPadding >= menuHeight + gap;
+  const top = openAbove
+    ? triggerRect.top - menuHeight - gap
+    : Math.min(
+        triggerRect.bottom + gap,
+        window.innerHeight - menuHeight - viewportPadding
+      );
+
+  actionsMenuStyle.left = `${Math.round(left)}px`;
+  actionsMenuStyle.top = `${Math.max(viewportPadding, Math.round(top))}px`;
+  actionsMenuStyle.visibility = 'visible';
+}
+
+function closeActionsMenu() {
+  activeActionsLessonId.value = '';
+  actionsMenuStyle.visibility = 'hidden';
+}
+
+function handleOutsideActionsMenu(event: PointerEvent) {
+  const target = event.target;
+  if (!(target instanceof Node)) return;
+  if (actionsMenu.value?.contains(target)) return;
+  if (
+    activeActionsLessonId.value &&
+    actionsMenuTriggers.get(activeActionsLessonId.value)?.contains(target)
+  ) {
+    return;
+  }
+  closeActionsMenu();
+}
+
+function handleActionsMenuKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') closeActionsMenu();
+}
+
 function dateLabel(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     month: '2-digit',
@@ -173,14 +284,20 @@ function duplicateLesson(lesson: LessonPlan) {
   }
 }
 
-function publishLesson(lesson: LessonPlan) {
+async function publishLesson(lesson: LessonPlan) {
+  if (publishingLessonId.value) return;
+  publishingLessonId.value = lesson.id;
   try {
-    store.publishLesson(lesson.id);
+    await store.publishLessonRemote(lesson.id);
     feedbackTone.value = 'success';
-    feedback.value = `“${lesson.title}”已发布，可继续配置考试与分组。`;
+    feedback.value = store.remote.enabled
+      ? `“${lesson.title}”已完成备案，教学点已发布。`
+      : `“${lesson.title}”已发布，可继续配置考试与分组。`;
   } catch (error) {
     feedbackTone.value = 'danger';
     feedback.value = error instanceof Error ? error.message : '发布校验未通过';
+  } finally {
+    publishingLessonId.value = '';
   }
 }
 </script>
@@ -205,7 +322,7 @@ function publishLesson(lesson: LessonPlan) {
       <MetricCard label="已发布" :value="metrics.published" hint="可进入考试设置" tone="green">
         <template #icon>✓</template>
       </MetricCard>
-      <MetricCard label="业务阶段" :value="metrics.stages" hint="动态串联办理角色" tone="blue">
+      <MetricCard label="教学点" :value="metrics.stages" hint="动态串联办理角色" tone="blue">
         <template #icon>⌘</template>
       </MetricCard>
     </section>
@@ -247,7 +364,7 @@ function publishLesson(lesson: LessonPlan) {
               <th>教案</th>
               <th>业务模块</th>
               <th>业务平台</th>
-              <th>录制与阶段</th>
+                  <th>录制与教学点</th>
               <th>版本 / 状态</th>
               <th>最近更新</th>
               <th>操作</th>
@@ -286,7 +403,7 @@ function publishLesson(lesson: LessonPlan) {
                 </small>
               </td>
               <td>
-                <strong>{{ lesson.stages.length }} 个阶段</strong>
+                    <strong>{{ lesson.stages.length }} 个教学点</strong>
                 <span class="subtle">
                   {{ lesson.stages.reduce((sum, stage) => sum + stage.recordedSteps.length, 0) }}
                   个录制步骤
@@ -307,49 +424,39 @@ function publishLesson(lesson: LessonPlan) {
                   >
                     查看录制
                   </RouterLink>
-                  <details class="lesson-actions-menu">
-                    <summary>业务配置</summary>
-                    <div>
-                      <RouterLink
-                        :to="{ name: 'lesson-editor', params: { lessonId: lesson.id } }"
-                      >
-                        <span>⌘</span>
-                        <span><strong>录制与编排教案</strong><small>业务界面录制、阶段与节点</small></span>
-                      </RouterLink>
-                      <RouterLink
-                        :to="{ name: 'exam-setup', params: { lessonId: lesson.id } }"
-                      >
-                        <span>◫</span>
-                        <span><strong>考试设置</strong><small>时间、计分与提交规则</small></span>
-                      </RouterLink>
-                      <RouterLink
-                        :to="{ name: 'group-setup', params: { lessonId: lesson.id } }"
-                      >
-                        <span>♟</span>
-                        <span><strong>分组设置</strong><small>角色分组与成员安排</small></span>
-                      </RouterLink>
-                      <RouterLink
-                        :to="{ name: 'exam-data', params: { lessonId: lesson.id } }"
-                      >
-                        <span>◈</span>
-                        <span><strong>考试数据</strong><small>生成、检查与替换数据</small></span>
-                      </RouterLink>
-                      <RouterLink
-                        :to="{ name: 'publish-center', params: { lessonId: lesson.id } }"
-                      >
-                        <span>↗</span>
-                        <span><strong>发布中心</strong><small>就绪检查与任务发布</small></span>
-                      </RouterLink>
-                    </div>
-                  </details>
+                  <button
+                    :ref="(element) => setActionsMenuTrigger(lesson.id, element)"
+                    class="lesson-actions-trigger"
+                    type="button"
+                    aria-haspopup="menu"
+                    :aria-expanded="activeActionsLessonId === lesson.id"
+                    @click.stop="toggleActionsMenu(lesson.id)"
+                  >
+                    业务配置
+                    <span aria-hidden="true">⌄</span>
+                  </button>
                   <button class="compact" type="button" @click="duplicateLesson(lesson)">复制</button>
                   <button
                     class="primary compact"
                     type="button"
-                    :disabled="lesson.status === 'PUBLISHED' || lesson.status === 'ARCHIVED'"
+                    :disabled="
+                      Boolean(publishingLessonId) ||
+                      lesson.status === 'ARCHIVED' ||
+                      (lesson.status === 'PUBLISHED' &&
+                        (!store.remote.enabled || Boolean(lesson.teachingPointId)))
+                    "
                     @click="publishLesson(lesson)"
                   >
-                    {{ lesson.status === 'PUBLISHED' ? '已发布' : '发布' }}
+                    {{
+                      publishingLessonId === lesson.id
+                        ? '同步中…'
+                        : lesson.status === 'PUBLISHED' &&
+                            (!store.remote.enabled || lesson.teachingPointId)
+                          ? '已备案'
+                          : lesson.status === 'PUBLISHED'
+                            ? '同步备案'
+                            : '备案并发布'
+                    }}
                   </button>
                 </div>
               </td>
@@ -361,6 +468,61 @@ function publishLesson(lesson: LessonPlan) {
         <div><strong>没有匹配的教案</strong><br />调整搜索词或筛选条件后再试。</div>
       </div>
     </section>
+
+    <Teleport to="body">
+      <div
+        v-if="activeActionsLessonId"
+        ref="actionsMenu"
+        class="lesson-actions-popover"
+        :style="actionsMenuStyle"
+        role="menu"
+        aria-label="教案业务配置"
+      >
+        <RouterLink
+          :to="{
+            name: 'lesson-editor',
+            params: { lessonId: activeActionsLessonId }
+          }"
+          role="menuitem"
+          @click="closeActionsMenu"
+        >
+          <span>⌘</span>
+              <span><strong>录制与编排教案</strong><small>业务界面录制、教学点与节点</small></span>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'exam-setup', params: { lessonId: activeActionsLessonId } }"
+          role="menuitem"
+          @click="closeActionsMenu"
+        >
+          <span>◫</span>
+          <span><strong>考试设置</strong><small>时间、计分与提交规则</small></span>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'group-setup', params: { lessonId: activeActionsLessonId } }"
+          role="menuitem"
+          @click="closeActionsMenu"
+        >
+          <span>♟</span>
+          <span><strong>分组设置</strong><small>角色分组与成员安排</small></span>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'exam-data', params: { lessonId: activeActionsLessonId } }"
+          role="menuitem"
+          @click="closeActionsMenu"
+        >
+          <span>◈</span>
+          <span><strong>考试数据</strong><small>生成、检查与替换数据</small></span>
+        </RouterLink>
+        <RouterLink
+          :to="{ name: 'publish-center', params: { lessonId: activeActionsLessonId } }"
+          role="menuitem"
+          @click="closeActionsMenu"
+        >
+          <span>↗</span>
+          <span><strong>发布中心</strong><small>就绪检查与任务发布</small></span>
+        </RouterLink>
+      </div>
+    </Teleport>
 
     <dialog ref="createDialog" class="native-dialog" @cancel="closeCreateDialog">
       <form method="dialog" @submit.prevent="createLesson">
@@ -558,14 +720,11 @@ function publishLesson(lesson: LessonPlan) {
   font-size: 11px;
 }
 
-.lesson-actions-menu {
-  position: relative;
-}
-
-.lesson-actions-menu summary {
+.lesson-actions-trigger {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
+  gap: 6px;
   border: 1px solid #d9d4ff;
   border-radius: 8px;
   padding: 0 10px;
@@ -574,31 +733,21 @@ function publishLesson(lesson: LessonPlan) {
   font-size: 11px;
   font-weight: 800;
   cursor: pointer;
-  list-style: none;
 }
 
-.lesson-actions-menu summary::-webkit-details-marker {
-  display: none;
-}
-
-.lesson-actions-menu summary::after {
-  margin-left: 6px;
-  content: "⌄";
-}
-
-.lesson-actions-menu[open] summary {
+.lesson-actions-trigger[aria-expanded="true"] {
   border-color: #8679ed;
   background: #eeeaff;
 }
 
-.lesson-actions-menu > div {
-  position: absolute;
-  z-index: 15;
-  top: calc(100% + 7px);
-  right: 0;
+.lesson-actions-popover {
+  position: fixed;
+  z-index: 3000;
   display: grid;
-  width: 270px;
-  overflow: hidden;
+  width: min(280px, calc(100vw - 24px));
+  max-height: calc(100vh - 24px);
+  overflow: auto;
+  overscroll-behavior: contain;
   border: 1px solid #e0e3eb;
   border-radius: 11px;
   padding: 6px;
@@ -606,7 +755,7 @@ function publishLesson(lesson: LessonPlan) {
   box-shadow: 0 18px 45px rgb(27 32 65 / 18%);
 }
 
-.lesson-actions-menu > div a {
+.lesson-actions-popover a {
   display: grid;
   grid-template-columns: 30px minmax(0, 1fr);
   align-items: center;
@@ -615,11 +764,13 @@ function publishLesson(lesson: LessonPlan) {
   padding: 8px;
 }
 
-.lesson-actions-menu > div a:hover {
+.lesson-actions-popover a:hover,
+.lesson-actions-popover a:focus-visible {
+  outline: 0;
   background: #f5f3ff;
 }
 
-.lesson-actions-menu > div a > span:first-child {
+.lesson-actions-popover a > span:first-child {
   display: grid;
   width: 29px;
   height: 29px;
@@ -630,17 +781,17 @@ function publishLesson(lesson: LessonPlan) {
   font-size: 12px;
 }
 
-.lesson-actions-menu > div a > span:last-child {
+.lesson-actions-popover a > span:last-child {
   display: grid;
   gap: 2px;
 }
 
-.lesson-actions-menu strong {
+.lesson-actions-popover strong {
   color: #3f4a5d;
   font-size: 10px;
 }
 
-.lesson-actions-menu small {
+.lesson-actions-popover small {
   color: #8b95a5;
   font-size: 8px;
 }

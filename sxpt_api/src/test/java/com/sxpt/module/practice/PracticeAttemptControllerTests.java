@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Collections;
+import java.util.Collections;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -218,6 +219,11 @@ class PracticeAttemptControllerTests {
      * @return Bearer Token 请求头值。
      */
     private String bearerToken() {
-        return "Bearer " + jwtService.generateToken("admin_001", "admin");
+        return "Bearer " + jwtService.generateToken(
+                "student_001",
+                "student",
+                "tenant_001",
+                Collections.singletonList("STUDENT")
+        );
     }
 }

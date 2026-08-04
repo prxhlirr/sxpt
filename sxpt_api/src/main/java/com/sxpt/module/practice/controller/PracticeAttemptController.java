@@ -1,6 +1,7 @@
 package com.sxpt.module.practice.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.practice.dto.FinishPracticeAttemptRequest;
 import com.sxpt.module.practice.dto.StartPracticeAttemptRequest;
 import com.sxpt.module.practice.entity.PracticeAttempt;
@@ -78,7 +79,10 @@ public class PracticeAttemptController {
     public ApiResult<List<PracticeAttemptVO>> listByStudentAndTask(@RequestParam String tenantId,
                                                                    @RequestParam String studentId,
                                                                    @RequestParam String taskId) {
-        return ApiResult.success(toVOList(practiceAttemptService.listByStudentAndTask(tenantId, studentId, taskId)));
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        String scopedStudentId = user.hasAnyRole("STUDENT") ? user.getUserId() : studentId;
+        return ApiResult.success(toVOList(practiceAttemptService.listByStudentAndTask(
+                user.getTenantId(), scopedStudentId, taskId)));
     }
 
     /**
@@ -88,16 +92,17 @@ public class PracticeAttemptController {
      * @return 练习次数实体。
      */
     private PracticeAttempt toStartEntity(StartPracticeAttemptRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
         PracticeAttempt attempt = new PracticeAttempt();
         attempt.setId(generateId());
-        attempt.setTenantId(request.getTenantId());
+        attempt.setTenantId(user.getTenantId());
         attempt.setExecutionId(request.getExecutionId());
-        attempt.setStudentId(request.getStudentId());
+        attempt.setStudentId(user.getUserId());
         attempt.setClassId(request.getClassId());
         attempt.setTaskId(request.getTaskId());
         attempt.setTeachingPointId(request.getTeachingPointId());
         attempt.setDataInstanceId(request.getDataInstanceId());
-        attempt.setCreateBy(request.getStudentId());
+        attempt.setCreateBy(user.getUserId());
         return attempt;
     }
 
@@ -108,8 +113,11 @@ public class PracticeAttemptController {
      * @return 练习次数实体。
      */
     private PracticeAttempt toFinishEntity(FinishPracticeAttemptRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
         PracticeAttempt attempt = new PracticeAttempt();
         attempt.setId(request.getId());
+        attempt.setTenantId(user.getTenantId());
+        attempt.setStudentId(user.getUserId());
         attempt.setAttemptStatus(request.getAttemptStatus());
         attempt.setEndTime(request.getEndTime());
         attempt.setScore(request.getScore());
@@ -118,7 +126,7 @@ public class PracticeAttemptController {
         attempt.setErrorCount(request.getErrorCount());
         attempt.setHintCount(request.getHintCount());
         attempt.setRollbackCount(request.getRollbackCount());
-        attempt.setUpdateBy(request.getUpdateBy());
+        attempt.setUpdateBy(user.getUserId());
         return attempt;
     }
 

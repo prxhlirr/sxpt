@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
+import AttachmentPanel from '../../components/lesson/AttachmentPanel.vue';
 import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import type { RecordedStep } from '../../domain/models';
 import StatusPill from '../../components/ui/StatusPill.vue';
@@ -10,6 +11,7 @@ import {
   type StudentDataLaunchResult
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { authApi } from '../../services/trainingApi';
 
 interface BusinessActionPayload {
   actionType: 'click' | 'input' | 'select' | 'submit';
@@ -21,6 +23,13 @@ interface BusinessActionPayload {
 const store = useTrainingStore();
 store.refreshPublishedTaskStatuses();
 const route = useRoute();
+const currentStudentId =
+  authApi.getSession()?.user.userId ??
+  (typeof window === 'undefined'
+    ? store.state.studentTasks.find(
+        (item) => item.id === String(route.params.taskId)
+      )?.studentId ?? ''
+    : '');
 const message = ref('');
 const errorMessage = ref('');
 const attemptMessage = ref('');
@@ -44,7 +53,9 @@ const submissionValues = reactive<Record<string, string>>({});
 
 const task = computed(() =>
   store.state.studentTasks.find(
-    (item) => item.id === String(route.params.taskId)
+    (item) =>
+      item.id === String(route.params.taskId) &&
+      item.studentId === currentStudentId
   )
 );
 const publishedTask = computed(() =>
@@ -68,12 +79,13 @@ const dataItem = computed(() =>
       )
     : undefined
 );
-const visibleStages = computed(
-  () =>
-    lesson.value?.stages.filter(
-      (stage) => task.value && stage.visibility[task.value.mode]
-    ) ?? []
-);
+const visibleStages = computed(() => {
+  if (!lesson.value || !task.value) return [];
+  if (task.value.mode === 'LEARNING') {
+    return lesson.value.stages;
+  }
+  return lesson.value.stages.filter((stage) => stage.visibility[task.value!.mode]);
+});
 const assignedStageIds = computed(() => {
   if (!task.value) return new Set<string>();
   const visibleIds = new Set(visibleStages.value.map((stage) => stage.id));
@@ -88,9 +100,24 @@ const assignedStageIds = computed(() => {
       .map((stage) => stage.id)
   );
 });
+const playbackStages = computed(() =>
+  visibleStages.value.filter((stage) => stage.recordedSteps.length > 0)
+);
+const playbackStageIds = computed(() => {
+  if (task.value?.mode === 'LEARNING') {
+    return new Set(playbackStages.value.map((stage) => stage.id));
+  }
+  return new Set(
+    playbackStages.value
+      .filter((stage) => assignedStageIds.value.has(stage.id))
+      .map((stage) => stage.id)
+  );
+});
+const navigationTeachingPoints = computed(() =>
+  playbackStages.value.filter((stage) => playbackStageIds.value.has(stage.id))
+);
 const learningSteps = computed(() =>
-  visibleStages.value
-    .filter((stage) => assignedStageIds.value.has(stage.id))
+  navigationTeachingPoints.value
     .flatMap((stage) =>
       stage.recordedSteps.map((step) => ({ stage, step }))
     )
@@ -113,10 +140,33 @@ const learningProgress = computed(() =>
     ? Math.min(learningStepIndex.value + 1, learningSteps.value.length)
     : 0
 );
+const learningTotalDuration = computed(() =>
+  learningSteps.value.reduce(
+    (total, item) => total + item.step.durationSeconds,
+    0
+  )
+);
+const learningElapsedDuration = computed(() =>
+  learningSteps.value
+    .slice(0, learningStepIndex.value + 1)
+    .reduce((total, item) => total + item.step.durationSeconds, 0)
+);
+const learningPlaybackProgress = computed(() =>
+  learningSteps.value.length
+    ? Math.round((learningProgress.value / learningSteps.value.length) * 100)
+    : 0
+);
 const currentLearningStageIndex = computed(() =>
-  visibleStages.value.findIndex(
+  navigationTeachingPoints.value.findIndex(
     (stage) => stage.id === currentLearningStep.value?.stage.id
   )
+);
+const canMoveLearningPrevious = computed(
+  () =>
+    learningStepIndex.value > 0 ||
+    (!showStageIntroduction.value &&
+      currentLearningStep.value?.stage.recordedSteps[0]?.id ===
+        currentLearningStep.value?.step.id)
 );
 const nextStage = computed(() =>
   lesson.value?.stages.find(
@@ -128,6 +178,13 @@ const nextStage = computed(() =>
 const nextStageIndex = computed(() =>
   lesson.value?.stages.findIndex((stage) => stage.id === nextStage.value?.id)
 );
+const allPlaybackStagesComplete = computed(
+  () =>
+    [...playbackStageIds.value].length > 0 &&
+    [...playbackStageIds.value].every((id) =>
+      task.value?.completedStageIds.includes(id)
+    )
+);
 const allAssignedStagesComplete = computed(
   () =>
     [...assignedStageIds.value].length > 0 &&
@@ -135,6 +192,21 @@ const allAssignedStagesComplete = computed(
       task.value?.completedStageIds.includes(id)
     )
 );
+const currentLearningInstruction = computed(() => {
+  if (!currentLearningStep.value || !task.value) return '';
+  if (task.value.mode === 'LEARNING') {
+    return (
+      currentLearningStep.value.step.teachingText ||
+      currentLearningStep.value.step.note ||
+      '请观察页面变化，并理解该动作在业务流程中的作用。'
+    );
+  }
+  return (
+    currentLearningStep.value.step.practiceHint ||
+    currentLearningStep.value.step.note ||
+    '请在高亮位置完成当前业务操作。'
+  );
+});
 const canRecordCompletion = computed(
   () =>
     task.value?.status === 'DOING' &&
@@ -188,6 +260,7 @@ const modeLabel = computed(() =>
       ? '流程练习'
       : '正式考试'
 );
+const isLearning = computed(() => task.value?.mode === 'LEARNING');
 const isExam = computed(() => task.value?.mode === 'EXAM');
 const activeAllocationId = computed(() => launchAllocation.value?.id || '');
 const activeOperationTarget = computed<
@@ -287,6 +360,12 @@ async function launchOriginPlatform() {
   }
 }
 
+function formatPlaybackDuration(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
+}
+
 function syncSubmissionValues() {
   Object.keys(submissionValues).forEach((key) => {
     delete submissionValues[key];
@@ -316,6 +395,16 @@ watch(
 );
 
 function syncLearningProgress(introduceStage = false) {
+  if (
+    task.value?.mode === 'LEARNING' &&
+    task.value.status !== 'SUBMITTED' &&
+    task.value.status !== 'GRADED'
+  ) {
+    learningStepIndex.value = 0;
+    showStageIntroduction.value =
+      introduceStage && Boolean(learningSteps.value[0]);
+    return;
+  }
   const firstIncompleteIndex = learningSteps.value.findIndex(
     ({ stage }) => !task.value?.completedStageIds.includes(stage.id)
   );
@@ -336,7 +425,9 @@ async function startTask() {
     message.value =
       task.value.mode === 'EXAM'
         ? '任务已开始。请按考试说明独立完成业务操作。'
-        : '任务已开始。请在录制业务系统的高亮位置完成当前操作。';
+        : task.value.mode === 'LEARNING'
+          ? '学习已开始，可自由选择任意教学点或节点，学习内容与教师讲解一致。'
+          : '任务已开始。请在录制业务系统的高亮位置完成当前操作。';
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '任务启动失败。';
@@ -353,12 +444,12 @@ async function completeStage() {
     syncing.value = true;
     await store.completeStudentStageRemote(task.value.id, nextStage.value.id);
     message.value =
-      '平台已记录本阶段的页面访问与流程操作。若有下一阶段，请继续办理。';
+      '平台已记录本教学点的页面访问与流程操作。若有下一教学点，请继续办理。';
   } catch (error) {
     errorMessage.value =
       error instanceof Error
         ? error.message
-        : '本阶段暂不能完成，请确认前序角色是否已提交。';
+        : '本教学点暂不能完成，请确认前序角色是否已提交。';
   } finally {
     syncing.value = false;
   }
@@ -377,7 +468,7 @@ async function submitTask() {
       '答卷已提交，系统客观分已经生成；教师完成主观评分后会推送完整结果。';
   } catch (error) {
     errorMessage.value =
-      error instanceof Error ? error.message : '提交失败，请检查阶段完成情况。';
+      error instanceof Error ? error.message : '提交失败，请检查教学点完成情况。';
   } finally {
     syncing.value = false;
   }
@@ -387,7 +478,7 @@ function resetLocalAttempt() {
   checks.entered = false;
   checks.located = false;
   checks.reviewed = false;
-  message.value = '已重新开始当前未提交阶段，平台不会回退已经完成的业务数据。';
+  message.value = '已重新开始当前未提交教学点，平台不会回退已经完成的业务数据。';
   errorMessage.value = '';
 }
 
@@ -469,6 +560,10 @@ function actionMatchesStep(
 
 async function advanceLearningStep() {
   if (!task.value || !currentLearningStep.value) return;
+  if (task.value.mode === 'LEARNING') {
+    moveLearningPlayback(1);
+    return;
+  }
   const current = currentLearningStep.value;
   const following = learningSteps.value[learningStepIndex.value + 1];
   const stageFinished = !following || following.stage.id !== current.stage.id;
@@ -501,10 +596,106 @@ async function advanceLearningStep() {
   }
 }
 
+function selectLearningStep(index: number) {
+  if (
+    task.value?.mode !== 'LEARNING' ||
+    task.value.status !== 'DOING' ||
+    index < 0 ||
+    index >= learningSteps.value.length
+  ) {
+    return;
+  }
+  learningStepIndex.value = index;
+  showStageIntroduction.value = false;
+  message.value = `已切换到节点“${learningSteps.value[index].step.title}”。`;
+  errorMessage.value = '';
+}
+
+function learningStepPosition(stepId: string) {
+  return learningSteps.value.findIndex(({ step }) => step.id === stepId);
+}
+
+function selectLearningTeachingPoint(stageId: string) {
+  if (
+    task.value?.mode !== 'LEARNING' ||
+    task.value.status !== 'DOING'
+  ) {
+    return;
+  }
+  const index = learningSteps.value.findIndex(
+    ({ stage }) => stage.id === stageId
+  );
+  if (index < 0) return;
+  learningStepIndex.value = index;
+  showStageIntroduction.value = true;
+  message.value = '';
+  errorMessage.value = '';
+}
+
+function moveLearningPlayback(direction: -1 | 1) {
+  if (
+    task.value?.mode !== 'LEARNING' ||
+    task.value.status !== 'DOING' ||
+    !currentLearningStep.value
+  ) {
+    return;
+  }
+  if (direction === 1) {
+    if (showStageIntroduction.value) {
+      showStageIntroduction.value = false;
+      return;
+    }
+    const following = learningSteps.value[learningStepIndex.value + 1];
+    if (!following) return;
+    const teachingPointChanged =
+      following.stage.id !== currentLearningStep.value.stage.id;
+    learningStepIndex.value += 1;
+    showStageIntroduction.value = teachingPointChanged;
+    return;
+  }
+
+  const firstStepId = currentLearningStep.value.stage.recordedSteps[0]?.id;
+  if (
+    !showStageIntroduction.value &&
+    currentLearningStep.value.step.id === firstStepId
+  ) {
+    showStageIntroduction.value = true;
+    return;
+  }
+  if (learningStepIndex.value <= 0) return;
+  learningStepIndex.value -= 1;
+  showStageIntroduction.value = false;
+}
+
+async function finishLearningTask() {
+  if (!task.value || task.value.mode !== 'LEARNING') return;
+  message.value = '';
+  errorMessage.value = '';
+  try {
+    syncing.value = true;
+    for (const teachingPoint of navigationTeachingPoints.value) {
+      if (!task.value.completedStageIds.includes(teachingPoint.id)) {
+        await store.completeStudentStageRemote(
+          task.value.id,
+          teachingPoint.id
+        );
+      }
+    }
+    await store.submitStudentTaskRemote(task.value.id, {});
+    message.value = '本次学习已完成，平台已保存学习记录。';
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error ? error.message : '学习记录提交失败。';
+  } finally {
+    syncing.value = false;
+  }
+}
+
 async function handleRecordedBusinessAction(payload: BusinessActionPayload) {
   if (
     !task.value ||
     task.value.mode === 'EXAM' ||
+    task.value.mode === 'LEARNING' ||
     task.value.status !== 'DOING' ||
     !currentLearningStep.value ||
     showStageIntroduction.value ||
@@ -539,7 +730,10 @@ function enterCurrentStage() {
     return;
   }
   showStageIntroduction.value = false;
-  message.value = `已进入“${currentLearningStep.value.stage.name}”，请完成第一个录制节点。`;
+  message.value =
+    task.value?.mode === 'LEARNING'
+      ? `已进入“${currentLearningStep.value.stage.name}”，可继续查看或切换任意节点。`
+      : `已进入“${currentLearningStep.value.stage.name}”，请完成第一个录制节点。`;
   errorMessage.value = '';
 }
 
@@ -588,6 +782,7 @@ async function restartTrainingTask() {
     class="runner-page"
     :class="{
       'runner-page--exam': isExam,
+      'learning-lecture-page': isLearning,
       'runner-menu-hidden': !showRunnerMenu
     }"
   >
@@ -597,7 +792,15 @@ async function restartTrainingTask() {
       type="button"
       @click="showRunnerMenu = !showRunnerMenu"
     >
-      {{ showRunnerMenu ? '隐藏上层菜单' : '显示上层菜单' }}
+      {{
+        isLearning
+          ? showRunnerMenu
+            ? '隐藏其他学习菜单'
+            : '显示完整学习菜单'
+          : showRunnerMenu
+            ? '隐藏上层菜单'
+            : '显示上层菜单'
+      }}
     </button>
 
     <header v-if="!isExam" v-show="showRunnerMenu" class="runner-header">
@@ -637,29 +840,368 @@ async function restartTrainingTask() {
     </header>
 
     <div
+      v-if="isLearning"
+      class="learning-lecture-view"
+    >
+      <section
+        v-show="showRunnerMenu"
+        class="learning-preview-metrics"
+      >
+        <span>
+          <small>教学点</small>
+          <strong>{{ navigationTeachingPoints.length }}</strong>
+        </span>
+        <span>
+          <small>录制片段</small>
+          <strong>{{ learningSteps.length }}</strong>
+        </span>
+        <span>
+          <small>总时长</small>
+          <strong>{{ formatPlaybackDuration(learningTotalDuration) }}</strong>
+        </span>
+        <span>
+          <small>当前进度</small>
+          <strong>{{ learningPlaybackProgress }}%</strong>
+        </span>
+        <div class="learning-preview-progress">
+          <i :style="{ width: `${learningPlaybackProgress}%` }"></i>
+        </div>
+      </section>
+
+      <div class="learning-preview-layout">
+        <main class="learning-business-stage">
+          <div v-show="showRunnerMenu" class="learning-browser-chrome">
+            <div class="learning-browser-dots"><i></i><i></i><i></i></div>
+            <div class="learning-browser-address">
+              {{
+                displayedLearningStep?.step.pageSnapshot?.pageUrl ??
+                displayedLearningStep?.step.url ??
+                displayedLearningStep?.step.pageTitle
+              }}
+            </div>
+            <span>页面快照 · 只读</span>
+          </div>
+
+          <BusinessSnapshotFrame
+            v-if="displayedLearningStep"
+            class="learning-snapshot-business-view"
+            :snapshot="displayedLearningStep.step.pageSnapshot"
+            :fallback-url="displayedLearningStep.step.url"
+            :selector="
+              task.status === 'DOING' && !showStageIntroduction
+                ? currentLearningStep?.step.selector
+                : undefined
+            "
+            :selector-candidates="
+              task.status === 'DOING' && !showStageIntroduction
+                ? currentLearningStep?.step.selectorCandidates
+                : undefined
+            "
+            :rect="
+              task.status === 'DOING' && !showStageIntroduction
+                ? currentLearningStep?.step.rect
+                : undefined
+            "
+            :recorded-viewport="
+              task.status === 'DOING' && !showStageIntroduction
+                ? currentLearningStep?.step.recordedViewport
+                : undefined
+            "
+            :title="`${displayedLearningStep.step.pageTitle}录制页面快照`"
+          />
+          <div v-else class="learning-empty-business">
+            当前教案还没有可学习的录制节点
+          </div>
+
+          <div
+            v-show="showRunnerMenu"
+            class="learning-playback-bar"
+          >
+            <span>{{ formatPlaybackDuration(learningElapsedDuration) }}</span>
+            <div><i :style="{ width: `${learningPlaybackProgress}%` }"></i></div>
+            <span>{{ formatPlaybackDuration(learningTotalDuration) }}</span>
+          </div>
+        </main>
+
+        <aside
+          v-if="task.status === 'DOING' && currentLearningStep"
+          class="learning-explanation-panel learning-step-prompt"
+          :class="{
+            'stage-prompt': showStageIntroduction,
+            'node-prompt': !showStageIntroduction
+          }"
+        >
+          <template v-if="showStageIntroduction">
+            <div class="learning-explanation-heading stage-introduction-heading">
+              <span>
+                本教学点说明 · 教学点 {{ currentLearningStageIndex + 1 }} /
+                {{ navigationTeachingPoints.length }}
+              </span>
+              <strong>{{ currentLearningStep.stage.name }}</strong>
+              <small>{{ currentLearningStep.stage.groupKey || '未指定业务角色' }}</small>
+            </div>
+            <div class="learning-instruction stage-introduction">
+              <span>教学点目标与注意事项</span>
+              <p>
+                {{
+                  currentLearningStep.stage.description ||
+                  '本教学点暂无补充说明，可按需选择任意节点进行学习。'
+                }}
+              </p>
+            </div>
+            <AttachmentPanel
+              :attachments="currentLearningStep.stage.attachments"
+              title="教学点附件"
+            />
+            <dl>
+              <div>
+                <dt>教学点节点</dt>
+                <dd>{{ currentLearningStep.stage.recordedSteps.length }} 个</dd>
+              </div>
+              <div>
+                <dt>负责角色</dt>
+                <dd>{{ currentLearningStep.stage.groupKey || '未指定' }}</dd>
+              </div>
+              <div>
+                <dt>教学点分值</dt>
+                <dd>{{ currentLearningStep.stage.score }} 分</dd>
+              </div>
+              <div>
+                <dt>完成依据</dt>
+                <dd>{{ currentLearningStep.stage.completionMethod }}</dd>
+              </div>
+            </dl>
+          </template>
+          <template v-else>
+            <div class="learning-explanation-heading">
+              <span>
+                本节点说明 · 步骤 {{ learningProgress }} /
+                {{ learningSteps.length }}
+              </span>
+              <strong>{{ currentLearningStep.step.title }}</strong>
+              <small>
+                {{ currentLearningStep.stage.name }} ·
+                {{ currentLearningStep.stage.groupKey }}
+              </small>
+            </div>
+            <div class="learning-instruction">
+              <span>逐步讲解</span>
+              <p>{{ currentLearningInstruction }}</p>
+            </div>
+            <AttachmentPanel
+              :attachments="currentLearningStep.step.attachments"
+              title="节点附件"
+            />
+            <dl>
+              <div>
+                <dt>pageTitle</dt>
+                <dd>{{ currentLearningStep.step.pageTitle }}</dd>
+              </div>
+              <div>
+                <dt>actionLabel</dt>
+                <dd>{{ currentLearningStep.step.actionLabel }}</dd>
+              </div>
+              <div>
+                <dt>selector</dt>
+                <dd><code>{{ currentLearningStep.step.selector }}</code></dd>
+              </div>
+              <div>
+                <dt>durationSeconds</dt>
+                <dd>{{ currentLearningStep.step.durationSeconds }} 秒</dd>
+              </div>
+              <div>
+                <dt>完成依据</dt>
+                <dd>{{ currentLearningStep.stage.completionMethod }}</dd>
+              </div>
+            </dl>
+          </template>
+
+          <div class="learning-step-controls">
+            <button
+              type="button"
+              :disabled="!canMoveLearningPrevious || syncing"
+              @click="moveLearningPlayback(-1)"
+            >
+              ← 上一步
+            </button>
+            <button
+              v-if="showStageIntroduction"
+              class="primary"
+              type="button"
+              :disabled="syncing"
+              @click="moveLearningPlayback(1)"
+            >
+              进入本教学点 →
+            </button>
+            <button
+              v-else-if="learningStepIndex < learningSteps.length - 1"
+              class="primary"
+              type="button"
+              :disabled="syncing"
+              @click="moveLearningPlayback(1)"
+            >
+              下一步 →
+            </button>
+            <button
+              v-else
+              class="primary"
+              type="button"
+              :disabled="syncing"
+              @click="finishLearningTask"
+            >
+              {{ syncing ? '正在保存…' : '完成本次学习' }}
+            </button>
+          </div>
+          <p v-if="message" class="learning-feedback success">{{ message }}</p>
+          <p v-if="errorMessage" class="learning-feedback danger">
+            {{ errorMessage }}
+          </p>
+        </aside>
+
+        <aside
+          v-else
+          class="learning-explanation-panel learning-step-prompt stage-prompt learning-state-prompt"
+        >
+          <div class="learning-explanation-heading stage-introduction-heading">
+            <span>
+              {{
+                task.status === 'TODO'
+                  ? '准备开始流程学习'
+                  : task.status === 'SUBMITTED' || task.status === 'GRADED'
+                    ? '学习记录已保存'
+                    : '暂无录制节点'
+              }}
+            </span>
+            <strong>
+              {{
+                task.status === 'TODO'
+                  ? lesson.title
+                  : task.status === 'SUBMITTED' || task.status === 'GRADED'
+                    ? '本次流程学习已经完成'
+                    : '当前教案暂无学习内容'
+              }}
+            </strong>
+            <small>{{ task.studentName }} · {{ roleNames?.join(' / ') }}</small>
+          </div>
+          <div class="learning-instruction stage-introduction">
+            <span>学习说明</span>
+            <p v-if="task.status === 'TODO'">
+              开始后将按照教师讲解的同一界面、教学点说明和节点提示进行只读学习。
+            </p>
+            <p v-else-if="task.status === 'SUBMITTED' || task.status === 'GRADED'">
+              系统已保存完整学习轨迹。你可以返回任务中心，也可以从第一步重新学习。
+            </p>
+            <p v-else>
+              请联系教师返回教案编排，至少录制一个完整业务操作。
+            </p>
+          </div>
+          <div class="learning-state-actions">
+            <button
+              v-if="task.status === 'TODO'"
+              class="primary"
+              type="button"
+              :disabled="syncing || !learningSteps.length"
+              @click="startTask"
+            >
+              {{ syncing ? '正在创建会话…' : '开始流程学习' }}
+            </button>
+            <template v-else-if="task.status === 'SUBMITTED' || task.status === 'GRADED'">
+              <RouterLink class="button secondary" to="/student/tasks">
+                返回任务中心
+              </RouterLink>
+              <button class="primary" type="button" @click="restartTrainingTask">
+                重新学习
+              </button>
+            </template>
+            <RouterLink v-else class="button secondary" to="/student/tasks">
+              返回任务中心
+            </RouterLink>
+          </div>
+          <p v-if="message" class="learning-feedback success">{{ message }}</p>
+          <p v-if="errorMessage" class="learning-feedback danger">
+            {{ errorMessage }}
+          </p>
+        </aside>
+      </div>
+
+      <section
+        v-if="learningSteps.length"
+        v-show="showRunnerMenu"
+        class="learning-segment-timeline"
+      >
+        <div class="learning-teaching-point-list">
+          <button
+            v-for="(stage, index) in navigationTeachingPoints"
+            :key="stage.id"
+            type="button"
+            :disabled="task.status !== 'DOING'"
+            :class="{
+              active:
+                stage.id === currentLearningStep?.stage.id &&
+                showStageIntroduction
+            }"
+            @click="selectLearningTeachingPoint(stage.id)"
+          >
+            <span>{{ index + 1 }}</span>
+            <strong>{{ stage.name }}</strong>
+            <small>{{ stage.recordedSteps.length }} 个节点</small>
+          </button>
+        </div>
+        <div class="learning-segment-list">
+          <button
+            v-for="(item, index) in learningSteps"
+            :key="item.step.id"
+            type="button"
+            :disabled="task.status !== 'DOING'"
+            :class="{
+              active: index === learningStepIndex && !showStageIntroduction
+            }"
+            @click="selectLearningStep(index)"
+          >
+            <span>{{ index + 1 }}</span>
+            <strong>{{ item.step.title }}</strong>
+            <small>{{ item.stage.name }} · {{ item.step.durationSeconds }} 秒</small>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div
+      v-else
       class="runner-layout"
       :class="{
         'help-hidden': !showHelp,
+        'learning-mode': task.mode === 'LEARNING',
         'exam-mode': isExam
       }"
     >
       <aside v-if="!isExam && showRunnerMenu" class="stage-sidebar">
         <span class="runner-kicker">BUSINESS WORKFLOW</span>
-        <h1>业务阶段</h1>
+        <h1>教学点导航</h1>
         <p>
-          各角色按顺序完成同一批业务流程；你仅需办理分配给自己的阶段。
+          {{
+            task.mode === 'LEARNING'
+              ? '学习内容与教师讲解一致，可自由选择任意教学点或节点。'
+              : '各角色按顺序完成同一批业务流程；你仅需办理分配给自己的教学点。'
+          }}
         </p>
         <div v-if="examSettings?.showProgress !== false" class="stage-list">
           <div
             v-for="(stage, index) in visibleStages"
             :key="stage.id"
             :class="{
-              assigned: assignedStageIds.has(stage.id),
+              selectable: task.mode === 'LEARNING' && playbackStageIds.has(stage.id),
+              assigned: playbackStageIds.has(stage.id),
               complete: task.completedStageIds.includes(stage.id),
               current:
                 stage.id ===
                 (currentLearningStep?.stage.id ?? nextStage?.id)
             }"
+            @click="
+              task.mode === 'LEARNING' &&
+              playbackStageIds.has(stage.id) &&
+              selectLearningTeachingPoint(stage.id)
+            "
           >
             <span>
               {{ task.completedStageIds.includes(stage.id) ? '✓' : index + 1 }}
@@ -668,22 +1210,48 @@ async function restartTrainingTask() {
               <strong>{{ stage.name }}</strong>
               <small>
                 {{
-                  assignedStageIds.has(stage.id)
-                    ? '由我办理'
-                    : '等待其他角色办理'
+                  task.mode === 'LEARNING'
+                    ? playbackStageIds.has(stage.id)
+                      ? '点击查看教学点说明'
+                      : '当前教学点无录制节点'
+                    : playbackStageIds.has(stage.id)
+                      ? '由我办理'
+                      : '等待其他角色办理'
                 }}
               </small>
+              <div
+                v-if="
+                  task.mode === 'LEARNING' &&
+                  stage.id === currentLearningStep?.stage.id &&
+                  stage.recordedSteps.length
+                "
+                class="teaching-point-nodes"
+              >
+                <button
+                  v-for="(step, stepIndex) in stage.recordedSteps"
+                  :key="step.id"
+                  type="button"
+                  :class="{ active: step.id === currentLearningStep?.step.id && !showStageIntroduction }"
+                  @click.stop="selectLearningStep(learningStepPosition(step.id))"
+                >
+                  {{ stepIndex + 1 }}. {{ step.title }}
+                </button>
+              </div>
             </section>
           </div>
         </div>
         <div v-else class="hidden-progress">
           <strong>考试进度已隐藏</strong>
-          <p>按考试设置，仅显示当前操作引导，不展示完整业务阶段。</p>
+          <p>按考试设置，仅显示当前操作引导，不展示完整教学点。</p>
         </div>
         <div class="evidence-boundary">
           <strong>当前判定口径</strong>
           <p>
-            访问目标页面 + 定位业务待办 + 执行流程按钮，即判定本阶段完成。
+            {{
+              task.mode === 'LEARNING'
+                ? '学习模式为讲解式只读回放，可按需要切换教学点与节点。'
+                : '访问目标页面 + 定位业务待办 + 执行流程按钮，即判定本教学点完成。'
+            }}
           </p>
         </div>
       </aside>
@@ -714,6 +1282,7 @@ async function restartTrainingTask() {
                 : currentLearningStep?.step.recordedViewport
             "
             :interactive="
+              task.mode === 'PRACTICE' &&
               task.status === 'DOING' &&
               Boolean(currentLearningStep) &&
               !showStageIntroduction &&
@@ -744,8 +1313,8 @@ async function restartTrainingTask() {
             <span>01</span>
             <h3>准备进入录制时的业务系统</h3>
             <p>
-              开始后请依次完成教师录制的 {{ learningSteps.length }}
-              个业务操作，系统将按真实教案顺序推进。
+              开始后将加载教师录制的 {{ learningSteps.length }}
+              个业务节点。学习模式可自由切换，练习模式按实际操作推进。
             </p>
             <button
               class="primary"
@@ -782,16 +1351,20 @@ async function restartTrainingTask() {
           >
             <span>{{ currentLearningStageIndex + 1 }}</span>
             <small>
-              本阶段说明 · 阶段 {{ currentLearningStageIndex + 1 }} /
-              {{ visibleStages.length }}
+              本教学点说明 · 教学点 {{ currentLearningStageIndex + 1 }} /
+              {{ playbackStageIds.size }}
             </small>
             <h3>{{ currentLearningStep.stage.name }}</h3>
             <p>
               {{
                 currentLearningStep.stage.description ||
-                '本阶段暂无补充说明，请按照录制节点顺序完成业务操作。'
+                '本教学点暂无补充说明，可按需选择任意节点查看。'
               }}
             </p>
+            <AttachmentPanel
+              :attachments="currentLearningStep.stage.attachments"
+              title="教学点附件"
+            />
             <dl>
               <div>
                 <dt>负责角色</dt>
@@ -808,12 +1381,16 @@ async function restartTrainingTask() {
               :disabled="syncing"
               @click="enterCurrentStage"
             >
-              {{ syncing ? '正在初始化任务…' : '进入本阶段' }}
+              {{ syncing ? '正在初始化任务…' : '进入本教学点' }}
             </button>
           </div>
 
           <div
-            v-else-if="allAssignedStagesComplete && !currentLearningStep"
+            v-else-if="
+              task.mode === 'PRACTICE' &&
+              allPlaybackStagesComplete &&
+              !currentLearningStep
+            "
             class="training-state-overlay success"
           >
             <span>✓</span>
@@ -831,7 +1408,7 @@ async function restartTrainingTask() {
 
           <div
             v-if="
-              showRunnerMenu &&
+              (showRunnerMenu || task.mode === 'LEARNING') &&
               task.status === 'DOING' &&
               currentLearningStep &&
               !showStageIntroduction
@@ -842,18 +1419,39 @@ async function restartTrainingTask() {
               {{ modeLabel }} {{ learningProgress }} / {{ learningSteps.length }}
             </span>
             <strong>{{ currentLearningStep.step.title }}</strong>
-            <p>
-              {{
-                task.mode === 'LEARNING'
-                  ? currentLearningStep.step.teachingText ||
-                    currentLearningStep.step.note ||
-                    '请在高亮位置重做教师录制的业务操作。'
-                  : currentLearningStep.step.practiceHint ||
-                    currentLearningStep.step.note ||
-                    '请在高亮位置完成当前业务操作。'
-              }}
-            </p>
-            <div>
+            <p>{{ currentLearningInstruction }}</p>
+            <AttachmentPanel
+              :attachments="currentLearningStep.step.attachments"
+              title="节点附件"
+            />
+            <div v-if="task.mode === 'LEARNING'" class="learning-playback-actions">
+              <button
+                type="button"
+                :disabled="!canMoveLearningPrevious || syncing"
+                @click="moveLearningPlayback(-1)"
+              >
+                ← 上一步
+              </button>
+              <button
+                v-if="learningStepIndex < learningSteps.length - 1"
+                class="primary"
+                type="button"
+                :disabled="syncing"
+                @click="moveLearningPlayback(1)"
+              >
+                下一步 →
+              </button>
+              <button
+                v-else
+                class="primary"
+                type="button"
+                :disabled="syncing"
+                @click="finishLearningTask"
+              >
+                {{ syncing ? '正在保存…' : '完成本次学习' }}
+              </button>
+            </div>
+            <div v-else>
               <button
                 v-if="currentStepIsGuide"
                 class="primary"
@@ -888,7 +1486,7 @@ async function restartTrainingTask() {
               <header>
                 <div>
                   <span>业务办理 / 我的待办</span>
-                  <h2>{{ nextStage?.name ?? '本角色阶段已完成' }}</h2>
+                  <h2>{{ nextStage?.name ?? '本角色教学点已完成' }}</h2>
                 </div>
                 <em>演示模式 · 操作不会写入真实业务系统</em>
               </header>
@@ -960,7 +1558,7 @@ async function restartTrainingTask() {
                     客观分 {{ task.objectiveScore ?? 0 }} 分。教师评分后，可在成绩反馈中查看主观分和批语。
                   </template>
                   <template v-else>
-                    系统已保存学习轨迹与阶段完成记录，可以返回任务中心继续下一项任务。
+                    系统已保存学习轨迹与教学点完成记录，可以返回任务中心继续下一项任务。
                   </template>
                 </p>
                 <RouterLink v-if="task.mode === 'EXAM'" class="button primary" to="/student/results">
@@ -984,7 +1582,7 @@ async function restartTrainingTask() {
                 class="business-start success"
               >
                 <span>✓</span>
-                <h3>你负责的业务阶段已全部完成</h3>
+                <h3>你负责的教学点已全部完成</h3>
                 <p>
                   {{
                     task.mode === 'EXAM'
@@ -1114,7 +1712,7 @@ async function restartTrainingTask() {
                       class="secondary"
                       @click="resetLocalAttempt"
                     >
-                      重新进入本阶段
+                      重新进入本教学点
                     </button>
                     <button
                       type="button"
@@ -1134,7 +1732,11 @@ async function restartTrainingTask() {
       </main>
 
       <aside
-        v-if="showRunnerMenu && !isExam && !showStageIntroduction"
+        v-if="
+          showRunnerMenu &&
+          task.mode === 'PRACTICE' &&
+          !showStageIntroduction
+        "
         class="guide-panel"
       >
         <span class="runner-kicker">RECORDED GUIDE</span>
@@ -1142,13 +1744,7 @@ async function restartTrainingTask() {
         <p>
           {{
             currentLearningStep
-              ? task.mode === 'LEARNING'
-                ? currentLearningStep.step.teachingText ||
-                  currentLearningStep.step.note ||
-                  '请观察高亮位置，并完成教师录制的对应操作。'
-                : currentLearningStep.step.practiceHint ||
-                  currentLearningStep.step.note ||
-                  '请在高亮位置独立完成当前操作。'
+              ? currentLearningInstruction
               : '教案录制的业务节点已经全部完成。'
           }}
         </p>
@@ -1180,7 +1776,7 @@ async function restartTrainingTask() {
         </div>
 
         <div v-if="currentLearningStep?.stage.recordedSteps.length" class="recorded-steps">
-          <strong>本阶段录制步骤</strong>
+          <strong>本教学点录制步骤</strong>
           <div
             v-for="(step, index) in currentLearningStep.stage.recordedSteps"
             :key="step.id"
@@ -1217,7 +1813,7 @@ async function restartTrainingTask() {
           <strong>页面访问</strong>
           <strong>元素操作</strong>
           <strong>录制顺序</strong>
-          <strong>第 {{ task.attemptNumber }} 次{{ task.mode === 'LEARNING' ? '学习' : '练习' }}</strong>
+          <strong>第 {{ task.attemptNumber }} 次练习</strong>
           <small>步骤必须与教案录制选择器匹配后才会推进</small>
         </div>
       </aside>
@@ -1377,6 +1973,15 @@ async function restartTrainingTask() {
   opacity: 0.5;
 }
 
+.stage-list > div.selectable {
+  cursor: pointer;
+}
+
+.stage-list > div.selectable:hover {
+  border-radius: 9px;
+  background: #f7f5ff;
+}
+
 .stage-list > div::before {
   position: absolute;
   top: 30px;
@@ -1438,6 +2043,32 @@ async function restartTrainingTask() {
 .stage-list small {
   color: #8993a4;
   font-size: 8px;
+}
+
+.teaching-point-nodes {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.teaching-point-nodes button {
+  overflow: hidden;
+  border: 1px solid #e4e1f7;
+  border-radius: 6px;
+  padding: 6px 7px;
+  color: #6f7889;
+  background: #fff;
+  font-size: 8px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.teaching-point-nodes button.active {
+  border-color: #8b7cf1;
+  color: #5747c9;
+  background: #efecff;
+  font-weight: 800;
 }
 
 .evidence-boundary {
@@ -1525,6 +2156,12 @@ async function restartTrainingTask() {
   box-shadow: 0 24px 64px rgb(20 27 53 / 22%);
   text-align: center;
   backdrop-filter: blur(16px);
+}
+
+.training-state-overlay :deep(.attachment-panel),
+.learning-controls :deep(.attachment-panel) {
+  width: 100%;
+  text-align: left;
 }
 
 .training-state-overlay > span {
@@ -1655,6 +2292,10 @@ async function restartTrainingTask() {
   align-self: center;
   color: #7d8798;
   font-size: 9px;
+}
+
+.learning-playback-actions button {
+  min-height: 32px;
 }
 
 .browser-bar {
@@ -2185,7 +2826,466 @@ async function restartTrainingTask() {
   }
 }
 
-/* 沉浸式任务：业务界面使用完整视口，阶段与操作引导作为上层浮窗。 */
+/* 学习模式与教师讲解使用一致的沉浸式快照、说明浮窗和底部节点导航。 */
+.learning-lecture-view,
+.learning-preview-layout {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+.learning-lecture-view {
+  z-index: 1;
+}
+
+.learning-preview-layout {
+  z-index: 1;
+}
+
+.learning-business-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  height: 100vh;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  background: #fff;
+}
+
+.learning-snapshot-business-view {
+  min-height: 0;
+}
+
+.learning-browser-chrome {
+  display: grid;
+  min-height: 38px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 13px;
+  color: #9da5ba;
+  background: #242739;
+  font-size: 9px;
+}
+
+.learning-browser-dots {
+  display: flex;
+  gap: 5px;
+}
+
+.learning-browser-dots i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e46870;
+}
+
+.learning-browser-dots i:nth-child(2) {
+  background: #dca448;
+}
+
+.learning-browser-dots i:nth-child(3) {
+  background: #55b98f;
+}
+
+.learning-browser-address {
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 5px 10px;
+  background: #303447;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.learning-playback-bar {
+  display: grid;
+  min-height: 52px;
+  grid-template-columns: auto minmax(80px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid #e4e7ee;
+  padding: 0 13px;
+  color: #7a8597;
+  background: #fff;
+  font-size: 9px;
+}
+
+.learning-playback-bar > div,
+.learning-preview-progress {
+  overflow: hidden;
+  border-radius: 20px;
+  background: #e9e7fa;
+}
+
+.learning-playback-bar > div {
+  height: 4px;
+}
+
+.learning-playback-bar i,
+.learning-preview-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #6958ee, #9b90ff);
+  transition: width 200ms ease;
+}
+
+.learning-preview-metrics,
+.learning-segment-timeline,
+.learning-explanation-panel {
+  position: absolute;
+  z-index: 20;
+  border: 1px solid rgb(218 223 234 / 88%);
+  background: rgb(255 255 255 / 94%);
+  box-shadow: 0 18px 46px rgb(23 29 55 / 18%);
+  backdrop-filter: blur(14px);
+}
+
+.learning-preview-metrics {
+  top: 82px;
+  left: 14px;
+  display: grid;
+  width: min(430px, calc(100vw - 28px));
+  grid-template-columns: repeat(4, minmax(80px, 1fr));
+  overflow: hidden;
+  border-radius: 12px;
+}
+
+.learning-preview-metrics > span {
+  display: grid;
+  gap: 3px;
+  border-right: 1px solid #eceef3;
+  padding: 9px 12px 12px;
+}
+
+.learning-preview-metrics small {
+  color: #8993a4;
+  font-size: 9px;
+}
+
+.learning-preview-metrics strong {
+  font-size: 13px;
+}
+
+.learning-preview-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+}
+
+.learning-explanation-panel {
+  z-index: 35;
+  display: grid;
+  width: min(430px, calc(100vw - 36px));
+  max-height: calc(100vh - 36px);
+  grid-template-rows: auto auto 1fr auto;
+  align-content: start;
+  overflow-y: auto;
+  border-radius: 16px;
+}
+
+.learning-step-prompt.stage-prompt {
+  top: 50%;
+  left: 50%;
+  width: min(500px, calc(100vw - 36px));
+  transform: translate(-50%, -50%);
+}
+
+.learning-step-prompt.node-prompt {
+  top: 50%;
+  left: 18px;
+  transform: translateY(-50%);
+}
+
+.learning-explanation-heading {
+  display: grid;
+  gap: 5px;
+  border-bottom: 1px solid #e9ecf2;
+  padding: 20px;
+}
+
+.learning-explanation-heading > span {
+  color: #6c5ce7;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.learning-explanation-heading strong {
+  font-size: 17px;
+}
+
+.learning-explanation-heading small {
+  color: #8a94a5;
+  font-size: 10px;
+}
+
+.learning-explanation-heading.stage-introduction-heading {
+  background: linear-gradient(135deg, #f7f5ff, #fff);
+}
+
+.learning-instruction {
+  margin: 16px;
+  border: 1px solid #dfdbff;
+  border-radius: 11px;
+  padding: 14px;
+  background: #f7f5ff;
+}
+
+.learning-instruction.stage-introduction {
+  border-color: #cfc8ff;
+  background: linear-gradient(145deg, #f3f0ff, #fbfaff);
+}
+
+.learning-instruction span {
+  color: #6555df;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.learning-instruction p {
+  margin: 7px 0 0;
+  color: #566277;
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.learning-explanation-panel :deep(.attachment-panel) {
+  margin: 0 16px 14px;
+}
+
+.learning-explanation-panel dl {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  margin: 0;
+  padding: 0 18px 18px;
+}
+
+.learning-explanation-panel dl > div {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr);
+  gap: 8px;
+  border-bottom: 1px solid #edf0f5;
+  padding: 11px 0;
+}
+
+.learning-explanation-panel dt {
+  color: #8b95a7;
+  font-size: 9px;
+}
+
+.learning-explanation-panel dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #4c596e;
+  font-size: 10px;
+}
+
+.learning-step-controls,
+.learning-state-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  border-top: 1px solid #e8ebf1;
+  padding: 14px;
+}
+
+.learning-state-actions > :only-child {
+  grid-column: 1 / -1;
+}
+
+.learning-feedback {
+  margin: 0 14px 10px;
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.learning-feedback.success {
+  color: #087b59;
+  background: #eaf8f2;
+}
+
+.learning-feedback.danger {
+  color: #a43d48;
+  background: #fff0f1;
+}
+
+.learning-empty-business {
+  display: grid;
+  place-items: center;
+  color: #7b8699;
+  background: #f4f6fa;
+  font-size: 13px;
+}
+
+.learning-segment-timeline {
+  right: 14px;
+  bottom: 66px;
+  left: 14px;
+  overflow: hidden;
+  border-radius: 13px;
+}
+
+.learning-teaching-point-list,
+.learning-segment-list {
+  display: flex;
+  overflow-x: auto;
+}
+
+.learning-teaching-point-list {
+  gap: 8px;
+  border-bottom: 1px solid #eceef4;
+  padding: 10px 13px 8px;
+}
+
+.learning-teaching-point-list button {
+  display: grid;
+  flex: 0 0 180px;
+  grid-template-columns: auto minmax(90px, 1fr);
+  align-items: center;
+  gap: 2px 7px;
+  border-color: #e2e5ec;
+  padding: 7px 9px;
+  text-align: left;
+}
+
+.learning-teaching-point-list button.active,
+.learning-segment-list button.active {
+  border-color: #9185f8;
+  background: #f4f2ff;
+}
+
+.learning-teaching-point-list span,
+.learning-segment-list button > span {
+  display: grid;
+  grid-row: 1 / 3;
+  place-items: center;
+  color: #6656dd;
+  background: #ece9ff;
+}
+
+.learning-teaching-point-list span {
+  width: 23px;
+  height: 23px;
+  border-radius: 7px;
+  font-size: 9px;
+}
+
+.learning-teaching-point-list strong,
+.learning-segment-list strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.learning-teaching-point-list small,
+.learning-segment-list small {
+  color: #8a94a6;
+  font-size: 8px;
+}
+
+.learning-segment-list {
+  gap: 9px;
+  padding: 9px;
+}
+
+.learning-segment-list button {
+  display: grid;
+  flex: 0 0 190px;
+  grid-template-columns: 25px minmax(110px, 1fr);
+  align-items: center;
+  gap: 2px 8px;
+  border-color: #e2e5ec;
+  padding: 9px;
+  text-align: left;
+}
+
+.learning-segment-list button > span {
+  width: 25px;
+  height: 25px;
+  border-radius: 8px;
+  font-size: 9px;
+}
+
+.learning-lecture-page .runner-menu-toggle {
+  top: 14px;
+}
+
+.runner-menu-hidden .learning-business-stage {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+@media (max-height: 720px) {
+  .learning-preview-metrics {
+    display: none;
+  }
+
+  .learning-segment-timeline {
+    bottom: 58px;
+  }
+
+  .learning-teaching-point-list {
+    display: none;
+  }
+
+  .learning-explanation-heading {
+    padding: 14px;
+  }
+
+  .learning-instruction {
+    margin: 10px 14px;
+    padding: 10px;
+  }
+
+  .learning-explanation-panel dl > div {
+    padding: 7px 0;
+  }
+}
+
+@media (max-height: 560px) {
+  .learning-segment-timeline,
+  .learning-explanation-panel dl,
+  .learning-explanation-panel :deep(.attachment-panel) {
+    display: none;
+  }
+
+  .learning-explanation-panel {
+    max-height: calc(100vh - 24px);
+  }
+}
+
+@media (max-width: 880px) {
+  .learning-preview-metrics,
+  .learning-segment-timeline {
+    display: none;
+  }
+
+  .learning-explanation-panel,
+  .learning-step-prompt.stage-prompt,
+  .learning-step-prompt.node-prompt {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    max-height: 46vh;
+    transform: none;
+  }
+
+  .learning-explanation-panel dl,
+  .learning-instruction {
+    display: none;
+  }
+}
+
+/* 沉浸式任务：业务界面使用完整视口，教学点与操作引导作为上层浮窗。 */
 .runner-page {
   position: relative;
   width: 100%;
@@ -2275,6 +3375,14 @@ async function restartTrainingTask() {
 .guide-panel {
   right: 14px;
   width: 300px;
+}
+
+.runner-layout.learning-mode .learning-controls {
+  right: 18px;
+  bottom: 18px;
+  width: min(460px, calc(100vw - 280px));
+  max-height: calc(100vh - 110px);
+  overflow-y: auto;
 }
 
 .runner-layout.help-hidden .business-canvas {

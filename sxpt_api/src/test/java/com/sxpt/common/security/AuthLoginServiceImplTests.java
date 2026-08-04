@@ -59,6 +59,9 @@ class AuthLoginServiceImplTests {
         assertThat(response.getUser().getEmployeeNo()).isEqualTo("T001");
         assertThat(response.getUser().getRoles()).containsExactly("teacher");
         assertThat(response.getUser().getOrgIds()).containsExactly("org-class-001");
+        JwtPrincipal principal = buildJwtService().parseToken(response.getToken());
+        assertThat(principal.getTenantId()).isEqualTo("tenant_001");
+        assertThat(principal.getRoles()).containsExactly("teacher");
         assertThat(teachUser.getFailedLoginCount()).isEqualTo(0);
         assertThat(teachUser.getLastLoginTime()).isNotNull();
         verify(mapper, times(1)).updateById(teachUser);
@@ -113,6 +116,13 @@ class AuthLoginServiceImplTests {
                 new JwtService(jwtProperties),
                 jwtProperties
         );
+    }
+
+    private JwtService buildJwtService() {
+        JwtProperties jwtProperties = new JwtProperties();
+        jwtProperties.setSecret("sxpt_test_jwt_secret");
+        jwtProperties.setExpireSeconds(7200L);
+        return new JwtService(jwtProperties);
     }
 
     private TeachUserRoleMapper buildUserRoleMapper() {

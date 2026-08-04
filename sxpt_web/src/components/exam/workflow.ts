@@ -192,8 +192,8 @@ export function buildPublishChecklist(input: PublishReadinessInput): {
       key: 'groups',
       label: '分组有效',
       detail: input.groupsValid
-        ? '角色覆盖全部阶段且已分配学员'
-        : '请配置角色、阶段映射和学员业务账号',
+      ? '角色覆盖全部教学点且已分配学员'
+      : '请配置角色、教学点映射和学员业务账号',
       passed: input.groupsValid,
       routeName: 'group-setup'
     },
@@ -221,7 +221,7 @@ export function buildPublishChecklist(input: PublishReadinessInput): {
   const reasons: string[] = [];
   if (!input.lessonPublished) reasons.push('教案尚未发布');
   if (!input.examConfigured) reasons.push('考试参数尚未完成配置');
-  if (!input.groupsValid) reasons.push('分组未覆盖全部考试阶段或尚无成员');
+  if (!input.groupsValid) reasons.push('分组未覆盖全部考试教学点或尚无成员');
   if (!input.dataReady) reasons.push('正式考试数据不足，需完成生成或补齐');
 
   return {

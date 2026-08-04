@@ -19,7 +19,10 @@ import type {
   UnitDataPlan
 } from '../domain/models';
 import {
+  authApi,
   createTrainingApi,
+  trainingWorkspaceApi,
+  type AuthSession,
   type TrainingApi
 } from '../services/trainingApi';
 import {
@@ -28,6 +31,7 @@ import {
 } from '../services/backendTrainingApi';
 import { getApiConfig } from '../config/api';
 import { createDefaultBusinessPlatforms } from '../data/mockSeed';
+import { usersApi } from '../api/users';
 
 export interface TrainingStoreOptions {
   api?: TrainingApi;
@@ -74,10 +78,119 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     lastError: '',
     lastSyncedAt: ''
   });
+  let workspaceUserKey = '';
+  let workspaceLoadPromise: Promise<void> | undefined;
+  let workspaceSaveTimer: ReturnType<typeof setTimeout> | undefined;
 
   const persist = () => {
     api.saveState(toPlain(state));
+    scheduleWorkspaceSave();
   };
+
+  function replaceState(nextState: TrainingState) {
+    const next = toPlain(nextState);
+    state.currentRole = next.currentRole;
+    state.businessPlatforms = next.businessPlatforms;
+    state.lessons = next.lessons;
+    state.examSettings = next.examSettings;
+    state.groupPlans = next.groupPlans;
+    state.unitDataPlans = next.unitDataPlans;
+    state.dataItems = next.dataItems;
+    state.publishedTasks = next.publishedTasks;
+    state.studentTasks = next.studentTasks;
+    state.activities = next.activities;
+  }
+
+  function scheduleWorkspaceSave() {
+    if (!workspaceUserKey || !backend.isEnabled()) return;
+    if (workspaceSaveTimer) clearTimeout(workspaceSaveTimer);
+    workspaceSaveTimer = setTimeout(() => {
+      workspaceSaveTimer = undefined;
+      void saveAuthenticatedWorkspace().catch((error) => {
+        remote.lastError =
+          error instanceof Error ? error.message : '工作区自动保存失败';
+      });
+    }, 350);
+  }
+
+  async function saveAuthenticatedWorkspace(): Promise<void> {
+    const session = authApi.getSession();
+    if (
+      !session ||
+      `${session.user.tenantId}:${session.user.userId}` !== workspaceUserKey ||
+      !backend.isEnabled()
+    ) {
+      return;
+    }
+    await trainingWorkspaceApi.save(session, toPlain(state));
+    remote.lastSyncedAt = now();
+  }
+
+  function clearAuthenticatedWorkspace(): void {
+    workspaceUserKey = '';
+    workspaceLoadPromise = undefined;
+    if (workspaceSaveTimer) {
+      clearTimeout(workspaceSaveTimer);
+      workspaceSaveTimer = undefined;
+    }
+    replaceState(api.resetDemo());
+    remote.initialized = false;
+    remote.loading = false;
+    remote.operation = '';
+    remote.lastError = '';
+    remote.lastSyncedAt = '';
+  }
+
+  async function initializeAuthenticatedWorkspace(
+    session: AuthSession | null = authApi.getSession()
+  ): Promise<void> {
+    if (!session) {
+      workspaceUserKey = '';
+      return;
+    }
+    const userKey = `${session.user.tenantId}:${session.user.userId}`;
+    if (workspaceUserKey === userKey) return;
+    if (workspaceLoadPromise) return workspaceLoadPromise;
+    const previousWorkspaceUserKey = workspaceUserKey;
+    workspaceLoadPromise = (async () => {
+      const role = authApi.getPortalRole(session);
+      state.currentRole = role;
+      if (!backend.isEnabled()) {
+        if (role === 'student') {
+          state.studentTasks = state.studentTasks.filter(
+            (task) => task.studentId === session.user.userId
+          );
+        }
+        api.saveState(toPlain(state));
+        workspaceUserKey = userKey;
+        return;
+      }
+      const savedState = await trainingWorkspaceApi.load(session);
+      if (savedState) {
+        replaceState(savedState);
+        state.currentRole = role;
+      } else if (role !== 'student') {
+        if (
+          previousWorkspaceUserKey &&
+          previousWorkspaceUserKey !== userKey
+        ) {
+          replaceState(api.resetDemo());
+          state.currentRole = role;
+        }
+        await trainingWorkspaceApi.save(session, toPlain(state));
+      }
+      api.saveState(toPlain(state));
+      workspaceUserKey = userKey;
+      remote.initialized = true;
+      remote.lastError = '';
+      remote.lastSyncedAt = now();
+    })();
+    try {
+      await workspaceLoadPromise;
+    } finally {
+      workspaceLoadPromise = undefined;
+    }
+  }
 
   const requireLesson = (lessonId: string) => {
     const lesson = state.lessons.find((candidate) => candidate.id === lessonId);
@@ -825,7 +938,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const created: LessonStage = {
       id: stageId,
       stageKey: input.stageKey?.trim() || `stage-${order}`,
-      name: input.name?.trim() || `业务阶段 ${order}`,
+      name: input.name?.trim() || `教学点 ${order}`,
       groupKey: input.groupKey?.trim() || '',
       description: input.description?.trim() || '',
       required: input.required ?? true,
@@ -838,7 +951,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     };
     lesson.stages.push(created);
     lesson.updatedAt = now();
-    addActivity('LESSON_STAGE_ADDED', `新增阶段：${created.name}`, lesson.title);
+    addActivity('LESSON_STAGE_ADDED', `新增教学点：${created.name}`, lesson.title);
     persist();
     return lesson.stages.find((stage) => stage.id === stageId)!;
   }
@@ -853,7 +966,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const stage = requireStage(lesson, stageId);
     Object.assign(stage, toPlain(patch), { id: stageId });
     lesson.updatedAt = now();
-    addActivity('LESSON_STAGE_UPDATED', `更新阶段：${stage.name}`, lesson.title);
+    addActivity('LESSON_STAGE_UPDATED', `更新教学点：${stage.name}`, lesson.title);
     persist();
     return stage;
   }
@@ -862,14 +975,14 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     assertLessonConfigurationMutable(lessonId);
     const lesson = requireLesson(lessonId);
     const index = lesson.stages.findIndex((stage) => stage.id === stageId);
-    if (index < 0) throw new Error(`未找到阶段：${stageId}`);
+    if (index < 0) throw new Error(`未找到教学点：${stageId}`);
     const [removed] = lesson.stages.splice(index, 1);
     const plan = state.groupPlans[lessonId];
     plan?.roles.forEach((role) => {
       role.stageIds = role.stageIds.filter((id) => id !== stageId);
     });
     lesson.updatedAt = now();
-    addActivity('LESSON_STAGE_REMOVED', `删除阶段：${removed.name}`, lesson.title);
+    addActivity('LESSON_STAGE_REMOVED', `删除教学点：${removed.name}`, lesson.title);
     persist();
     return removed;
   }
@@ -882,7 +995,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     assertLessonConfigurationMutable(lessonId);
     const lesson = requireLesson(lessonId);
     const from = lesson.stages.findIndex((stage) => stage.id === stageId);
-    if (from < 0) throw new Error(`未找到阶段：${stageId}`);
+    if (from < 0) throw new Error(`未找到教学点：${stageId}`);
     const desired =
       target === 'up' ? from - 1 : target === 'down' ? from + 1 : target;
     const to = Math.max(0, Math.min(lesson.stages.length - 1, desired));
@@ -890,7 +1003,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       const [stage] = lesson.stages.splice(from, 1);
       lesson.stages.splice(to, 0, stage);
       lesson.updatedAt = now();
-      addActivity('LESSON_STAGE_MOVED', `调整阶段顺序：${stage.name}`, lesson.title);
+    addActivity('LESSON_STAGE_MOVED', `调整教学点顺序：${stage.name}`, lesson.title);
       persist();
     }
     return lesson.stages;
@@ -921,12 +1034,12 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         issues.push('教案绑定的平台模块尚未配置访问路径');
       }
     }
-    if (lesson.stages.length === 0) issues.push('教案至少需要一个业务阶段');
+    if (lesson.stages.length === 0) issues.push('教案至少需要一个教学点');
     if (lesson.stages.some((stage) => !stage.groupKey.trim())) {
-      issues.push('每个阶段必须指定负责角色组');
+      issues.push('每个教学点必须指定负责角色组');
     }
     if (lesson.stages.some((stage) => stage.recordedSteps.length === 0)) {
-      issues.push('每个阶段至少需要一个录制步骤');
+      issues.push('每个教学点至少需要一个录制步骤');
     }
     if (
       !Number.isFinite(lesson.objectiveMaxScore) ||
@@ -938,11 +1051,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       issues.push('教案客观分与主观分合计必须为 100');
     }
     if (lesson.stages.some((stage) => !Number.isFinite(stage.score) || stage.score < 0)) {
-      issues.push('阶段分值必须为非负数');
+      issues.push('教学点分值必须为非负数');
     }
     const stageScore = lesson.stages.reduce((total, stage) => total + stage.score, 0);
     if (stageScore !== lesson.objectiveMaxScore) {
-      issues.push('阶段客观分合计必须等于教案客观分');
+      issues.push('教学点客观分合计必须等于教案客观分');
     }
     return [...new Set(issues)];
   }
@@ -1063,6 +1176,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const issues = validateLesson(lessonId);
     if (issues.length) throw new TrainingValidationError(issues);
     if (!backend.isEnabled()) return publishLesson(lessonId);
+    if (lesson.status === 'PUBLISHED' && lesson.teachingPointId) {
+      return lesson;
+    }
     const platform = requireBusinessPlatform(lesson.businessPlatformId);
 
     for (const stage of lesson.stages) {
@@ -1086,7 +1202,15 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       });
     });
     persist();
-    return publishLesson(lessonId);
+    const publishedLesson =
+      lesson.status === 'PUBLISHED' ? lesson : publishLesson(lessonId);
+    if (lesson.status === 'PUBLISHED') {
+      lesson.publishedAt ??= now();
+      lesson.updatedAt = now();
+      persist();
+    }
+    await saveAuthenticatedWorkspace();
+    return publishedLesson;
   }
 
   function ensureSimulatedModeTask(
@@ -1096,19 +1220,18 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const existing = state.publishedTasks.find(
       (task) => task.lessonId === lessonId && task.mode === mode
     );
-    if (existing) return existing;
     const lesson = requireLesson(lessonId);
     const config = getApiConfig();
     const startAt = new Date(Date.parse(now()) - 60_000).toISOString();
     const endAt = new Date(
       Date.parse(startAt) + 30 * 24 * 60 * 60 * 1000
     ).toISOString();
-    const id = idFactory('published-task');
+    const id = existing?.id ?? idFactory('published-task');
     const title =
       mode === 'LEARNING'
         ? `${lesson.title}｜流程学习`
         : `${lesson.title}｜流程练习`;
-    const published: PublishedTask = {
+    const published: PublishedTask = existing ?? {
       id,
       lessonId,
       title,
@@ -1116,7 +1239,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       status: 'RUNNING',
       startAt,
       endAt,
-      assignedCount: 1,
+      assignedCount: 0,
       groupCount: new Set(
         lesson.stages.map((stage) => stage.groupKey).filter(Boolean)
       ).size,
@@ -1124,36 +1247,75 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       completedCount: 0,
       syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
     };
-    const assignment: StudentTask = {
-      id: idFactory('student-task'),
-      publishedTaskId: id,
-      lessonId,
-      studentId: config.simulatedStudentId,
-      studentName: config.simulatedStudentName,
-      title,
-      mode,
-      groupKey: lesson.stages[0]?.groupKey ?? 'all',
-      groupKeys: [
-        ...new Set(
-          lesson.stages.map((stage) => stage.groupKey).filter(Boolean)
-        )
-      ],
-      unitId: config.simulatedOrgId,
-      unitName: '模拟班级',
-      dataItemId: `simulated-${mode.toLowerCase()}-${lessonId}`,
-      attemptNumber: 1,
-      submissionValues: {},
-      status: 'TODO',
-      currentStageIndex: 0,
-      completedStageIds: [],
-      syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
-    };
-    state.publishedTasks.unshift(published);
-    state.studentTasks.push(assignment);
+    const membersByStudent = new Map<
+      string,
+      {
+        studentId: string;
+        studentName: string;
+        unitId: string;
+        unitName: string;
+      }
+    >();
+    (state.groupPlans[lessonId]?.members ?? []).forEach((member) =>
+      membersByStudent.set(member.studentId, member)
+    );
+    if (!membersByStudent.size && !backend.isEnabled()) {
+      membersByStudent.set(config.simulatedStudentId, {
+        studentId: config.simulatedStudentId,
+        studentName: config.simulatedStudentName,
+        unitId: config.simulatedOrgId,
+        unitName: '模拟班级'
+      });
+    }
+    const allGroupKeys = [
+      ...new Set(lesson.stages.map((stage) => stage.groupKey).filter(Boolean))
+    ];
+    const assignedStudentIds = new Set(membersByStudent.keys());
+    state.studentTasks = state.studentTasks.filter(
+      (task) =>
+        task.publishedTaskId !== id ||
+        assignedStudentIds.has(task.studentId)
+    );
+    membersByStudent.forEach((member) => {
+      const existingAssignment = state.studentTasks.find(
+        (task) =>
+          task.publishedTaskId === id && task.studentId === member.studentId
+      );
+      if (existingAssignment) {
+        existingAssignment.studentName = member.studentName;
+        existingAssignment.groupKey = allGroupKeys[0] ?? 'all';
+        existingAssignment.groupKeys = allGroupKeys;
+        existingAssignment.unitId = member.unitId;
+        existingAssignment.unitName = member.unitName;
+        return;
+      }
+      state.studentTasks.push({
+        id: idFactory('student-task'),
+        publishedTaskId: id,
+        lessonId,
+        studentId: member.studentId,
+        studentName: member.studentName,
+        title,
+        mode,
+        groupKey: allGroupKeys[0] ?? 'all',
+        groupKeys: allGroupKeys,
+        unitId: member.unitId,
+        unitName: member.unitName,
+        dataItemId: `training-${mode.toLowerCase()}-${lessonId}-${member.studentId}`,
+        attemptNumber: 1,
+        submissionValues: {},
+        status: 'TODO',
+        currentStageIndex: 0,
+        completedStageIds: [],
+        syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
+      });
+    });
+    published.assignedCount = membersByStudent.size;
+    if (!existing) state.publishedTasks.unshift(published);
     addActivity(
       'TRAINING_TASK_CREATED',
       `生成${mode === 'LEARNING' ? '学习' : '练习'}任务：${title}`,
-      `${config.simulatedStudentName}（模拟身份）`
+      `已分配 ${membersByStudent.size} 名真实学员`
     );
     persist();
     return published;
@@ -1247,17 +1409,45 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   async function publishLearningAndPracticeRemote(
     lessonId: string
   ): Promise<PublishedTask[]> {
-    const lesson = requireLesson(lessonId);
-    if (lesson.status !== 'PUBLISHED' || !lesson.teachingPointId) {
-      throw new Error('请先完成教案备案并发布教学点');
+    let lesson = requireLesson(lessonId);
+    if (lesson.status !== 'PUBLISHED') {
+      throw new Error('请先完成教案备案并发布');
+    }
+    if (!lesson.teachingPointId && backend.isEnabled()) {
+      await publishLessonRemote(lessonId);
+      lesson = requireLesson(lessonId);
+    }
+    if (!lesson.teachingPointId) {
+      throw new Error('教案教学点尚未发布，请重新执行备案发布');
     }
     if (!lesson.lectureCompletedAt) {
       throw new Error('请先在教师讲解页完整讲解一遍备案流程');
+    }
+    if (
+      backend.isEnabled() &&
+      !(state.groupPlans[lessonId]?.members.length)
+    ) {
+      throw new Error('请先在分组设置中选择真实学生账号，再发布学习与练习任务');
+    }
+    if (backend.isEnabled() && authApi.getSession()) {
+      const realStudents = await usersApi.listStudents();
+      const realStudentIds = new Set(
+        realStudents.map((student) => student.studentId)
+      );
+      const invalidMembers = (
+        state.groupPlans[lessonId]?.members ?? []
+      ).filter((member) => !realStudentIds.has(member.studentId));
+      if (invalidMembers.length) {
+        throw new Error(
+          `分组中有 ${invalidMembers.length} 个演示或已失效账号，请进入分组设置重新选择真实学生`
+        );
+      }
     }
     const learning = ensureSimulatedModeTask(lessonId, 'LEARNING');
     const practice = ensureSimulatedModeTask(lessonId, 'PRACTICE');
     await publishModeTaskRemote(lessonId, 'LEARNING', learning);
     await publishModeTaskRemote(lessonId, 'PRACTICE', practice);
+    await saveAuthenticatedWorkspace();
     return [learning, practice];
   }
 
@@ -1309,13 +1499,13 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const stageIds = new Set(lesson.stages.map((stage) => stage.id));
     const mappedStageIds = plan.roles.flatMap((role) => role.stageIds);
     if (mappedStageIds.some((stageId) => !stageIds.has(stageId))) {
-      issues.push('角色组包含不存在的教案阶段');
+      issues.push('角色组包含不存在的教学点');
     }
     if (
       new Set(mappedStageIds).size !== mappedStageIds.length ||
       lesson.stages.some((stage) => !mappedStageIds.includes(stage.id))
     ) {
-      issues.push('每个教案阶段必须且只能属于一个角色组');
+      issues.push('每个教学点必须且只能属于一个角色组');
     }
     const membershipKeys = plan.members.map(
       (member) => `${member.studentId}|${member.groupKey}`
@@ -1633,7 +1823,13 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       }
     }
     const published = publishExam(lessonId);
-    return publishModeTaskRemote(lessonId, 'EXAM', published);
+    const remotePublished = await publishModeTaskRemote(
+      lessonId,
+      'EXAM',
+      published
+    );
+    await saveAuthenticatedWorkspace();
+    return remotePublished;
   }
 
   function startStudentTask(taskId: string): StudentTask {
@@ -1701,10 +1897,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const lesson = requireLesson(task.lessonId);
     const stage = requireStage(lesson, stageId);
     if (!stage.visibility[task.mode]) {
-      throw new Error('该阶段在当前考试模式中不可办理');
+      throw new Error('该教学点在当前考试模式中不可办理');
     }
     if (!task.groupKeys.includes(stage.groupKey)) {
-      throw new Error('该阶段不属于学员负责的角色组');
+      throw new Error('该教学点不属于学员负责的角色组');
     }
     if (task.completedStageIds.includes(stageId)) return task;
     const stageIndex = lesson.stages.findIndex((candidate) => candidate.id === stageId);
@@ -1725,13 +1921,13 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
           previous.required &&
           !completedForData.has(previous.id)
       );
-    if (incompletePrevious) throw new Error('必须先完成前序阶段');
+    if (incompletePrevious) throw new Error('必须先完成前序教学点');
 
     task.completedStageIds.push(stageId);
     task.currentStageIndex = stageIndex + 1;
     addActivity(
       'STUDENT_STAGE_COMPLETED',
-      `${task.studentName}完成阶段：${stage.name}`,
+      `${task.studentName}完成教学点：${stage.name}`,
       `依据平台会话与流程操作轨迹判定`
     );
     persist();
@@ -1758,7 +1954,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const lesson = requireLesson(task.lessonId);
     const stage = requireStage(lesson, stageId);
     try {
-      await runRemote('上报阶段完成轨迹', () =>
+    await runRemote('上报教学点完成轨迹', () =>
         backend.reportStudentStageCompletion(
           toPlain(lesson),
           toPlain(stage),
@@ -1774,7 +1970,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       restoreObject(completed, previous);
       completed.syncStatus = 'FAILED';
       completed.syncError =
-        error instanceof Error ? error.message : '阶段轨迹上报失败';
+        error instanceof Error ? error.message : '教学点轨迹上报失败';
       persist();
       throw error;
     }
@@ -1799,7 +1995,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         (stage) => stage.required && !task.completedStageIds.includes(stage.id)
       )
     ) {
-      throw new Error('必须先完成本人负责的全部必做阶段');
+      throw new Error('必须先完成本人负责的全部必做教学点');
     }
     const submissionFields =
       task.mode === 'EXAM'
@@ -2268,7 +2464,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     restartLearningOrPractice,
     restartStudentAttempt,
     gradeStudentTask,
-    resetDemo
+    resetDemo,
+    clearAuthenticatedWorkspace,
+    initializeAuthenticatedWorkspace,
+    saveAuthenticatedWorkspace
   };
 }
 
@@ -2283,7 +2482,7 @@ export function useTrainingStore(): TrainingStore {
 
 function requireStage(lesson: LessonPlan, stageId: string): LessonStage {
   const stage = lesson.stages.find((candidate) => candidate.id === stageId);
-  if (!stage) throw new Error(`未找到阶段：${stageId}`);
+    if (!stage) throw new Error(`未找到教学点：${stageId}`);
   return stage;
 }
 

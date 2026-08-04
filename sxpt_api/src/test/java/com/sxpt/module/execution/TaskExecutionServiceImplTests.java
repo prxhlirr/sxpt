@@ -242,6 +242,8 @@ class TaskExecutionServiceImplTests {
         verify(practiceAttemptService).finishAttempt(finishCaptor.capture());
         PracticeAttempt finishedAttempt = finishCaptor.getValue();
         assertEquals("attempt_001", finishedAttempt.getId());
+        assertEquals("tenant_001", finishedAttempt.getTenantId());
+        assertEquals("student_001", finishedAttempt.getStudentId());
         assertEquals("COMPLETED", finishedAttempt.getAttemptStatus());
         assertEquals(submitted.getEndTime(), finishedAttempt.getEndTime());
         assertEquals(new BigDecimal("10.00"), finishedAttempt.getScore());

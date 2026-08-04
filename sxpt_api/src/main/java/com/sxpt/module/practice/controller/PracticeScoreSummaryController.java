@@ -1,6 +1,9 @@
 package com.sxpt.module.practice.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.practice.dto.GeneratePracticeScoreSummaryRequest;
 import com.sxpt.module.practice.entity.PracticeScoreSummary;
 import com.sxpt.module.practice.service.PracticeScoreSummaryService;
@@ -47,6 +50,10 @@ public class PracticeScoreSummaryController {
      */
     @PostMapping("/generate")
     public ApiResult<PracticeScoreSummaryVO> generate(@Valid @RequestBody GeneratePracticeScoreSummaryRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        if (!user.hasAnyRole("ADMIN", "TEACHER")) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
         PracticeScoreSummary saved = practiceScoreSummaryService.generateSummary(toEntity(request));
         return ApiResult.success(toVO(saved));
     }
@@ -65,8 +72,10 @@ public class PracticeScoreSummaryController {
                                                         @RequestParam String studentId,
                                                         @RequestParam String taskId,
                                                         @RequestParam(required = false) String teachingPointId) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        String scopedStudentId = user.hasAnyRole("STUDENT") ? user.getUserId() : studentId;
         return ApiResult.success(toVO(practiceScoreSummaryService.getSummary(
-                tenantId, studentId, taskId, teachingPointId)));
+                user.getTenantId(), scopedStudentId, taskId, teachingPointId)));
     }
 
     /**
@@ -76,15 +85,16 @@ public class PracticeScoreSummaryController {
      * @return 练习过程分汇总实体。
      */
     private PracticeScoreSummary toEntity(GeneratePracticeScoreSummaryRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
         PracticeScoreSummary summary = new PracticeScoreSummary();
         summary.setId(generateId());
-        summary.setTenantId(request.getTenantId());
+        summary.setTenantId(user.getTenantId());
         summary.setStudentId(request.getStudentId());
         summary.setClassId(request.getClassId());
         summary.setCourseId(request.getCourseId());
         summary.setTaskId(request.getTaskId());
         summary.setTeachingPointId(request.getTeachingPointId());
-        summary.setCreateBy(request.getCreateBy());
+        summary.setCreateBy(user.getUserId());
         return summary;
     }
 

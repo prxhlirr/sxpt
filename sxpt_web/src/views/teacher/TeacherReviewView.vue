@@ -192,7 +192,7 @@ function scoreTask() {
               <h2>{{ selectedTask.studentName }} · {{ lesson.title }}</h2>
               <p>
                 {{ roleNames(selectedTask.groupKeys) }} ·
-                已完成 {{ selectedTask.completedStageIds.length }} 个业务阶段
+              已完成 {{ selectedTask.completedStageIds.length }} 个教学点
               </p>
             </div>
             <StatusPill

@@ -192,7 +192,7 @@ describe('考试链路业务规则', () => {
     expect(blocked.reasons).toEqual(
       expect.arrayContaining([
         '考试参数尚未完成配置',
-        '分组未覆盖全部考试阶段或尚无成员',
+        '分组未覆盖全部考试教学点或尚无成员',
         '正式考试数据不足，需完成生成或补齐'
       ])
     );

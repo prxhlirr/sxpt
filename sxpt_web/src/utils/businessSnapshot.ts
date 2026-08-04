@@ -1,4 +1,5 @@
 import type { BusinessPageSnapshot } from '../domain/models';
+import { normalizeViewport } from './viewportScaling';
 
 const MAX_SNAPSHOT_HTML_LENGTH = 700_000;
 const MAX_SNAPSHOT_CSS_LENGTH = 400_000;
@@ -123,8 +124,7 @@ export function captureBusinessPageSnapshot(
     html: clampText(clone.outerHTML, MAX_SNAPSHOT_HTML_LENGTH),
     cssText: collectDocumentCss(),
     viewport:
-      context.viewport ??
-      {
+      normalizeViewport(context.viewport) ?? {
         width: window.innerWidth,
         height: window.innerHeight
       }
@@ -146,14 +146,7 @@ export function normalizeBusinessPageSnapshot(
   }
 
   const viewport =
-    candidate.viewport &&
-    Number.isFinite(candidate.viewport.width) &&
-    Number.isFinite(candidate.viewport.height)
-      ? {
-          width: Number(candidate.viewport.width),
-          height: Number(candidate.viewport.height)
-        }
-      : fallback.viewport;
+    normalizeViewport(candidate.viewport) ?? normalizeViewport(fallback.viewport);
 
   return {
     version: 1,
