@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.util.StringUtils;
 
 import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.List;
 import java.time.LocalDateTime;
@@ -63,6 +65,33 @@ public class TeachUserController {
     }
 
     /**
+     * 更新教学平台用户基础信息。
+     *
+     * @param request 更新教学用户请求。
+     * @return 已更新的教学平台用户。
+     */
+    @PostMapping("/update")
+    public ApiResult<TeachUserVO> update(@Valid @RequestBody UpdateTeachUserRequest request) {
+        TeachUser saved = teachUserService.updateTeachUser(request.getTenantId(), toUpdateEntity(request));
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 更新教学平台用户启停用状态。
+     *
+     * @param request 用户状态切换请求。
+     * @return 已更新状态的教学平台用户。
+     */
+    @PostMapping("/status")
+    public ApiResult<TeachUserVO> updateStatus(@Valid @RequestBody UpdateTeachUserStatusRequest request) {
+        TeachUser saved = teachUserService.updateTeachUserStatus(
+                request.getTenantId(),
+                request.getId(),
+                request.getStatus());
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
      * 查询教学平台用户列表。
      *
      * 业务功能：为管理端用户管理页面提供用户主数据列表，支撑后续角色授权、单位绑定和任务发布范围选择。
@@ -101,6 +130,25 @@ public class TeachUserController {
         teachUser.setStudentNo(request.getStudentNo());
         teachUser.setEmployeeNo(request.getEmployeeNo());
         fillInitialPassword(request, teachUser);
+        return teachUser;
+    }
+
+    /**
+     * 将更新请求转换为用户实体。
+     *
+     * @param request 更新教学用户请求。
+     * @return 教学平台用户实体。
+     */
+    private TeachUser toUpdateEntity(UpdateTeachUserRequest request) {
+        TeachUser teachUser = new TeachUser();
+        teachUser.setId(request.getId());
+        teachUser.setRealName(request.getRealName());
+        teachUser.setPhone(request.getPhone());
+        teachUser.setEmail(request.getEmail());
+        teachUser.setUserType(request.getUserType());
+        teachUser.setSourceType(request.getSourceType());
+        teachUser.setStudentNo(request.getStudentNo());
+        teachUser.setEmployeeNo(request.getEmployeeNo());
         return teachUser;
     }
 
@@ -158,5 +206,79 @@ public class TeachUserController {
      */
     private String generateId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    public static class UpdateTeachUserRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "用户 ID 不能为空")
+        @Size(max = 64, message = "用户 ID 长度不能超过 64")
+        private String id;
+
+        @NotBlank(message = "用户姓名不能为空")
+        @Size(max = 128, message = "用户姓名长度不能超过 128")
+        private String realName;
+
+        @Size(max = 32, message = "手机号长度不能超过 32")
+        private String phone;
+
+        @Size(max = 128, message = "邮箱长度不能超过 128")
+        private String email;
+
+        @NotBlank(message = "用户类型不能为空")
+        @Size(max = 32, message = "用户类型长度不能超过 32")
+        private String userType;
+
+        @NotBlank(message = "来源类型不能为空")
+        @Size(max = 32, message = "来源类型长度不能超过 32")
+        private String sourceType;
+
+        @Size(max = 64, message = "学号长度不能超过 64")
+        private String studentNo;
+
+        @Size(max = 64, message = "工号长度不能超过 64")
+        private String employeeNo;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getRealName() { return realName; }
+        public void setRealName(String realName) { this.realName = realName; }
+        public String getPhone() { return phone; }
+        public void setPhone(String phone) { this.phone = phone; }
+        public String getEmail() { return email; }
+        public void setEmail(String email) { this.email = email; }
+        public String getUserType() { return userType; }
+        public void setUserType(String userType) { this.userType = userType; }
+        public String getSourceType() { return sourceType; }
+        public void setSourceType(String sourceType) { this.sourceType = sourceType; }
+        public String getStudentNo() { return studentNo; }
+        public void setStudentNo(String studentNo) { this.studentNo = studentNo; }
+        public String getEmployeeNo() { return employeeNo; }
+        public void setEmployeeNo(String employeeNo) { this.employeeNo = employeeNo; }
+    }
+
+    public static class UpdateTeachUserStatusRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "用户 ID 不能为空")
+        @Size(max = 64, message = "用户 ID 长度不能超过 64")
+        private String id;
+
+        @NotBlank(message = "状态不能为空")
+        @Size(max = 32, message = "状态长度不能超过 32")
+        private String status;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
     }
 }

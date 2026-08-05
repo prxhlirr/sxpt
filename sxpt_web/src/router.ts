@@ -225,8 +225,17 @@ export const router = createRouter({
 
 router.beforeEach(async (to) => {
   if (to.path === '/login') {
+    const store = useTrainingStore();
+    if (authApi.getSession()) {
+      try {
+        await store.flushAuthenticatedWorkspace();
+      } catch (error) {
+        console.error('退出登录前保存教案工作区失败', error);
+        return false;
+      }
+    }
     authApi.logout();
-    useTrainingStore().clearAuthenticatedWorkspace();
+    store.clearAuthenticatedWorkspace();
     useRuntimeContextStore().resetRuntimeContext();
     return true;
   }
@@ -241,6 +250,7 @@ router.beforeEach(async (to) => {
     };
   }
   const store = useTrainingStore();
+  await store.initializeAuthenticatedWorkspace(session);
   const runtimeContextStore = useRuntimeContextStore();
   const sessionRole = authApi.getPortalRole(session);
   if (store.state.currentRole !== sessionRole) {

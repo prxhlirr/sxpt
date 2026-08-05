@@ -32,6 +32,8 @@ public class TeachRoleServiceImpl implements TeachRoleService {
 
     private static final String DEFAULT_STATUS = "ACTIVE";
 
+    private static final String DISABLED_STATUS = "DISABLED";
+
     private final TeachRoleMapper teachRoleMapper;
 
     public TeachRoleServiceImpl(TeachRoleMapper teachRoleMapper) {
@@ -51,6 +53,45 @@ public class TeachRoleServiceImpl implements TeachRoleService {
         fillCreateDefaults(teachRole);
         teachRoleMapper.insert(teachRole);
         return teachRole;
+    }
+
+    /**
+     * 更新教学平台角色基础信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param teachRole 角色实体，必须包含 ID 和可编辑字段。
+     * @return 已更新的角色实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachRole updateTeachRole(String tenantId, TeachRole teachRole) {
+        requireText(tenantId);
+        validateUpdateFields(teachRole);
+        TeachRole existing = getExistingRole(tenantId, teachRole.getId());
+        existing.setRoleName(teachRole.getRoleName());
+        existing.setDescription(teachRole.getDescription());
+        existing.setUpdateTime(LocalDateTime.now());
+        teachRoleMapper.updateById(existing);
+        return existing;
+    }
+
+    /**
+     * 切换教学平台角色启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 角色 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的角色实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachRole updateTeachRoleStatus(String tenantId, String id, String status) {
+        requireSupportedStatus(status);
+        TeachRole existing = getExistingRole(tenantId, id);
+        existing.setStatus(status);
+        existing.setUpdateTime(LocalDateTime.now());
+        teachRoleMapper.updateById(existing);
+        return existing;
     }
 
     /**
@@ -81,6 +122,51 @@ public class TeachRoleServiceImpl implements TeachRoleService {
         requireText(teachRole.getTenantId());
         requireText(teachRole.getRoleCode());
         requireText(teachRole.getRoleName());
+    }
+
+    /**
+     * 校验角色更新所需字段，角色编码不在编辑入口修改以保持授权引用稳定。
+     *
+     * @param teachRole 教学平台角色实体。
+     */
+    private void validateUpdateFields(TeachRole teachRole) {
+        if (teachRole == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(teachRole.getId());
+        requireText(teachRole.getRoleName());
+    }
+
+    /**
+     * 按租户和角色 ID 读取未删除角色，避免跨租户维护角色。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 角色 ID。
+     * @return 未删除角色实体。
+     */
+    private TeachRole getExistingRole(String tenantId, String id) {
+        requireText(tenantId);
+        requireText(id);
+        TeachRole existing = teachRoleMapper.selectOne(new QueryWrapper<TeachRole>()
+                .eq("tenant_id", tenantId)
+                .eq("id", id)
+                .eq("deleted", Boolean.FALSE));
+        if (existing == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return existing;
+    }
+
+    /**
+     * 限制角色维护状态只允许启用和停用。
+     *
+     * @param status 目标状态。
+     */
+    private void requireSupportedStatus(String status) {
+        requireText(status);
+        if (!DEFAULT_STATUS.equals(status) && !DISABLED_STATUS.equals(status)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
     }
 
     /**

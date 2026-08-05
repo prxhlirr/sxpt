@@ -1,7 +1,7 @@
 package com.sxpt.module.connector.service.impl;
 
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,14 +21,10 @@ import java.util.UUID;
  * 3. 后续接入真实原平台时，以新的 OriginDataPrepareAdapter Bean 替换本适配器。
  */
 @Service
-@ConditionalOnProperty(name = "sxpt.origin.local-adapter.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnExpression("${sxpt.origin.local-adapter.enabled:true} && '${sxpt.origin.adapter-mode:local}' == 'local'")
 public class LocalOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
 
     private static final String SUCCESS_STATUS = "SUCCESS";
-
-    private static final String DEFAULT_STEP_CODE = "PURCHASE_CREATE";
-
-    private static final int DEFAULT_ACTOR_NO = 1;
 
     /**
      * 批量创建教学用原平台业务数据。
@@ -132,8 +128,6 @@ public class LocalOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         item.setExternalBusinessName("本地联调业务数据-" + requestItem.getRequestItemId());
         item.setExternalStatus("DRAFT");
         item.setTargetUrl("/local-origin/" + request.getModuleCode() + "/" + businessId);
-        item.setCurrentStepCode(DEFAULT_STEP_CODE);
-        item.setCurrentActorNo(DEFAULT_ACTOR_NO);
         item.setItemStatus(SUCCESS_STATUS);
         return item;
     }

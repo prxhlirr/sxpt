@@ -64,7 +64,7 @@ export function createRuntimeContextStore(
    * 关键流程：兼容 ADMIN 和 SUPER_ADMIN 两种历史编码，避免种子数据迁移期间管理员权限失效。
    */
   function isSuperAdmin(): boolean {
-    const roleCodes = state.context?.roles.map((role) => role.roleCode) ?? [];
+    const roleCodes = state.context?.roles.map((role) => role.roleCode.toUpperCase()) ?? [];
     return roleCodes.includes('ADMIN') || roleCodes.includes('SUPER_ADMIN');
   }
 

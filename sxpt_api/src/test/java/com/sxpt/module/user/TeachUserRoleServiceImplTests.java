@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 教学平台用户角色关系服务测试。
@@ -58,6 +60,24 @@ class TeachUserRoleServiceImplTests {
 
         assertThrows(BusinessException.class, () -> service.grantUserRole(teachUserRole));
         verify(mapper, times(0)).insert(teachUserRole);
+    }
+
+    /**
+     * 校验用户角色绑定状态切换会写回目标状态。
+     */
+    @Test
+    void updateUserRoleStatusShouldUpdateExistingRelation() {
+        TeachUserRoleMapper mapper = mock(TeachUserRoleMapper.class);
+        TeachUserRoleServiceImpl service = new TeachUserRoleServiceImpl(mapper);
+        TeachUserRole existing = buildValidTeachUserRole();
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        TeachUserRole saved = service.updateUserRoleStatus("tenant_001", "user_role_001", "DISABLED");
+
+        assertEquals("DISABLED", saved.getStatus());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
     }
 
     /**

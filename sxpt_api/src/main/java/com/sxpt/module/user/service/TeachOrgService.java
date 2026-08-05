@@ -26,6 +26,25 @@ public interface TeachOrgService {
     TeachOrg createTeachOrg(TeachOrg teachOrg);
 
     /**
+     * 更新教学组织基础信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param teachOrg 组织实体，必须包含 ID 和可编辑字段。
+     * @return 已更新的组织实体。
+     */
+    TeachOrg updateTeachOrg(String tenantId, TeachOrg teachOrg);
+
+    /**
+     * 切换教学组织启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 组织 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的组织实体。
+     */
+    TeachOrg updateTeachOrgStatus(String tenantId, String id, String status);
+
+    /**
      * 查询指定租户下的教学组织列表。
      *
      * @param tenantId 租户 ID。

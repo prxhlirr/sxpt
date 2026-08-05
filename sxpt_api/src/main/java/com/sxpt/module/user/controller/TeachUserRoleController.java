@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -51,6 +53,21 @@ public class TeachUserRoleController {
     @PostMapping("/grant")
     public ApiResult<TeachUserRoleVO> grant(@Valid @RequestBody GrantTeachUserRoleRequest request) {
         TeachUserRole saved = teachUserRoleService.grantUserRole(toEntity(request));
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 更新用户角色授权关系启停用状态。
+     *
+     * @param request 用户角色状态切换请求。
+     * @return 已更新状态的用户角色关系。
+     */
+    @PostMapping("/status")
+    public ApiResult<TeachUserRoleVO> updateStatus(@Valid @RequestBody UpdateTeachUserRoleStatusRequest request) {
+        TeachUserRole saved = teachUserRoleService.updateUserRoleStatus(
+                request.getTenantId(),
+                request.getId(),
+                request.getStatus());
         return ApiResult.success(toVO(saved));
     }
 
@@ -115,5 +132,26 @@ public class TeachUserRoleController {
      */
     private String generateId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    public static class UpdateTeachUserRoleStatusRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "用户角色关系 ID 不能为空")
+        @Size(max = 64, message = "用户角色关系 ID 长度不能超过 64")
+        private String id;
+
+        @NotBlank(message = "状态不能为空")
+        @Size(max = 32, message = "状态长度不能超过 32")
+        private String status;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
     }
 }

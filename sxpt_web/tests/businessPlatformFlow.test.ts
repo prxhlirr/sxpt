@@ -190,6 +190,9 @@ describe('业务平台维护、教案绑定与录制加载', () => {
 
     expect(snapshot).toContain('sxpt-recorded-operation-target');
     expect(snapshot).toContain("target.classList.add('sxpt-recorded-operation-target')");
+    expect(snapshot).toContain('rebaseSnapshotMarkupResources');
+    expect(snapshot).toContain("'srcset'");
+    expect(snapshot).toContain('resourceBaseUrl?: string');
     expect(snapshotFrame).toContain('recorded-rect-highlight');
     expect(snapshotFrame).toContain('calculateContainedViewport');
     expect(snapshotFrame).toContain('mapRectToContainedViewport');
@@ -201,6 +204,7 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(captureFrame).toContain("fitMode: 'fill'");
     expect(captureFrame).toContain('自适应全屏');
     expect(playback).toContain('fit-mode="fill"');
+    expect(playback).toContain('businessResourceBaseUrl');
     expect(viewportScaling).toContain('Math.min(');
     expect(viewportScaling).toContain('containerWidth / safeViewport.width');
     expect(viewportScaling).toContain('containerHeight / safeViewport.height');

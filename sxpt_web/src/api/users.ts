@@ -90,6 +90,36 @@ export const usersApi = {
     });
   },
 
+  updateUser(request: {
+    tenantId: string;
+    id: string;
+    realName: string;
+    phone?: string;
+    email?: string;
+    userType: string;
+    sourceType: string;
+    studentNo?: string;
+    employeeNo?: string;
+  }) {
+    return apiRequest<TeachUser>({
+      method: 'POST',
+      url: '/user/update',
+      data: request
+    });
+  },
+
+  updateUserStatus(request: {
+    tenantId: string;
+    id: string;
+    status: 'ACTIVE' | 'DISABLED';
+  }) {
+    return apiRequest<TeachUser>({
+      method: 'POST',
+      url: '/user/status',
+      data: request
+    });
+  },
+
   createRole(request: {
     tenantId: string;
     roleCode: string;
@@ -99,6 +129,31 @@ export const usersApi = {
     return apiRequest<TeachRole>({
       method: 'POST',
       url: '/roles/create',
+      data: request
+    });
+  },
+
+  updateRole(request: {
+    tenantId: string;
+    id: string;
+    roleName: string;
+    description?: string;
+  }) {
+    return apiRequest<TeachRole>({
+      method: 'POST',
+      url: '/roles/update',
+      data: request
+    });
+  },
+
+  updateRoleStatus(request: {
+    tenantId: string;
+    id: string;
+    status: 'ACTIVE' | 'DISABLED';
+  }) {
+    return apiRequest<TeachRole>({
+      method: 'POST',
+      url: '/roles/status',
       data: request
     });
   },
@@ -124,6 +179,18 @@ export const usersApi = {
     });
   },
 
+  updateUserRoleStatus(request: {
+    tenantId: string;
+    id: string;
+    status: 'ACTIVE' | 'DISABLED';
+  }) {
+    return apiRequest<TeachUserRole>({
+      method: 'POST',
+      url: '/user-roles/status',
+      data: request
+    });
+  },
+
   listUserRoles(tenantId: string) {
     return apiRequest<TeachUserRole[]>({
       method: 'GET',
@@ -142,6 +209,32 @@ export const usersApi = {
     return apiRequest<TeachOrg>({
       method: 'POST',
       url: '/orgs/create',
+      data: request
+    });
+  },
+
+  updateOrg(request: {
+    tenantId: string;
+    id: string;
+    parentId?: string;
+    orgName: string;
+    orgType: string;
+  }) {
+    return apiRequest<TeachOrg>({
+      method: 'POST',
+      url: '/orgs/update',
+      data: request
+    });
+  },
+
+  updateOrgStatus(request: {
+    tenantId: string;
+    id: string;
+    status: 'ACTIVE' | 'DISABLED';
+  }) {
+    return apiRequest<TeachOrg>({
+      method: 'POST',
+      url: '/orgs/status',
       data: request
     });
   },
@@ -175,6 +268,18 @@ export const usersApi = {
     return apiRequest<TeachUserOrg>({
       method: 'POST',
       url: '/orgs/users/remove',
+      data: request
+    });
+  },
+
+  updateUserOrgStatus(request: {
+    tenantId: string;
+    id: string;
+    status: 'ACTIVE' | 'DISABLED';
+  }) {
+    return apiRequest<TeachUserOrg>({
+      method: 'POST',
+      url: '/orgs/users/status',
       data: request
     });
   },

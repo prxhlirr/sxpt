@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -55,6 +57,33 @@ public class TeachOrgController {
     }
 
     /**
+     * 更新教学组织基础信息。
+     *
+     * @param request 更新教学组织请求。
+     * @return 已更新的教学组织。
+     */
+    @PostMapping("/update")
+    public ApiResult<TeachOrgVO> update(@Valid @RequestBody UpdateTeachOrgRequest request) {
+        TeachOrg saved = teachOrgService.updateTeachOrg(request.getTenantId(), toUpdateEntity(request));
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 更新教学组织启停用状态。
+     *
+     * @param request 组织状态切换请求。
+     * @return 已更新状态的教学组织。
+     */
+    @PostMapping("/status")
+    public ApiResult<TeachOrgVO> updateStatus(@Valid @RequestBody UpdateTeachOrgStatusRequest request) {
+        TeachOrg saved = teachOrgService.updateTeachOrgStatus(
+                request.getTenantId(),
+                request.getId(),
+                request.getStatus());
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
      * 查询教学组织列表。
      *
      * @param tenantId 租户 ID。
@@ -88,6 +117,21 @@ public class TeachOrgController {
     }
 
     /**
+     * 将更新请求转换为教学组织实体。
+     *
+     * @param request 更新教学组织请求。
+     * @return 教学组织实体。
+     */
+    private TeachOrg toUpdateEntity(UpdateTeachOrgRequest request) {
+        TeachOrg teachOrg = new TeachOrg();
+        teachOrg.setId(request.getId());
+        teachOrg.setParentId(request.getParentId());
+        teachOrg.setOrgName(request.getOrgName());
+        teachOrg.setOrgType(request.getOrgType());
+        return teachOrg;
+    }
+
+    /**
      * 将实体转换为前端返回对象。
      *
      * @param teachOrg 教学组织实体。
@@ -114,5 +158,58 @@ public class TeachOrgController {
      */
     private String generateId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    public static class UpdateTeachOrgRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "单位 ID 不能为空")
+        @Size(max = 64, message = "单位 ID 长度不能超过 64")
+        private String id;
+
+        @Size(max = 64, message = "上级单位 ID 长度不能超过 64")
+        private String parentId;
+
+        @NotBlank(message = "单位名称不能为空")
+        @Size(max = 128, message = "单位名称长度不能超过 128")
+        private String orgName;
+
+        @NotBlank(message = "单位类型不能为空")
+        @Size(max = 32, message = "单位类型长度不能超过 32")
+        private String orgType;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getParentId() { return parentId; }
+        public void setParentId(String parentId) { this.parentId = parentId; }
+        public String getOrgName() { return orgName; }
+        public void setOrgName(String orgName) { this.orgName = orgName; }
+        public String getOrgType() { return orgType; }
+        public void setOrgType(String orgType) { this.orgType = orgType; }
+    }
+
+    public static class UpdateTeachOrgStatusRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "单位 ID 不能为空")
+        @Size(max = 64, message = "单位 ID 长度不能超过 64")
+        private String id;
+
+        @NotBlank(message = "状态不能为空")
+        @Size(max = 32, message = "状态长度不能超过 32")
+        private String status;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
     }
 }

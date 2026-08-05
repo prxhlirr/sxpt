@@ -94,6 +94,50 @@ class TeachOrgServiceImplTests {
     }
 
     /**
+     * 校验编辑单位时只更新名称、类型和上级单位，不修改单位编码。
+     */
+    @Test
+    void updateTeachOrgShouldKeepOrgCodeStable() {
+        TeachOrgMapper mapper = mock(TeachOrgMapper.class);
+        TeachOrgServiceImpl service = new TeachOrgServiceImpl(mapper);
+        TeachOrg existing = buildValidTeachOrg();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        TeachOrg update = new TeachOrg();
+        update.setId("org_001");
+        update.setParentId("org_parent");
+        update.setOrgName("2026级实训一班");
+        update.setOrgType("CLASS");
+
+        TeachOrg saved = service.updateTeachOrg("tenant_001", update);
+
+        assertEquals("class_2026_01", saved.getOrgCode());
+        assertEquals("org_parent", saved.getParentId());
+        assertEquals("2026级实训一班", saved.getOrgName());
+        assertEquals("CLASS", saved.getOrgType());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
+    }
+
+    /**
+     * 校验单位状态切换会写回目标状态。
+     */
+    @Test
+    void updateTeachOrgStatusShouldUpdateExistingOrg() {
+        TeachOrgMapper mapper = mock(TeachOrgMapper.class);
+        TeachOrgServiceImpl service = new TeachOrgServiceImpl(mapper);
+        TeachOrg existing = buildValidTeachOrg();
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        TeachOrg saved = service.updateTeachOrgStatus("tenant_001", "org_001", "DISABLED");
+
+        assertEquals("DISABLED", saved.getStatus());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
+    }
+
+    /**
      * 构造最小有效教学组织。
      *
      * @return 教学组织实体。

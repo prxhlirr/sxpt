@@ -129,4 +129,20 @@ describe('登录后的平台入口与身份导航', () => {
     expect(list).toContain("name: 'exam-data'");
     expect(list).toContain("name: 'publish-center'");
   });
+
+  it('业务模块详情提供原平台字典维护入口并服务参与方下拉', () => {
+    const modules = source('src/views/admin/DataPrepareModulesView.vue');
+
+    expect(modules).toContain("type ModuleDetailTab = 'info' | 'chain' | 'dictionary'");
+    expect(modules).toContain('openOriginDictionaryTab');
+    expect(modules).toContain('原平台字典');
+    expect(modules).toContain('openCreateOriginOrgForm');
+    expect(modules).toContain('openCreateOriginRoleForm');
+    expect(modules).toContain('dataPrepareApi.createOriginOrg');
+    expect(modules).toContain('dataPrepareApi.createOriginRole');
+    expect(modules).toContain('dataPrepareApi.listOriginOrgs');
+    expect(modules).toContain('dataPrepareApi.listOriginRoles');
+    expect(modules).toContain('v-for="org in originOrgs"');
+    expect(modules).toContain('v-for="role in originRoles"');
+  });
 });

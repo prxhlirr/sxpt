@@ -1,107 +1,125 @@
-import type { CaptureRect } from '../domain/models';
-
 export interface ViewportSize {
   width: number;
   height: number;
 }
 
-export interface ViewportPlacement extends ViewportSize {
+export interface ContainedViewport extends ViewportSize {
   left: number;
   top: number;
   scale: number;
 }
 
 export interface ViewportRect {
-  left: number;
-  top: number;
+  x: number;
+  y: number;
   width: number;
   height: number;
 }
 
 export const DEFAULT_RECORDING_VIEWPORT: ViewportSize = {
-  width: 1366,
-  height: 768
+  width: 1440,
+  height: 900
 };
 
-/**
- * 业务功能：规范化录制视口尺寸，避免历史数据缺失或非法数值导致回放布局失真。
- * 关键流程：只接受有限且大于 0 的宽高；不合法时返回 undefined，由调用方使用默认兜底。
- */
+const MIN_VIEWPORT_EDGE = 240;
+const MAX_VIEWPORT_EDGE = 7680;
+
 export function normalizeViewport(
-  viewport?: Partial<ViewportSize>
+  viewport?: Partial<ViewportSize>,
+  fallback?: ViewportSize
 ): ViewportSize | undefined {
   const width = Number(viewport?.width);
   const height = Number(viewport?.height);
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return undefined;
-  if (width <= 0 || height <= 0) return undefined;
-  return {
-    width,
-    height
-  };
+  if (
+    Number.isFinite(width) &&
+    Number.isFinite(height) &&
+    width >= MIN_VIEWPORT_EDGE &&
+    height >= MIN_VIEWPORT_EDGE &&
+    width <= MAX_VIEWPORT_EDGE &&
+    height <= MAX_VIEWPORT_EDGE
+  ) {
+    return {
+      width: Math.round(width),
+      height: Math.round(height)
+    };
+  }
+  return fallback ? { ...fallback } : undefined;
 }
 
-/**
- * 业务功能：计算录制视口在容器内等比完整展示的位置。
- * 关键流程：取横纵缩放比的较小值，居中放置，保证录制页面不被裁剪。
- */
 export function calculateContainedViewport(
   viewport: ViewportSize,
   container: ViewportSize
-): ViewportPlacement {
-  const safeViewport = normalizeViewport(viewport) ?? DEFAULT_RECORDING_VIEWPORT;
-  const safeContainer = normalizeViewport(container) ?? safeViewport;
-  const containerWidth = safeContainer.width;
-  const containerHeight = safeContainer.height;
-  const scale = Math.min(
-    containerWidth / safeViewport.width,
-    containerHeight / safeViewport.height
-  );
+): ContainedViewport {
+  const safeViewport = normalizeViewport(viewport, DEFAULT_RECORDING_VIEWPORT)!;
+  const containerWidth = Math.max(0, Number(container.width) || 0);
+  const containerHeight = Math.max(0, Number(container.height) || 0);
+  const scale =
+    containerWidth > 0 && containerHeight > 0
+      ? Math.min(
+          containerWidth / safeViewport.width,
+          containerHeight / safeViewport.height
+        )
+      : 1;
   const width = safeViewport.width * scale;
   const height = safeViewport.height * scale;
   return {
-    width: safeViewport.width,
-    height: safeViewport.height,
+    width,
+    height,
+    scale,
     left: (containerWidth - width) / 2,
-    top: (containerHeight - height) / 2,
-    scale
+    top: (containerHeight - height) / 2
   };
 }
 
-/**
- * 业务功能：把录制时的元素矩形映射到填充展示容器。
- * 关键流程：横纵轴分别按容器比例缩放，适用于 iframe 拉伸填满的场景。
- */
-export function mapRectToFilledViewport(
-  rect: CaptureRect,
-  viewport: ViewportSize,
-  container: ViewportSize
-): ViewportRect {
-  const safeViewport = normalizeViewport(viewport) ?? DEFAULT_RECORDING_VIEWPORT;
-  const safeContainer = normalizeViewport(container) ?? safeViewport;
-  const scaleX = safeContainer.width / safeViewport.width;
-  const scaleY = safeContainer.height / safeViewport.height;
-  return {
-    left: rect.x * scaleX,
-    top: rect.y * scaleY,
-    width: rect.width * scaleX,
-    height: rect.height * scaleY
-  };
-}
-
-/**
- * 业务功能：把录制时的元素矩形映射到等比完整展示容器。
- * 关键流程：复用 contained 视口偏移与统一缩放比例，保证高亮位置与页面一致。
- */
 export function mapRectToContainedViewport(
-  rect: CaptureRect,
+  rect: ViewportRect,
   viewport: ViewportSize,
   container: ViewportSize
-): ViewportRect {
-  const placement = calculateContainedViewport(viewport, container);
+) {
+  const safeViewport = normalizeViewport(viewport, DEFAULT_RECORDING_VIEWPORT)!;
+  const placement = calculateContainedViewport(safeViewport, container);
+  const x = Math.min(safeViewport.width, Math.max(0, Number(rect.x) || 0));
+  const y = Math.min(safeViewport.height, Math.max(0, Number(rect.y) || 0));
+  const width = Math.min(
+    safeViewport.width - x,
+    Math.max(0, Number(rect.width) || 0)
+  );
+  const height = Math.min(
+    safeViewport.height - y,
+    Math.max(0, Number(rect.height) || 0)
+  );
   return {
-    left: placement.left + rect.x * placement.scale,
-    top: placement.top + rect.y * placement.scale,
-    width: rect.width * placement.scale,
-    height: rect.height * placement.scale
+    left: placement.left + x * placement.scale,
+    top: placement.top + y * placement.scale,
+    width: width * placement.scale,
+    height: height * placement.scale
+  };
+}
+
+export function mapRectToFilledViewport(
+  rect: ViewportRect,
+  viewport: ViewportSize,
+  container: ViewportSize
+) {
+  const safeViewport = normalizeViewport(viewport, DEFAULT_RECORDING_VIEWPORT)!;
+  const containerWidth = Math.max(0, Number(container.width) || 0);
+  const containerHeight = Math.max(0, Number(container.height) || 0);
+  const scaleX = containerWidth > 0 ? containerWidth / safeViewport.width : 1;
+  const scaleY = containerHeight > 0 ? containerHeight / safeViewport.height : 1;
+  const x = Math.min(safeViewport.width, Math.max(0, Number(rect.x) || 0));
+  const y = Math.min(safeViewport.height, Math.max(0, Number(rect.y) || 0));
+  const width = Math.min(
+    safeViewport.width - x,
+    Math.max(0, Number(rect.width) || 0)
+  );
+  const height = Math.min(
+    safeViewport.height - y,
+    Math.max(0, Number(rect.height) || 0)
+  );
+  return {
+    left: x * scaleX,
+    top: y * scaleY,
+    width: width * scaleX,
+    height: height * scaleY
   };
 }

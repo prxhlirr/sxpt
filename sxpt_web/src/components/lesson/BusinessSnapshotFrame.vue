@@ -56,9 +56,19 @@ const selectors = computed(() =>
     (selector): selector is string => Boolean(selector)
   )
 );
+const snapshotHasVisualStyles = computed(() => {
+  const snapshot = props.snapshot;
+  if (!snapshot) return false;
+  return Boolean(
+    snapshot.cssText?.trim() ||
+      snapshot.styleUrls?.length ||
+      /\sstyle\s*=/i.test(snapshot.html)
+  );
+});
 const snapshotHasTarget = computed(() => {
-  if (!props.snapshot || !props.interactive || !selectors.value.length) {
-    return Boolean(props.snapshot);
+  if (!props.snapshot || !snapshotHasVisualStyles.value) return false;
+  if (!props.interactive || !selectors.value.length) {
+    return true;
   }
   const body = new DOMParser().parseFromString(
     `<body>${props.snapshot.html}</body>`,
@@ -75,11 +85,12 @@ const snapshotHasTarget = computed(() => {
 const snapshotDocument = computed(() =>
   props.snapshot && snapshotHasTarget.value
     ? createBusinessSnapshotDocument(
-        props.snapshot,
-        selectors.value,
-        props.interactive,
-        props.clearFormValues
-      )
+         props.snapshot,
+         selectors.value,
+         props.interactive,
+         props.clearFormValues,
+         props.fallbackUrl
+       )
     : undefined
 );
 const resolutionViewport = computed(() =>
@@ -154,6 +165,8 @@ const snapshotFrameKey = computed(
   () =>
     [
       props.snapshot?.capturedAt ?? 'snapshot',
+      props.snapshot?.cssText?.length ?? 0,
+      props.snapshot?.styleUrls?.join('|') ?? '',
       props.interactive ? 'interactive' : 'readonly',
       props.clearFormValues ? 'empty-form' : 'recorded-form',
       selectorSignature.value

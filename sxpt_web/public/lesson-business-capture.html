@@ -1151,23 +1151,136 @@
         });
       }
 
-      function collectCssText() {
-        return Array.from(document.styleSheets)
-          .flatMap((styleSheet) => {
-            try {
-              return Array.from(styleSheet.cssRules).map((rule) => rule.cssText);
-            } catch {
-              return [];
+      function copySnapshotMediaState(source, clone) {
+        const sourceImages = source.querySelectorAll("img");
+        const clonedImages = clone.querySelectorAll("img");
+        sourceImages.forEach((image, index) => {
+          const clonedImage = clonedImages[index];
+          if (!clonedImage) return;
+          const renderedSource =
+            image.currentSrc ||
+            image.src ||
+            image.dataset.src ||
+            image.dataset.original;
+          if (renderedSource) {
+            clonedImage.setAttribute("src", renderedSource);
+            clonedImage.removeAttribute("srcset");
+          }
+          clonedImage.removeAttribute("crossorigin");
+          clonedImage.setAttribute("loading", "eager");
+        });
+      }
+
+      function resolveSnapshotResourceUrl(value, baseUrl) {
+        const normalized = String(value || "").trim();
+        if (!normalized || normalized.startsWith("#")) return "";
+        try {
+          const resolved = new URL(normalized, baseUrl);
+          return ["http:", "https:"].includes(resolved.protocol)
+            ? resolved.href
+            : "";
+        } catch {
+          return "";
+        }
+      }
+
+      function rebaseSnapshotCssUrls(cssText, baseUrl) {
+        return String(cssText || "")
+          .replace(
+            /url\(\s*(?:(["'])(.*?)\1|([^\s"')][^)]*))\s*\)/gi,
+            (source, quote, quotedValue, bareValue) => {
+              const value = String(quotedValue || bareValue || "").trim();
+              if (/^(?:data:|blob:|https?:|#)/i.test(value)) return source;
+              const resolved = resolveSnapshotResourceUrl(value, baseUrl);
+              if (!resolved) return source;
+              const wrapper = quote || "";
+              return `url(${wrapper}${resolved}${wrapper})`;
             }
+          )
+          .replace(/@import\s+(["'])(.*?)\1/gi, (source, quote, value) => {
+            const resolved = resolveSnapshotResourceUrl(value, baseUrl);
+            return resolved ? `@import ${quote}${resolved}${quote}` : source;
+          });
+      }
+
+      function rebaseSnapshotSrcset(value, baseUrl) {
+        value = String(value || "");
+        if (/^\s*(?:data:|blob:)/i.test(value)) return value;
+        return value
+          .split(",")
+          .map((candidate) => {
+            const match = candidate.trim().match(/^(\S+)(\s+.*)?$/);
+            if (!match) return candidate;
+            const resolved = resolveSnapshotResourceUrl(match[1], baseUrl);
+            return resolved ? `${resolved}${match[2] || ""}` : candidate.trim();
           })
-          .join("\n")
-          .slice(0, 400000);
+          .join(", ");
+      }
+
+      function rebaseSnapshotMarkupResources(root, baseUrl) {
+        const resourceAttributes = [
+          "src",
+          "poster",
+          "href",
+          "xlink:href",
+          "action",
+          "background"
+        ];
+        [root, ...root.querySelectorAll("*")].forEach((element) => {
+          resourceAttributes.forEach((attributeName) => {
+            const value = element.getAttribute(attributeName);
+            if (!value || /^(?:data:|blob:|#)/i.test(value.trim())) return;
+            const resolved = resolveSnapshotResourceUrl(value, baseUrl);
+            if (resolved) {
+              element.setAttribute(attributeName, resolved);
+            } else if (/^(?:javascript:|vbscript:)/i.test(value.trim())) {
+              element.removeAttribute(attributeName);
+            }
+          });
+          const srcset = element.getAttribute("srcset");
+          if (srcset) {
+            element.setAttribute("srcset", rebaseSnapshotSrcset(srcset, baseUrl));
+          }
+          const inlineStyle = element.getAttribute("style");
+          if (inlineStyle) {
+            element.setAttribute("style", rebaseSnapshotCssUrls(inlineStyle, baseUrl));
+          }
+        });
+      }
+
+      function collectSnapshotStyles() {
+        const cssParts = [];
+        const styleUrls = [];
+        Array.from(document.styleSheets).forEach((styleSheet) => {
+          const stylesheetBase = styleSheet.href || document.baseURI;
+          if (styleSheet.href) {
+            const styleUrl = resolveSnapshotResourceUrl(
+              styleSheet.href,
+              document.baseURI
+            );
+            if (styleUrl && !styleUrls.includes(styleUrl)) styleUrls.push(styleUrl);
+          }
+          try {
+            const cssText = Array.from(styleSheet.cssRules)
+              .map((rule) => rule.cssText)
+              .join("\n");
+            cssParts.push(rebaseSnapshotCssUrls(cssText, stylesheetBase));
+          } catch {
+            // Cross-origin rules are restored from styleUrls during playback.
+          }
+        });
+        return {
+          cssText: cssParts.join("\n").slice(0, 1500000),
+          styleUrls: styleUrls.slice(0, 64)
+        };
       }
 
       function createPageSnapshot() {
         const clone = document.body.cloneNode(true);
         copyFormState(document.body, clone);
+        copySnapshotMediaState(document.body, clone);
         clone.classList.remove("picking");
+        clone.classList.add("sxpt-recorded-business-root");
         clone
           .querySelectorAll(".pick-banner, .element-pick-overlay")
           .forEach((element) => element.remove());
@@ -1189,14 +1302,20 @@
           }
           element.classList.remove("runtime-target");
         });
+        rebaseSnapshotMarkupResources(
+          clone,
+          document.baseURI || window.location.href
+        );
+        const styles = collectSnapshotStyles();
         return {
           version: 1,
           format: "DOM",
-          pageUrl: currentMeta().path,
+          pageUrl: window.location.href,
           pageTitle: currentMeta().title,
           capturedAt: new Date().toISOString(),
           html: clone.outerHTML.slice(0, 700000),
-          cssText: collectCssText(),
+          cssText: styles.cssText,
+          styleUrls: styles.styleUrls,
           viewport: {
             width: window.innerWidth,
             height: window.innerHeight

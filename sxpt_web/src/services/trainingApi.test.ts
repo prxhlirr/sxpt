@@ -217,6 +217,77 @@ describe('按任务触发数据准备接口', () => {
       })
     );
   });
+
+  it('点击数据准备时会向教学平台 API 添加认证和 JSON 请求头', async () => {
+    const session = createSession('teacher');
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          code: 200,
+          message: 'OK',
+          result: session,
+          timestamp: Date.now()
+        })
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          code: 200,
+          message: 'OK',
+          result: {
+            requirement: {
+              id: 'requirement_001',
+              tenantId: 'tenant_001',
+              requirementCode: 'REQ-001',
+              connectorSystemId: 'system_001',
+              moduleCode: 'OA_DOC',
+              taskId: 'task_001',
+              sceneType: 'PRACTICE'
+            },
+            job: {
+              id: 'job_001',
+              tenantId: 'tenant_001',
+              connectorSystemId: 'system_001',
+              moduleCode: 'OA_DOC',
+              taskId: 'task_001',
+              sceneType: 'PRACTICE',
+              jobType: 'INITIAL_CREATE',
+              idempotencyKey: 'key_001',
+              requestBatchId: 'attempt_001'
+            },
+            requestBatchId: 'attempt_001'
+          },
+          timestamp: Date.now()
+        })
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await authApi.login({
+      tenantId: 'tenant_001',
+      username: 'teacher01',
+      password: 'Sxpt@123456',
+      loginType: 'PASSWORD'
+    });
+
+    await dataPrepareApi.triggerTaskPrepare('task_001', {
+      connectorSystemId: 'system_001',
+      businessModuleId: 'module_001',
+      moduleCode: 'OA_DOC',
+      sceneType: 'PRACTICE',
+      requestBatchId: 'attempt_001',
+      participants: []
+    });
+
+    const headers = fetchMock.mock.calls[1][1].headers as Headers;
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(headers.get('Authorization')).toBe('Bearer token-teacher');
+  });
 });
 
 describe('原平台角色组织字典接口', () => {
@@ -291,5 +362,56 @@ describe('原平台角色组织字典接口', () => {
     );
     expect(fetchMock.mock.calls[0][0]).toContain('activeOnly=true');
     expect(fetchMock.mock.calls[1][0]).toContain('activeOnly=true');
+  });
+
+  it('会提交原平台角色和组织字典维护请求', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          success: true,
+          code: 200,
+          message: 'OK',
+          result: {},
+          timestamp: Date.now()
+        })
+      });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await dataPrepareApi.createOriginRole({
+      tenantId: 'tenant_001',
+      connectorSystemId: 'system_001',
+      roleCode: 'OA_APPLICANT',
+      roleName: 'OA 申请人'
+    });
+    await dataPrepareApi.updateOriginRole('role_001', {
+      tenantId: 'tenant_001',
+      connectorSystemId: 'system_001',
+      roleCode: 'OA_APPLICANT',
+      roleName: 'OA 申请人'
+    });
+    await dataPrepareApi.disableOriginRole('role_001');
+    await dataPrepareApi.createOriginOrg({
+      tenantId: 'tenant_001',
+      connectorSystemId: 'system_001',
+      orgCode: 'OA_DEPT',
+      orgName: 'OA 部门'
+    });
+    await dataPrepareApi.updateOriginOrg('org_001', {
+      tenantId: 'tenant_001',
+      connectorSystemId: 'system_001',
+      orgCode: 'OA_DEPT',
+      orgName: 'OA 部门'
+    });
+    await dataPrepareApi.enableOriginOrg('org_001');
+
+    expect(fetchMock.mock.calls[0][0]).toContain('api/v1/connector/origin-roles/create');
+    expect(fetchMock.mock.calls[1][0]).toContain('api/v1/connector/origin-roles/role_001/update');
+    expect(fetchMock.mock.calls[2][0]).toContain('api/v1/connector/origin-roles/role_001/disable');
+    expect(fetchMock.mock.calls[3][0]).toContain('api/v1/connector/origin-orgs/create');
+    expect(fetchMock.mock.calls[4][0]).toContain('api/v1/connector/origin-orgs/org_001/update');
+    expect(fetchMock.mock.calls[5][0]).toContain('api/v1/connector/origin-orgs/org_001/enable');
   });
 });

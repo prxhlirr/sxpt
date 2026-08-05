@@ -5,7 +5,10 @@ import com.sxpt.module.connector.service.impl.LocalOriginDataPrepareAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.annotation.AnnotationConfigApplicationContext;
 
+import java.util.Collections;
+
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -36,5 +39,29 @@ class LocalOriginDataPrepareAdapterContextTests {
             assertNotNull(adapter);
             assertTrue(adapter instanceof LocalOriginDataPrepareAdapter);
         }
+    }
+
+    /**
+     * 验证本地 Adapter 不返回模块无关的固定办理位置。
+     *
+     * 业务功能：本地联调系统没有真实原平台流程状态时，必须把当前步骤和参与方留给业务模块标准链推导。
+     * 关键流程：构造任意模块造数请求，调用本地 Adapter 后确认响应只包含业务数据引用，不携带固定步骤码和参与方序号。
+     */
+    @Test
+    void localAdapterShouldLetStandardProcessChainResolveCurrentActor() {
+        LocalOriginDataPrepareAdapter adapter = new LocalOriginDataPrepareAdapter();
+        OriginDataPrepareAdapter.RequestItem requestItem = new OriginDataPrepareAdapter.RequestItem();
+        requestItem.setRequestItemId("batch_001:item_001");
+        OriginDataPrepareAdapter.BatchCreateRequest request = new OriginDataPrepareAdapter.BatchCreateRequest();
+        request.setRequestBatchId("batch_001");
+        request.setModuleCode("record_apply_1785916779495");
+        request.setItems(Collections.singletonList(requestItem));
+
+        OriginDataPrepareAdapter.BatchCreateResponse response = adapter.createTeachingData(request);
+
+        OriginDataPrepareAdapter.ResponseItem responseItem = response.getItems().get(0);
+        assertNotNull(responseItem.getExternalBusinessId());
+        assertNull(responseItem.getCurrentStepCode());
+        assertNull(responseItem.getCurrentActorNo());
     }
 }

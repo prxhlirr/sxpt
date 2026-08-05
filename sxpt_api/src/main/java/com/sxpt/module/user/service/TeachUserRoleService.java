@@ -26,6 +26,16 @@ public interface TeachUserRoleService {
     TeachUserRole grantUserRole(TeachUserRole teachUserRole);
 
     /**
+     * 切换用户角色授权关系启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 授权关系 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的用户角色关系实体。
+     */
+    TeachUserRole updateUserRoleStatus(String tenantId, String id, String status);
+
+    /**
      * 查询租户下的用户角色授权关系列表。
      *
      * 业务功能：为后台角色绑定页面展示用户与角色的当前授权关系，避免授权状态只能通过数据库确认。

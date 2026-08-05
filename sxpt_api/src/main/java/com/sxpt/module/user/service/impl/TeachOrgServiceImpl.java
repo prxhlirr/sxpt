@@ -32,6 +32,8 @@ public class TeachOrgServiceImpl implements TeachOrgService {
 
     private static final String DEFAULT_STATUS = "ACTIVE";
 
+    private static final String DISABLED_STATUS = "DISABLED";
+
     private final TeachOrgMapper teachOrgMapper;
 
     public TeachOrgServiceImpl(TeachOrgMapper teachOrgMapper) {
@@ -51,6 +53,46 @@ public class TeachOrgServiceImpl implements TeachOrgService {
         fillCreateDefaults(teachOrg);
         teachOrgMapper.insert(teachOrg);
         return teachOrg;
+    }
+
+    /**
+     * 更新教学组织基础信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param teachOrg 组织实体，必须包含 ID 和可编辑字段。
+     * @return 已更新的组织实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachOrg updateTeachOrg(String tenantId, TeachOrg teachOrg) {
+        requireText(tenantId);
+        validateUpdateFields(teachOrg);
+        TeachOrg existing = getExistingOrg(tenantId, teachOrg.getId());
+        existing.setParentId(teachOrg.getParentId());
+        existing.setOrgName(teachOrg.getOrgName());
+        existing.setOrgType(teachOrg.getOrgType());
+        existing.setUpdateTime(LocalDateTime.now());
+        teachOrgMapper.updateById(existing);
+        return existing;
+    }
+
+    /**
+     * 切换教学组织启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 组织 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的组织实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachOrg updateTeachOrgStatus(String tenantId, String id, String status) {
+        requireSupportedStatus(status);
+        TeachOrg existing = getExistingOrg(tenantId, id);
+        existing.setStatus(status);
+        existing.setUpdateTime(LocalDateTime.now());
+        teachOrgMapper.updateById(existing);
+        return existing;
     }
 
     /**
@@ -82,6 +124,52 @@ public class TeachOrgServiceImpl implements TeachOrgService {
         requireText(teachOrg.getOrgCode());
         requireText(teachOrg.getOrgName());
         requireText(teachOrg.getOrgType());
+    }
+
+    /**
+     * 校验组织更新所需字段，组织编码不在编辑入口修改以保持外部引用稳定。
+     *
+     * @param teachOrg 教学组织实体。
+     */
+    private void validateUpdateFields(TeachOrg teachOrg) {
+        if (teachOrg == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(teachOrg.getId());
+        requireText(teachOrg.getOrgName());
+        requireText(teachOrg.getOrgType());
+    }
+
+    /**
+     * 按租户和组织 ID 读取未删除组织，避免跨租户维护单位。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 组织 ID。
+     * @return 未删除组织实体。
+     */
+    private TeachOrg getExistingOrg(String tenantId, String id) {
+        requireText(tenantId);
+        requireText(id);
+        TeachOrg existing = teachOrgMapper.selectOne(new QueryWrapper<TeachOrg>()
+                .eq("tenant_id", tenantId)
+                .eq("id", id)
+                .eq("deleted", Boolean.FALSE));
+        if (existing == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return existing;
+    }
+
+    /**
+     * 限制组织维护状态只允许启用和停用。
+     *
+     * @param status 目标状态。
+     */
+    private void requireSupportedStatus(String status) {
+        requireText(status);
+        if (!DEFAULT_STATUS.equals(status) && !DISABLED_STATUS.equals(status)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
     }
 
     /**

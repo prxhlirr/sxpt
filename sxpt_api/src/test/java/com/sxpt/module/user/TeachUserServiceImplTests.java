@@ -10,9 +10,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 教学平台用户服务测试。
@@ -57,6 +59,47 @@ class TeachUserServiceImplTests {
 
         assertThrows(BusinessException.class, () -> service.createTeachUser(teachUser));
         verify(mapper, times(0)).insert(teachUser);
+    }
+
+    /**
+     * 校验编辑用户时只更新基础资料，不修改登录账号。
+     */
+    @Test
+    void updateTeachUserShouldKeepUsernameStable() {
+        TeachUserMapper mapper = mock(TeachUserMapper.class);
+        TeachUserServiceImpl service = new TeachUserServiceImpl(mapper);
+        TeachUser existing = buildValidTeachUser();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        TeachUser update = new TeachUser();
+        update.setId("user_001");
+        update.setRealName("教师一改");
+        update.setUserType("ADMIN");
+        update.setSourceType("LOCAL");
+        update.setPhone("13800000000");
+
+        TeachUser saved = service.updateTeachUser("tenant_001", update);
+
+        assertEquals("teacher001", saved.getUsername());
+        assertEquals("教师一改", saved.getRealName());
+        assertEquals("ADMIN", saved.getUserType());
+        assertEquals("13800000000", saved.getPhone());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
+    }
+
+    /**
+     * 校验用户状态切换只接受启用和停用状态。
+     */
+    @Test
+    void updateTeachUserStatusShouldRejectUnsupportedStatus() {
+        TeachUserMapper mapper = mock(TeachUserMapper.class);
+        TeachUserServiceImpl service = new TeachUserServiceImpl(mapper);
+
+        assertThrows(BusinessException.class, () ->
+                service.updateTeachUserStatus("tenant_001", "user_001", "LOCKED"));
+        verify(mapper, times(0)).selectOne(any());
+        verify(mapper, times(0)).updateById(any());
     }
 
     /**

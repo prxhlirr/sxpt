@@ -97,6 +97,24 @@ class TeachUserOrgServiceImplTests {
     }
 
     /**
+     * 校验用户单位绑定状态切换会写回目标状态。
+     */
+    @Test
+    void updateUserOrgStatusShouldUpdateExistingRelation() {
+        TeachUserOrgMapper mapper = mock(TeachUserOrgMapper.class);
+        TeachUserOrgServiceImpl service = new TeachUserOrgServiceImpl(mapper);
+        TeachUserOrg existing = buildValidTeachUserOrg();
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        TeachUserOrg saved = service.updateUserOrgStatus("tenant_001", "user_org_001", "DISABLED");
+
+        assertEquals("DISABLED", saved.getStatus());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
+    }
+
+    /**
      * 构造最小有效教学用户组织关系。
      *
      * @return 用户组织关系实体。

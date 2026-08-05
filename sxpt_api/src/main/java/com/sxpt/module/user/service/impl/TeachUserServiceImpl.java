@@ -32,6 +32,8 @@ public class TeachUserServiceImpl implements TeachUserService {
 
     private static final String DEFAULT_STATUS = "ACTIVE";
 
+    private static final String DISABLED_STATUS = "DISABLED";
+
     private final TeachUserMapper teachUserMapper;
 
     public TeachUserServiceImpl(TeachUserMapper teachUserMapper) {
@@ -51,6 +53,50 @@ public class TeachUserServiceImpl implements TeachUserService {
         fillCreateDefaults(teachUser);
         teachUserMapper.insert(teachUser);
         return teachUser;
+    }
+
+    /**
+     * 更新教学平台用户基础信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param teachUser 用户实体，必须包含 ID 和可编辑字段。
+     * @return 已更新的用户实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachUser updateTeachUser(String tenantId, TeachUser teachUser) {
+        requireText(tenantId);
+        validateUpdateFields(teachUser);
+        TeachUser existing = getExistingUser(tenantId, teachUser.getId());
+        existing.setRealName(teachUser.getRealName());
+        existing.setPhone(teachUser.getPhone());
+        existing.setEmail(teachUser.getEmail());
+        existing.setUserType(teachUser.getUserType());
+        existing.setSourceType(teachUser.getSourceType());
+        existing.setStudentNo(teachUser.getStudentNo());
+        existing.setEmployeeNo(teachUser.getEmployeeNo());
+        existing.setUpdateTime(LocalDateTime.now());
+        teachUserMapper.updateById(existing);
+        return existing;
+    }
+
+    /**
+     * 切换教学平台用户启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的用户实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachUser updateTeachUserStatus(String tenantId, String id, String status) {
+        requireSupportedStatus(status);
+        TeachUser existing = getExistingUser(tenantId, id);
+        existing.setStatus(status);
+        existing.setUpdateTime(LocalDateTime.now());
+        teachUserMapper.updateById(existing);
+        return existing;
     }
 
     /**
@@ -86,6 +132,53 @@ public class TeachUserServiceImpl implements TeachUserService {
         requireText(teachUser.getRealName());
         requireText(teachUser.getUserType());
         requireText(teachUser.getSourceType());
+    }
+
+    /**
+     * 校验更新用户所需字段，用户名不可在此入口修改以保持登录标识稳定。
+     *
+     * @param teachUser 教学平台用户实体。
+     */
+    private void validateUpdateFields(TeachUser teachUser) {
+        if (teachUser == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(teachUser.getId());
+        requireText(teachUser.getRealName());
+        requireText(teachUser.getUserType());
+        requireText(teachUser.getSourceType());
+    }
+
+    /**
+     * 按租户和用户 ID 读取未删除用户，保证维护操作不会跨租户修改数据。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户 ID。
+     * @return 未删除用户实体。
+     */
+    private TeachUser getExistingUser(String tenantId, String id) {
+        requireText(tenantId);
+        requireText(id);
+        TeachUser existing = teachUserMapper.selectOne(new QueryWrapper<TeachUser>()
+                .eq("tenant_id", tenantId)
+                .eq("id", id)
+                .eq("deleted", Boolean.FALSE));
+        if (existing == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return existing;
+    }
+
+    /**
+     * 限制基础主数据只允许启用和停用两种维护状态。
+     *
+     * @param status 目标状态。
+     */
+    private void requireSupportedStatus(String status) {
+        requireText(status);
+        if (!DEFAULT_STATUS.equals(status) && !DISABLED_STATUS.equals(status)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
     }
 
     /**

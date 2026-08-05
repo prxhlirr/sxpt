@@ -41,6 +41,9 @@ const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
 const loading = ref(false);
 const dialogOpen = ref(false);
+const editingUserId = ref('');
+const editingRoleId = ref('');
+const editingOrgId = ref('');
 const editingMenuId = ref('');
 const editingPermissionId = ref('');
 const editingDictItemId = ref('');
@@ -75,6 +78,34 @@ const createPermissionBySection: Partial<Record<SectionKey, string>> = {
 
 const removePermissionBySection: Partial<Record<SectionKey, string>> = {
   userOrgs: 'system:user-org:remove'
+};
+
+const userActionPermission = {
+  edit: 'system:user:edit',
+  enable: 'system:user:enable',
+  disable: 'system:user:disable'
+};
+
+const roleActionPermission = {
+  edit: 'system:role:edit',
+  enable: 'system:role:enable',
+  disable: 'system:role:disable'
+};
+
+const orgActionPermission = {
+  edit: 'system:org:edit',
+  enable: 'system:org:enable',
+  disable: 'system:org:disable'
+};
+
+const userRoleActionPermission = {
+  enable: 'system:user-role:enable',
+  disable: 'system:user-role:disable'
+};
+
+const userOrgActionPermission = {
+  enable: 'system:user-org:enable',
+  disable: 'system:user-org:disable'
 };
 
 const menuActionPermission = {
@@ -290,8 +321,11 @@ const pagedRows = computed(() => {
 });
 
 const emptyColspan = computed(() => {
-  if (props.section === 'users') return 6;
-  if (props.section === 'userOrgs') return showOperationColumn.value ? 5 : 4;
+  if (props.section === 'users') return canOperateUser.value ? 7 : 6;
+  if (props.section === 'roles') return canOperateRole.value ? 5 : 4;
+  if (props.section === 'orgs') return canOperateOrg.value ? 6 : 5;
+  if (props.section === 'userRoles') return canOperateUserRole.value ? 5 : 4;
+  if (props.section === 'userOrgs') return canOperateUserOrg.value ? 5 : 4;
   if (props.section === 'menus') return canOperateMenu.value ? 8 : 7;
   if (props.section === 'permissions') return canOperatePermission.value ? 7 : 6;
   if (props.section === 'rolePermissions') return canOperateRolePermission.value ? 5 : 4;
@@ -307,8 +341,48 @@ const canRemoveCurrent = computed(() =>
   hasRuntimePermission(removePermissionBySection[props.section])
 );
 
-const showOperationColumn = computed(() =>
-  props.section === 'userOrgs' && canRemoveCurrent.value
+const canOperateUser = computed(() =>
+  props.section === 'users' &&
+  (
+    hasRuntimePermission(userActionPermission.edit) ||
+    hasRuntimePermission(userActionPermission.enable) ||
+    hasRuntimePermission(userActionPermission.disable)
+  )
+);
+
+const canOperateRole = computed(() =>
+  props.section === 'roles' &&
+  (
+    hasRuntimePermission(roleActionPermission.edit) ||
+    hasRuntimePermission(roleActionPermission.enable) ||
+    hasRuntimePermission(roleActionPermission.disable)
+  )
+);
+
+const canOperateOrg = computed(() =>
+  props.section === 'orgs' &&
+  (
+    hasRuntimePermission(orgActionPermission.edit) ||
+    hasRuntimePermission(orgActionPermission.enable) ||
+    hasRuntimePermission(orgActionPermission.disable)
+  )
+);
+
+const canOperateUserRole = computed(() =>
+  props.section === 'userRoles' &&
+  (
+    hasRuntimePermission(userRoleActionPermission.enable) ||
+    hasRuntimePermission(userRoleActionPermission.disable)
+  )
+);
+
+const canOperateUserOrg = computed(() =>
+  props.section === 'userOrgs' &&
+  (
+    canRemoveCurrent.value ||
+    hasRuntimePermission(userOrgActionPermission.enable) ||
+    hasRuntimePermission(userOrgActionPermission.disable)
+  )
 );
 
 const canOperateMenu = computed(() =>
@@ -351,7 +425,13 @@ const canOperateRolePermission = computed(() =>
 );
 
 const dialogTitle = computed(() =>
-  editingMenuId.value
+  editingUserId.value
+    ? '编辑用户'
+    : editingRoleId.value
+      ? '编辑角色'
+      : editingOrgId.value
+        ? '编辑单位'
+        : editingMenuId.value
     ? '编辑菜单'
     : editingPermissionId.value
       ? '编辑权限'
@@ -443,6 +523,9 @@ async function openCreateDialog() {
     return;
   }
 
+  editingUserId.value = '';
+  editingRoleId.value = '';
+  editingOrgId.value = '';
   editingMenuId.value = '';
   editingPermissionId.value = '';
   editingDictItemId.value = '';
@@ -464,6 +547,131 @@ async function openCreateDialog() {
  * 业务功能：查看菜单详情。
  * 关键流程：从后端读取最新菜单配置，避免列表缓存和详情展示不一致。
  */
+function openEditUserDialog(row: TeachUser) {
+  if (!hasRuntimePermission(userActionPermission.edit)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  editingUserId.value = row.id;
+  fillUserForm(row);
+  dialogOpen.value = true;
+}
+
+function openEditRoleDialog(row: TeachRole) {
+  if (!hasRuntimePermission(roleActionPermission.edit)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  editingRoleId.value = row.id;
+  fillRoleForm(row);
+  dialogOpen.value = true;
+}
+
+function openEditOrgDialog(row: TeachOrg) {
+  if (!hasRuntimePermission(orgActionPermission.edit)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  editingOrgId.value = row.id;
+  fillOrgForm(row);
+  dialogOpen.value = true;
+}
+
+async function toggleUserStatus(row: TeachUser) {
+  const nextStatus = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const permissionCode =
+    nextStatus === 'ACTIVE' ? userActionPermission.enable : userActionPermission.disable;
+  if (!hasRuntimePermission(permissionCode)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  await run(async () => {
+    await usersApi.updateUserStatus({
+      tenantId: tenantId.value,
+      id: row.id,
+      status: nextStatus
+    });
+    await loadPageData();
+    await refreshRuntimeContextAfterConfigChange();
+  }, nextStatus === 'ACTIVE' ? '用户已启用' : '用户已停用');
+}
+
+async function toggleRoleStatus(row: TeachRole) {
+  const nextStatus = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const permissionCode =
+    nextStatus === 'ACTIVE' ? roleActionPermission.enable : roleActionPermission.disable;
+  if (!hasRuntimePermission(permissionCode)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  await run(async () => {
+    await usersApi.updateRoleStatus({
+      tenantId: tenantId.value,
+      id: row.id,
+      status: nextStatus
+    });
+    await loadPageData();
+    await refreshRuntimeContextAfterConfigChange();
+  }, nextStatus === 'ACTIVE' ? '角色已启用' : '角色已停用');
+}
+
+async function toggleOrgStatus(row: TeachOrg) {
+  const nextStatus = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const permissionCode =
+    nextStatus === 'ACTIVE' ? orgActionPermission.enable : orgActionPermission.disable;
+  if (!hasRuntimePermission(permissionCode)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  await run(async () => {
+    await usersApi.updateOrgStatus({
+      tenantId: tenantId.value,
+      id: row.id,
+      status: nextStatus
+    });
+    await loadPageData();
+    await refreshRuntimeContextAfterConfigChange();
+  }, nextStatus === 'ACTIVE' ? '单位已启用' : '单位已停用');
+}
+
+async function toggleUserRoleStatus(row: TeachUserRole) {
+  const nextStatus = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const permissionCode =
+    nextStatus === 'ACTIVE' ? userRoleActionPermission.enable : userRoleActionPermission.disable;
+  if (!hasRuntimePermission(permissionCode)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  await run(async () => {
+    await usersApi.updateUserRoleStatus({
+      tenantId: tenantId.value,
+      id: row.id,
+      status: nextStatus
+    });
+    await loadPageData();
+    await refreshRuntimeContextAfterConfigChange();
+  }, nextStatus === 'ACTIVE' ? '用户角色已启用' : '用户角色已停用');
+}
+
+async function toggleUserOrgStatus(row: TeachUserOrg) {
+  const nextStatus = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+  const permissionCode =
+    nextStatus === 'ACTIVE' ? userOrgActionPermission.enable : userOrgActionPermission.disable;
+  if (!hasRuntimePermission(permissionCode)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  await run(async () => {
+    await usersApi.updateUserOrgStatus({
+      tenantId: tenantId.value,
+      id: row.id,
+      status: nextStatus
+    });
+    await loadPageData();
+    await refreshRuntimeContextAfterConfigChange();
+  }, nextStatus === 'ACTIVE' ? '用户单位已启用' : '用户单位已停用');
+}
+
 async function viewMenuDetail(row: SysMenuConfig) {
   if (!hasRuntimePermission(menuActionPermission.view)) {
     notify('error', '当前角色暂无该操作入口');
@@ -716,36 +924,72 @@ async function submitForm() {
 
   await run(async () => {
     if (props.section === 'users') {
-      await usersApi.createUser({
-        tenantId: tenantId.value,
-        username: userForm.username.trim(),
-        realName: userForm.realName.trim(),
-        userType: userForm.userType,
-        sourceType: userForm.sourceType,
-        initialPassword: userForm.initialPassword.trim() || undefined,
-        studentNo: userForm.studentNo.trim() || undefined,
-        employeeNo: userForm.employeeNo.trim() || undefined,
-        phone: userForm.phone.trim() || undefined,
-        email: userForm.email.trim() || undefined
-      });
+      if (editingUserId.value) {
+        await usersApi.updateUser({
+          tenantId: tenantId.value,
+          id: editingUserId.value,
+          realName: userForm.realName.trim(),
+          userType: userForm.userType,
+          sourceType: userForm.sourceType,
+          studentNo: userForm.studentNo.trim() || undefined,
+          employeeNo: userForm.employeeNo.trim() || undefined,
+          phone: userForm.phone.trim() || undefined,
+          email: userForm.email.trim() || undefined
+        });
+      } else {
+        await usersApi.createUser({
+          tenantId: tenantId.value,
+          username: userForm.username.trim(),
+          realName: userForm.realName.trim(),
+          userType: userForm.userType,
+          sourceType: userForm.sourceType,
+          initialPassword: userForm.initialPassword.trim() || undefined,
+          studentNo: userForm.studentNo.trim() || undefined,
+          employeeNo: userForm.employeeNo.trim() || undefined,
+          phone: userForm.phone.trim() || undefined,
+          email: userForm.email.trim() || undefined
+        });
+      }
       resetUserForm();
+      editingUserId.value = '';
     } else if (props.section === 'roles') {
-      await usersApi.createRole({
-        tenantId: tenantId.value,
-        roleCode: roleForm.roleCode.trim(),
-        roleName: roleForm.roleName.trim(),
-        description: roleForm.description.trim() || undefined
-      });
+      if (editingRoleId.value) {
+        await usersApi.updateRole({
+          tenantId: tenantId.value,
+          id: editingRoleId.value,
+          roleName: roleForm.roleName.trim(),
+          description: roleForm.description.trim() || undefined
+        });
+      } else {
+        await usersApi.createRole({
+          tenantId: tenantId.value,
+          roleCode: roleForm.roleCode.trim(),
+          roleName: roleForm.roleName.trim(),
+          description: roleForm.description.trim() || undefined
+        });
+      }
       resetRoleForm();
+      editingRoleId.value = '';
     } else if (props.section === 'orgs') {
-      await usersApi.createOrg({
-        tenantId: tenantId.value,
-        parentId: orgForm.parentId || undefined,
-        orgCode: orgForm.orgCode.trim(),
-        orgName: orgForm.orgName.trim(),
-        orgType: orgForm.orgType
-      });
+      if (editingOrgId.value) {
+        await usersApi.updateOrg({
+          tenantId: tenantId.value,
+          id: editingOrgId.value,
+          parentId: orgForm.parentId || undefined,
+          orgName: orgForm.orgName.trim(),
+          orgType: orgForm.orgType
+        });
+      } else {
+        await usersApi.createOrg({
+          tenantId: tenantId.value,
+          parentId: orgForm.parentId || undefined,
+          orgCode: orgForm.orgCode.trim(),
+          orgName: orgForm.orgName.trim(),
+          orgType: orgForm.orgType
+        });
+      }
       resetOrgForm();
+      editingOrgId.value = '';
     } else if (props.section === 'userRoles') {
       await usersApi.grantRole({
         tenantId: tenantId.value,
@@ -1026,6 +1270,9 @@ function nextPage() {
 
 function closeDialog() {
   dialogOpen.value = false;
+  editingUserId.value = '';
+  editingRoleId.value = '';
+  editingOrgId.value = '';
   editingMenuId.value = '';
   editingPermissionId.value = '';
   editingDictItemId.value = '';
@@ -1053,10 +1300,28 @@ function resetUserForm() {
   userForm.email = '';
 }
 
+function fillUserForm(user: TeachUser) {
+  userForm.username = user.username;
+  userForm.realName = user.realName;
+  userForm.userType = user.userType;
+  userForm.sourceType = user.sourceType;
+  userForm.initialPassword = '';
+  userForm.studentNo = user.studentNo || '';
+  userForm.employeeNo = user.employeeNo || '';
+  userForm.phone = user.phone || '';
+  userForm.email = user.email || '';
+}
+
 function resetRoleForm() {
   roleForm.roleCode = '';
   roleForm.roleName = '';
   roleForm.description = '';
+}
+
+function fillRoleForm(role: TeachRole) {
+  roleForm.roleCode = role.roleCode;
+  roleForm.roleName = role.roleName;
+  roleForm.description = role.description || '';
 }
 
 function resetOrgForm() {
@@ -1064,6 +1329,13 @@ function resetOrgForm() {
   orgForm.orgCode = '';
   orgForm.orgName = '';
   orgForm.orgType = 'SCHOOL';
+}
+
+function fillOrgForm(org: TeachOrg) {
+  orgForm.parentId = org.parentId || '';
+  orgForm.orgCode = org.orgCode;
+  orgForm.orgName = org.orgName;
+  orgForm.orgType = org.orgType;
 }
 
 function resetMenuForm() {
@@ -1186,12 +1458,14 @@ function fillDictForm(item: SysDictItem) {
               <th>来源</th>
               <th>联系方式</th>
               <th>状态</th>
+              <th v-if="canOperateUser">操作</th>
             </tr>
             <tr v-else-if="section === 'roles'">
               <th>角色编码</th>
               <th>角色名称</th>
               <th>说明</th>
               <th>状态</th>
+              <th v-if="canOperateRole">操作</th>
             </tr>
             <tr v-else-if="section === 'orgs'">
               <th>单位编码</th>
@@ -1199,19 +1473,21 @@ function fillDictForm(item: SysDictItem) {
               <th>单位类型</th>
               <th>上级单位</th>
               <th>状态</th>
+              <th v-if="canOperateOrg">操作</th>
             </tr>
             <tr v-else-if="section === 'userRoles'">
               <th>用户</th>
               <th>角色</th>
               <th>授权来源</th>
               <th>状态</th>
+              <th v-if="canOperateUserRole">操作</th>
             </tr>
             <tr v-else-if="section === 'userOrgs'">
               <th>用户</th>
               <th>单位</th>
               <th>关系类型</th>
               <th>状态</th>
-              <th v-if="showOperationColumn">操作</th>
+              <th v-if="canOperateUserOrg">操作</th>
             </tr>
             <tr v-else-if="section === 'menus'">
               <th>菜单编码</th>
@@ -1264,12 +1540,66 @@ function fillDictForm(item: SysDictItem) {
                 <td>{{ (row as TeachUser).sourceType }}</td>
                 <td>{{ (row as TeachUser).phone || (row as TeachUser).email || '-' }}</td>
                 <td><span class="status-pill">{{ statusText(row.status) }}</span></td>
+                <td v-if="canOperateUser" class="table-actions">
+                  <button
+                    v-if="hasRuntimePermission(userActionPermission.edit)"
+                    type="button"
+                    class="text-action"
+                    :disabled="loading"
+                    @click="openEditUserDialog(row as TeachUser)"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="
+                      hasRuntimePermission(
+                        (row as TeachUser).status === 'ACTIVE'
+                          ? userActionPermission.disable
+                          : userActionPermission.enable
+                      )
+                    "
+                    type="button"
+                    class="text-action"
+                    :class="{ danger: (row as TeachUser).status === 'ACTIVE' }"
+                    :disabled="loading"
+                    @click="toggleUserStatus(row as TeachUser)"
+                  >
+                    {{ (row as TeachUser).status === 'ACTIVE' ? '停用' : '启用' }}
+                  </button>
+                </td>
               </template>
               <template v-else-if="section === 'roles'">
                 <td>{{ (row as TeachRole).roleCode }}</td>
                 <td>{{ (row as TeachRole).roleName }}</td>
                 <td>{{ (row as TeachRole).description || '-' }}</td>
                 <td><span class="status-pill">{{ statusText(row.status) }}</span></td>
+                <td v-if="canOperateRole" class="table-actions">
+                  <button
+                    v-if="hasRuntimePermission(roleActionPermission.edit)"
+                    type="button"
+                    class="text-action"
+                    :disabled="loading"
+                    @click="openEditRoleDialog(row as TeachRole)"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="
+                      hasRuntimePermission(
+                        (row as TeachRole).status === 'ACTIVE'
+                          ? roleActionPermission.disable
+                          : roleActionPermission.enable
+                      )
+                    "
+                    type="button"
+                    class="text-action"
+                    :class="{ danger: (row as TeachRole).status === 'ACTIVE' }"
+                    :disabled="loading"
+                    @click="toggleRoleStatus(row as TeachRole)"
+                  >
+                    {{ (row as TeachRole).status === 'ACTIVE' ? '停用' : '启用' }}
+                  </button>
+                </td>
               </template>
               <template v-else-if="section === 'orgs'">
                 <td>{{ (row as TeachOrg).orgCode }}</td>
@@ -1277,19 +1607,80 @@ function fillDictForm(item: SysDictItem) {
                 <td>{{ (row as TeachOrg).orgType }}</td>
                 <td>{{ (row as TeachOrg).parentId ? orgName((row as TeachOrg).parentId!) : '-' }}</td>
                 <td><span class="status-pill">{{ statusText(row.status) }}</span></td>
+                <td v-if="canOperateOrg" class="table-actions">
+                  <button
+                    v-if="hasRuntimePermission(orgActionPermission.edit)"
+                    type="button"
+                    class="text-action"
+                    :disabled="loading"
+                    @click="openEditOrgDialog(row as TeachOrg)"
+                  >
+                    编辑
+                  </button>
+                  <button
+                    v-if="
+                      hasRuntimePermission(
+                        (row as TeachOrg).status === 'ACTIVE'
+                          ? orgActionPermission.disable
+                          : orgActionPermission.enable
+                      )
+                    "
+                    type="button"
+                    class="text-action"
+                    :class="{ danger: (row as TeachOrg).status === 'ACTIVE' }"
+                    :disabled="loading"
+                    @click="toggleOrgStatus(row as TeachOrg)"
+                  >
+                    {{ (row as TeachOrg).status === 'ACTIVE' ? '停用' : '启用' }}
+                  </button>
+                </td>
               </template>
               <template v-else-if="section === 'userRoles'">
                 <td>{{ userName((row as TeachUserRole).userId) }}</td>
                 <td>{{ roleName((row as TeachUserRole).roleId) }}</td>
                 <td>{{ (row as TeachUserRole).grantSource || '-' }}</td>
                 <td><span class="status-pill">{{ statusText(row.status) }}</span></td>
+                <td v-if="canOperateUserRole" class="table-actions">
+                  <button
+                    v-if="
+                      hasRuntimePermission(
+                        (row as TeachUserRole).status === 'ACTIVE'
+                          ? userRoleActionPermission.disable
+                          : userRoleActionPermission.enable
+                      )
+                    "
+                    type="button"
+                    class="text-action"
+                    :class="{ danger: (row as TeachUserRole).status === 'ACTIVE' }"
+                    :disabled="loading"
+                    @click="toggleUserRoleStatus(row as TeachUserRole)"
+                  >
+                    {{ (row as TeachUserRole).status === 'ACTIVE' ? '停用' : '启用' }}
+                  </button>
+                </td>
               </template>
               <template v-else-if="section === 'userOrgs'">
                 <td>{{ userName((row as TeachUserOrg).userId) }}</td>
                 <td>{{ orgName((row as TeachUserOrg).orgId) }}</td>
                 <td>{{ (row as TeachUserOrg).relationType }}</td>
                 <td><span class="status-pill">{{ statusText(row.status) }}</span></td>
-                <td v-if="showOperationColumn">
+                <td v-if="canOperateUserOrg" class="table-actions">
+                  <button
+                    v-if="
+                      hasRuntimePermission(
+                        (row as TeachUserOrg).status === 'ACTIVE'
+                          ? userOrgActionPermission.disable
+                          : userOrgActionPermission.enable
+                      )
+                    "
+                    type="button"
+                    class="text-action"
+                    :class="{ danger: (row as TeachUserOrg).status === 'ACTIVE' }"
+                    :disabled="loading"
+                    @click="toggleUserOrgStatus(row as TeachUserOrg)"
+                  >
+                    {{ (row as TeachUserOrg).status === 'ACTIVE' ? '停用' : '启用' }}
+                  </button>
                   <button
                     v-if="canRemoveCurrent"
                     type="button"
@@ -1494,7 +1885,7 @@ function fillDictForm(item: SysDictItem) {
           <template v-if="section === 'users'">
             <label>
               <span>登录账号</span>
-              <input v-model="userForm.username" type="text" />
+              <input v-model="userForm.username" type="text" :disabled="Boolean(editingUserId)" />
             </label>
             <label>
               <span>用户姓名</span>
@@ -1516,7 +1907,7 @@ function fillDictForm(item: SysDictItem) {
                 <option value="SYNC">外部同步</option>
               </select>
             </label>
-            <label>
+            <label v-if="!editingUserId">
               <span>初始密码</span>
               <input v-model="userForm.initialPassword" type="password" />
             </label>
@@ -1541,7 +1932,7 @@ function fillDictForm(item: SysDictItem) {
           <template v-else-if="section === 'roles'">
             <label>
               <span>角色编码</span>
-              <input v-model="roleForm.roleCode" type="text" />
+              <input v-model="roleForm.roleCode" type="text" :disabled="Boolean(editingRoleId)" />
             </label>
             <label>
               <span>角色名称</span>
@@ -1556,7 +1947,7 @@ function fillDictForm(item: SysDictItem) {
           <template v-else-if="section === 'orgs'">
             <label>
               <span>单位编码</span>
-              <input v-model="orgForm.orgCode" type="text" />
+              <input v-model="orgForm.orgCode" type="text" :disabled="Boolean(editingOrgId)" />
             </label>
             <label>
               <span>单位名称</span>

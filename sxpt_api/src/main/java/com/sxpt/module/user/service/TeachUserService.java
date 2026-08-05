@@ -26,6 +26,25 @@ public interface TeachUserService {
     TeachUser createTeachUser(TeachUser teachUser);
 
     /**
+     * 更新教学平台用户基础信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param teachUser 用户实体，必须包含 ID 和可编辑字段。
+     * @return 已更新的用户实体。
+     */
+    TeachUser updateTeachUser(String tenantId, TeachUser teachUser);
+
+    /**
+     * 切换教学平台用户启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的用户实体。
+     */
+    TeachUser updateTeachUserStatus(String tenantId, String id, String status);
+
+    /**
      * 查询租户下的教学平台用户列表。
      *
      * 业务功能：为后台基础配置页面提供用户可视化维护入口，避免管理员只能通过初始化脚本确认老师、学生和管理员账号。

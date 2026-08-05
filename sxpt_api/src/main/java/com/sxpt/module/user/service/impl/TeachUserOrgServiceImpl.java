@@ -85,6 +85,25 @@ public class TeachUserOrgServiceImpl implements TeachUserOrgService {
     }
 
     /**
+     * 切换用户单位绑定关系启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户单位关系 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的用户单位关系实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachUserOrg updateUserOrgStatus(String tenantId, String id, String status) {
+        requireSupportedStatus(status);
+        TeachUserOrg existing = getExistingUserOrg(tenantId, id);
+        existing.setStatus(status);
+        existing.setUpdateTime(LocalDateTime.now());
+        teachUserOrgMapper.updateById(existing);
+        return existing;
+    }
+
+    /**
      * 查询租户下的用户教学组织关系列表。
      *
      * 业务功能：支撑管理端查看用户与班级、课程班、分组的绑定关系，保证任务发布和数据准备学生范围可追溯。
@@ -116,6 +135,38 @@ public class TeachUserOrgServiceImpl implements TeachUserOrgService {
         requireText(teachUserOrg.getUserId());
         requireText(teachUserOrg.getOrgId());
         requireText(teachUserOrg.getRelationType());
+    }
+
+    /**
+     * 按租户和关系 ID 读取未删除单位绑定，避免跨租户维护关系。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户单位关系 ID。
+     * @return 未删除用户单位关系实体。
+     */
+    private TeachUserOrg getExistingUserOrg(String tenantId, String id) {
+        requireText(tenantId);
+        requireText(id);
+        TeachUserOrg existing = teachUserOrgMapper.selectOne(new QueryWrapper<TeachUserOrg>()
+                .eq("tenant_id", tenantId)
+                .eq("id", id)
+                .eq("deleted", Boolean.FALSE));
+        if (existing == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return existing;
+    }
+
+    /**
+     * 限制用户单位关系只允许启用和停用两种状态。
+     *
+     * @param status 目标状态。
+     */
+    private void requireSupportedStatus(String status) {
+        requireText(status);
+        if (!DEFAULT_STATUS.equals(status) && !DISABLED_STATUS.equals(status)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
     }
 
     /**

@@ -72,6 +72,22 @@ describe('运行时上下文 Store', () => {
     expect(store.hasPermission('system:unknown:operate')).toBe(true);
   });
 
+  it('兼容种子数据中的小写超级管理员角色编码', async () => {
+    const store = createRuntimeContextStore({
+      listCurrentUserContext: vi.fn(async () =>
+        createContext({
+          roles: [{ id: 'role-1', roleCode: 'admin', roleName: '管理员' }],
+          permissions: []
+        })
+      )
+    });
+
+    await store.loadRuntimeContext();
+
+    expect(store.isSuperAdmin()).toBe(true);
+    expect(store.hasPermission('system:user:create')).toBe(true);
+  });
+
   it('普通角色按权限码判断操作入口', async () => {
     const store = createRuntimeContextStore({
       listCurrentUserContext: vi.fn(async () =>

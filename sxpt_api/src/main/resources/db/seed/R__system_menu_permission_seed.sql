@@ -274,6 +274,64 @@ DO UPDATE SET
     update_time = now(),
     status = 'ACTIVE';
 
+INSERT INTO sys_permission_config (
+    id, tenant_id, permission_code, permission_name, resource_type,
+    resource_code, action_code, description,
+    create_by, create_time, update_by, update_time, status, deleted
+) VALUES
+    ('perm-system-user-create', 'demo-tenant', 'system:user:create', '用户新增', 'BUTTON', 'system-user', 'CREATE', '允许新增教学平台用户。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-view', 'demo-tenant', 'system:user:view', '用户查看', 'BUTTON', 'system-user', 'VIEW', '允许查看用户详情。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-edit', 'demo-tenant', 'system:user:edit', '用户编辑', 'BUTTON', 'system-user', 'EDIT', '允许编辑教学平台用户。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-enable', 'demo-tenant', 'system:user:enable', '用户启用', 'BUTTON', 'system-user', 'ENABLE', '允许启用教学平台用户。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-disable', 'demo-tenant', 'system:user:disable', '用户停用', 'BUTTON', 'system-user', 'DISABLE', '允许停用教学平台用户。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-create', 'demo-tenant', 'system:role:create', '角色新增', 'BUTTON', 'system-role', 'CREATE', '允许新增教学平台角色。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-view', 'demo-tenant', 'system:role:view', '角色查看', 'BUTTON', 'system-role', 'VIEW', '允许查看角色详情。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-edit', 'demo-tenant', 'system:role:edit', '角色编辑', 'BUTTON', 'system-role', 'EDIT', '允许编辑教学平台角色。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-enable', 'demo-tenant', 'system:role:enable', '角色启用', 'BUTTON', 'system-role', 'ENABLE', '允许启用教学平台角色。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-disable', 'demo-tenant', 'system:role:disable', '角色停用', 'BUTTON', 'system-role', 'DISABLE', '允许停用教学平台角色。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-org-create', 'demo-tenant', 'system:org:create', '单位新增', 'BUTTON', 'system-org', 'CREATE', '允许新增教学平台单位。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-org-view', 'demo-tenant', 'system:org:view', '单位查看', 'BUTTON', 'system-org', 'VIEW', '允许查看单位详情。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-org-edit', 'demo-tenant', 'system:org:edit', '单位编辑', 'BUTTON', 'system-org', 'EDIT', '允许编辑教学平台单位。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-org-enable', 'demo-tenant', 'system:org:enable', '单位启用', 'BUTTON', 'system-org', 'ENABLE', '允许启用教学平台单位。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-org-disable', 'demo-tenant', 'system:org:disable', '单位停用', 'BUTTON', 'system-org', 'DISABLE', '允许停用教学平台单位。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-role-grant', 'demo-tenant', 'system:user-role:grant', '用户角色绑定', 'BUTTON', 'system-user-role', 'GRANT', '允许绑定用户角色。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-role-view', 'demo-tenant', 'system:user-role:view', '用户角色查看', 'BUTTON', 'system-user-role', 'VIEW', '允许查看用户角色绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-role-enable', 'demo-tenant', 'system:user-role:enable', '用户角色启用', 'BUTTON', 'system-user-role', 'ENABLE', '允许启用用户角色绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-role-disable', 'demo-tenant', 'system:user-role:disable', '用户角色停用', 'BUTTON', 'system-user-role', 'DISABLE', '允许停用用户角色绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-role-remove', 'demo-tenant', 'system:user-role:remove', '用户角色移除', 'BUTTON', 'system-user-role', 'REMOVE', '允许移除用户角色绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-org-grant', 'demo-tenant', 'system:user-org:grant', '用户单位绑定', 'BUTTON', 'system-user-org', 'GRANT', '允许绑定用户单位。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-org-view', 'demo-tenant', 'system:user-org:view', '用户单位查看', 'BUTTON', 'system-user-org', 'VIEW', '允许查看用户单位绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-user-org-remove', 'demo-tenant', 'system:user-org:remove', '用户单位移除', 'BUTTON', 'system-user-org', 'REMOVE', '允许移除用户单位绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-menu-create', 'demo-tenant', 'system:menu:create', '菜单新增', 'BUTTON', 'system-menu', 'CREATE', '允许新增菜单配置。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-menu-view', 'demo-tenant', 'system:menu:view', '菜单查看', 'BUTTON', 'system-menu', 'VIEW', '允许查看菜单详情。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-menu-edit', 'demo-tenant', 'system:menu:edit', '菜单编辑', 'BUTTON', 'system-menu', 'EDIT', '允许编辑菜单配置。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-menu-enable', 'demo-tenant', 'system:menu:enable', '菜单启用', 'BUTTON', 'system-menu', 'ENABLE', '允许启用菜单配置。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-menu-disable', 'demo-tenant', 'system:menu:disable', '菜单停用', 'BUTTON', 'system-menu', 'DISABLE', '允许停用菜单配置。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-permission-create', 'demo-tenant', 'system:permission:create', '权限新增', 'BUTTON', 'system-permission', 'CREATE', '允许新增权限点。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-permission-view', 'demo-tenant', 'system:permission:view', '权限查看', 'BUTTON', 'system-permission', 'VIEW', '允许查看权限点详情。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-permission-edit', 'demo-tenant', 'system:permission:edit', '权限编辑', 'BUTTON', 'system-permission', 'EDIT', '允许编辑权限点。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-permission-enable', 'demo-tenant', 'system:permission:enable', '权限启用', 'BUTTON', 'system-permission', 'ENABLE', '允许启用权限点。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-permission-disable', 'demo-tenant', 'system:permission:disable', '权限停用', 'BUTTON', 'system-permission', 'DISABLE', '允许停用权限点。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-permission-grant', 'demo-tenant', 'system:role-permission:grant', '角色权限绑定', 'BUTTON', 'system-role-permission', 'GRANT', '允许绑定角色权限。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-permission-view', 'demo-tenant', 'system:role-permission:view', '角色权限查看', 'BUTTON', 'system-role-permission', 'VIEW', '允许查看角色权限绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-permission-enable', 'demo-tenant', 'system:role-permission:enable', '角色权限启用', 'BUTTON', 'system-role-permission', 'ENABLE', '允许启用角色权限绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-role-permission-disable', 'demo-tenant', 'system:role-permission:disable', '角色权限停用', 'BUTTON', 'system-role-permission', 'DISABLE', '允许停用角色权限绑定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-dict-create', 'demo-tenant', 'system:dict:create', '字典新增', 'BUTTON', 'system-dict', 'CREATE', '允许新增字典项。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-dict-view', 'demo-tenant', 'system:dict:view', '字典查看', 'BUTTON', 'system-dict', 'VIEW', '允许查看字典项详情。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-dict-edit', 'demo-tenant', 'system:dict:edit', '字典编辑', 'BUTTON', 'system-dict', 'EDIT', '允许编辑字典项。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-dict-enable', 'demo-tenant', 'system:dict:enable', '字典启用', 'BUTTON', 'system-dict', 'ENABLE', '允许启用字典项。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('perm-system-dict-disable', 'demo-tenant', 'system:dict:disable', '字典停用', 'BUTTON', 'system-dict', 'DISABLE', '允许停用字典项。', 'seed', now(), 'seed', now(), 'ACTIVE', false)
+ON CONFLICT (tenant_id, permission_code) WHERE deleted = false
+DO UPDATE SET
+    permission_name = EXCLUDED.permission_name,
+    resource_type = EXCLUDED.resource_type,
+    resource_code = EXCLUDED.resource_code,
+    action_code = EXCLUDED.action_code,
+    description = EXCLUDED.description,
+    update_by = 'seed',
+    update_time = now(),
+    status = 'ACTIVE';
+
 WITH admin_permissions AS (
     SELECT
         'srp-admin-' || permission.resource_code AS id,

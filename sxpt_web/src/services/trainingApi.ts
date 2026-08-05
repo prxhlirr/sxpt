@@ -170,6 +170,18 @@ export interface OriginRole {
   updateTime?: string;
 }
 
+export interface OriginRoleRequest {
+  tenantId: string;
+  connectorSystemId: string;
+  roleCode: string;
+  roleName: string;
+  externalRoleId?: string;
+  roleType?: string;
+  remark?: string;
+  createBy?: string;
+  updateBy?: string;
+}
+
 export interface OriginOrg {
   id: string;
   tenantId: string;
@@ -183,6 +195,19 @@ export interface OriginOrg {
   status?: string;
   createTime?: string;
   updateTime?: string;
+}
+
+export interface OriginOrgRequest {
+  tenantId: string;
+  connectorSystemId: string;
+  orgCode: string;
+  orgName: string;
+  externalOrgId?: string;
+  parentExternalOrgId?: string;
+  orgType?: string;
+  remark?: string;
+  createBy?: string;
+  updateBy?: string;
 }
 
 export interface TeachingDataTemplate {
@@ -975,6 +1000,37 @@ export const dataPrepareApi = {
     );
   },
 
+  async createOriginRole(request: OriginRoleRequest): Promise<OriginRole> {
+    return requestApi<OriginRole>('api/v1/connector/origin-roles/create', {
+      method: 'POST',
+      body: JSON.stringify(request)
+    });
+  },
+
+  async updateOriginRole(id: string, request: OriginRoleRequest): Promise<OriginRole> {
+    return requestApi<OriginRole>(
+      `api/v1/connector/origin-roles/${encodeURIComponent(id)}/update`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async enableOriginRole(id: string): Promise<OriginRole> {
+    return requestApi<OriginRole>(
+      `api/v1/connector/origin-roles/${encodeURIComponent(id)}/enable`,
+      { method: 'POST' }
+    );
+  },
+
+  async disableOriginRole(id: string): Promise<OriginRole> {
+    return requestApi<OriginRole>(
+      `api/v1/connector/origin-roles/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' }
+    );
+  },
+
   async listOriginOrgs(params: {
     tenantId: string;
     connectorSystemId: string;
@@ -986,6 +1042,37 @@ export const dataPrepareApi = {
         connectorSystemId: params.connectorSystemId,
         activeOnly: String(Boolean(params.activeOnly))
       })}`
+    );
+  },
+
+  async createOriginOrg(request: OriginOrgRequest): Promise<OriginOrg> {
+    return requestApi<OriginOrg>('api/v1/connector/origin-orgs/create', {
+      method: 'POST',
+      body: JSON.stringify(request)
+    });
+  },
+
+  async updateOriginOrg(id: string, request: OriginOrgRequest): Promise<OriginOrg> {
+    return requestApi<OriginOrg>(
+      `api/v1/connector/origin-orgs/${encodeURIComponent(id)}/update`,
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async enableOriginOrg(id: string): Promise<OriginOrg> {
+    return requestApi<OriginOrg>(
+      `api/v1/connector/origin-orgs/${encodeURIComponent(id)}/enable`,
+      { method: 'POST' }
+    );
+  },
+
+  async disableOriginOrg(id: string): Promise<OriginOrg> {
+    return requestApi<OriginOrg>(
+      `api/v1/connector/origin-orgs/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' }
     );
   },
 

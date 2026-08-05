@@ -24,6 +24,8 @@ const moduleFilter = ref('ALL');
 const feedback = ref('');
 const feedbackTone = ref<'success' | 'danger'>('success');
 const publishingLessonId = ref('');
+const creatingLesson = ref(false);
+const duplicatingLessonId = ref('');
 const activeActionsLessonId = ref('');
 const actionsMenu = ref<HTMLElement | null>(null);
 const actionsMenuTriggers = new Map<string, HTMLElement>();
@@ -246,6 +248,7 @@ function closeCreateDialog() {
 }
 
 async function createLesson() {
+  if (creatingLesson.value) return;
   if (
     !createForm.code.trim() ||
     !createForm.title.trim() ||
@@ -256,8 +259,9 @@ async function createLesson() {
     feedback.value = '请填写教案编号和名称，并选择业务平台及平台模块。';
     return;
   }
+  creatingLesson.value = true;
   try {
-    const lesson = store.createLesson({
+    const lesson = await store.createLessonRemote({
       code: createForm.code.trim(),
       title: createForm.title.trim(),
       moduleName: selectedCreateModule.value?.name,
@@ -270,17 +274,23 @@ async function createLesson() {
   } catch (error) {
     feedbackTone.value = 'danger';
     feedback.value = error instanceof Error ? error.message : '教案创建失败';
+  } finally {
+    creatingLesson.value = false;
   }
 }
 
-function duplicateLesson(lesson: LessonPlan) {
+async function duplicateLesson(lesson: LessonPlan) {
+  if (duplicatingLessonId.value) return;
+  duplicatingLessonId.value = lesson.id;
   try {
-    const copied = store.duplicateLesson(lesson.id);
+    const copied = await store.duplicateLessonRemote(lesson.id);
     feedbackTone.value = 'success';
     feedback.value = `已复制“${lesson.title}”，新教案为“${copied.title}”。`;
   } catch (error) {
     feedbackTone.value = 'danger';
     feedback.value = error instanceof Error ? error.message : '复制失败';
+  } finally {
+    duplicatingLessonId.value = '';
   }
 }
 
@@ -435,7 +445,14 @@ async function publishLesson(lesson: LessonPlan) {
                     业务配置
                     <span aria-hidden="true">⌄</span>
                   </button>
-                  <button class="compact" type="button" @click="duplicateLesson(lesson)">复制</button>
+                  <button
+                    class="compact"
+                    type="button"
+                    :disabled="Boolean(duplicatingLessonId)"
+                    @click="duplicateLesson(lesson)"
+                  >
+                    {{ duplicatingLessonId === lesson.id ? '保存中...' : '复制' }}
+                  </button>
                   <button
                     class="primary compact"
                     type="button"
@@ -599,8 +616,10 @@ async function publishLesson(lesson: LessonPlan) {
           </div>
         </div>
         <div class="dialog-footer">
-          <button type="button" @click="closeCreateDialog">取消</button>
-          <button class="primary" type="submit">创建并开始编排</button>
+          <button type="button" :disabled="creatingLesson" @click="closeCreateDialog">取消</button>
+          <button class="primary" type="submit" :disabled="creatingLesson">
+            {{ creatingLesson ? '正在保存...' : '创建并开始编排' }}
+          </button>
         </div>
       </form>
     </dialog>

@@ -94,6 +94,48 @@ class TeachRoleServiceImplTests {
     }
 
     /**
+     * 校验编辑角色时只更新名称和说明，不修改角色编码。
+     */
+    @Test
+    void updateTeachRoleShouldKeepRoleCodeStable() {
+        TeachRoleMapper mapper = mock(TeachRoleMapper.class);
+        TeachRoleServiceImpl service = new TeachRoleServiceImpl(mapper);
+        TeachRole existing = buildValidTeachRole();
+        when(mapper.selectOne(any())).thenReturn(existing);
+        TeachRole update = new TeachRole();
+        update.setId("role_001");
+        update.setRoleName("实训教师");
+        update.setDescription("负责实训任务");
+
+        TeachRole saved = service.updateTeachRole("tenant_001", update);
+
+        assertEquals("TEACHER", saved.getRoleCode());
+        assertEquals("实训教师", saved.getRoleName());
+        assertEquals("负责实训任务", saved.getDescription());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
+    }
+
+    /**
+     * 校验角色状态切换会写回目标状态。
+     */
+    @Test
+    void updateTeachRoleStatusShouldUpdateExistingRole() {
+        TeachRoleMapper mapper = mock(TeachRoleMapper.class);
+        TeachRoleServiceImpl service = new TeachRoleServiceImpl(mapper);
+        TeachRole existing = buildValidTeachRole();
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        TeachRole saved = service.updateTeachRoleStatus("tenant_001", "role_001", "DISABLED");
+
+        assertEquals("DISABLED", saved.getStatus());
+        assertNotNull(saved.getUpdateTime());
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
+    }
+
+    /**
      * 构造最小有效教学平台角色。
      *
      * @return 教学平台角色实体。

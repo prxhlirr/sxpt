@@ -13,12 +13,15 @@ import {
   type BusinessModuleRequest,
   type ConnectorSystem,
   type OriginOrg,
-  type OriginRole
+  type OriginOrgRequest,
+  type OriginRole,
+  type OriginRoleRequest
 } from '../../services/trainingApi';
 
 type ModuleDialogMode = 'none' | 'detail' | 'create' | 'edit';
 type ChainDialogMode = 'none' | 'step-create' | 'step-edit' | 'actor-create' | 'actor-edit';
-type ModuleDetailTab = 'info' | 'chain';
+type ModuleDetailTab = 'info' | 'chain' | 'dictionary';
+type OriginDictionaryMode = 'none' | 'org-create' | 'org-edit' | 'role-create' | 'role-edit';
 
 const PAGE_SIZE = 10;
 
@@ -38,6 +41,9 @@ const selectedActor = ref<BusinessModuleProcessActor | null>(null);
 const dialogMode = ref<ModuleDialogMode>('none');
 const detailTab = ref<ModuleDetailTab>('info');
 const chainDialogMode = ref<ChainDialogMode>('none');
+const originDictionaryMode = ref<OriginDictionaryMode>('none');
+const selectedOriginOrg = ref<OriginOrg | null>(null);
+const selectedOriginRole = ref<OriginRole | null>(null);
 const loading = ref(false);
 const currentPage = ref(1);
 const notice = ref({
@@ -86,6 +92,27 @@ const actorForm = reactive<BusinessModuleProcessActorRequest>({
   remark: ''
 });
 
+const originOrgForm = reactive<OriginOrgRequest>({
+  tenantId: '',
+  connectorSystemId: '',
+  orgCode: '',
+  orgName: '',
+  externalOrgId: '',
+  parentExternalOrgId: '',
+  orgType: 'DEPT',
+  remark: ''
+});
+
+const originRoleForm = reactive<OriginRoleRequest>({
+  tenantId: '',
+  connectorSystemId: '',
+  roleCode: '',
+  roleName: '',
+  externalRoleId: '',
+  roleType: 'PROCESS_ROLE',
+  remark: ''
+});
+
 function getDefaultModuleForm(): BusinessModuleRequest {
   const stamp = Date.now();
   return {
@@ -129,6 +156,15 @@ const pagedModules = computed(() => {
 
 const isDialogOpen = computed(() => dialogMode.value !== 'none');
 const isChainDialogOpen = computed(() => chainDialogMode.value !== 'none');
+const currentConnectorSystemId = computed(
+  () => selectedModule.value?.connectorSystemId || connectorSystemId.value
+);
+const isOriginOrgFormOpen = computed(
+  () => originDictionaryMode.value === 'org-create' || originDictionaryMode.value === 'org-edit'
+);
+const isOriginRoleFormOpen = computed(
+  () => originDictionaryMode.value === 'role-create' || originDictionaryMode.value === 'role-edit'
+);
 const moduleEnableChecklist = computed(() => {
   const activeSteps = processSteps.value.filter((step) => step.status === 'ACTIVE');
   const activeActors = processActors.value.filter((actor) => actor.status === 'ACTIVE');
@@ -306,8 +342,12 @@ async function loadProcessActors(step: BusinessModuleProcessStep | null) {
   });
 }
 
-async function loadOriginDictionaries() {
-  const systemId = selectedModule.value?.connectorSystemId || connectorSystemId.value;
+/**
+ * 业务功能：加载当前原平台下的原平台单位和角色字典。
+ * 关键流程：参与方下拉只使用启用字典；维护页签需要展示全部字典，方便管理员重新启用停用项。
+ */
+async function loadOriginDictionaries(activeOnly = true) {
+  const systemId = currentConnectorSystemId.value;
   if (!systemId) {
     originRoles.value = [];
     originOrgs.value = [];
@@ -317,16 +357,163 @@ async function loadOriginDictionaries() {
     dataPrepareApi.listOriginRoles({
       tenantId: tenantId.value,
       connectorSystemId: systemId,
-      activeOnly: true
+      activeOnly
     }),
     dataPrepareApi.listOriginOrgs({
       tenantId: tenantId.value,
       connectorSystemId: systemId,
-      activeOnly: true
+      activeOnly
     })
   ]);
   originRoles.value = roles;
   originOrgs.value = orgs;
+}
+
+/**
+ * 业务功能：进入原平台单位/角色字典维护页签。
+ * 关键流程：基于当前业务模块所属原平台加载全量字典，保证新增后参与方下拉可直接复用同一数据源。
+ */
+async function openOriginDictionaryTab() {
+  detailTab.value = 'dictionary';
+  closeOriginDictionaryForm();
+  await run(() => loadOriginDictionaries(false), '原平台字典已加载');
+}
+
+/**
+ * 业务功能：打开原平台单位新增表单。
+ * 关键流程：预置当前原平台系统边界，避免管理员把单位维护到错误系统下。
+ */
+function openCreateOriginOrgForm() {
+  fillOriginOrgForm({
+    tenantId: tenantId.value,
+    connectorSystemId: currentConnectorSystemId.value,
+    orgCode: '',
+    orgName: '',
+    externalOrgId: '',
+    parentExternalOrgId: '',
+    orgType: 'DEPT',
+    remark: ''
+  });
+  selectedOriginOrg.value = null;
+  originDictionaryMode.value = 'org-create';
+}
+
+/**
+ * 业务功能：打开原平台单位编辑表单。
+ * 关键流程：编码只用于定位已有原平台单位，编辑时保留编码稳定。
+ */
+function openEditOriginOrgForm(org: OriginOrg) {
+  fillOriginOrgForm(org);
+  selectedOriginOrg.value = org;
+  originDictionaryMode.value = 'org-edit';
+}
+
+/**
+ * 业务功能：保存原平台单位字典。
+ * 关键流程：创建和更新都写入当前原平台系统，保存后重载全量字典供列表和参与方弹窗同步使用。
+ */
+async function saveOriginOrg() {
+  if (!originOrgForm.orgCode.trim()) {
+    notify('error', '请填写原平台单位编码');
+    return;
+  }
+  if (!originOrgForm.orgName.trim()) {
+    notify('error', '请填写原平台单位名称');
+    return;
+  }
+  await run(async () => {
+    const request = buildOriginOrgRequest();
+    if (originDictionaryMode.value === 'org-edit' && selectedOriginOrg.value) {
+      await dataPrepareApi.updateOriginOrg(selectedOriginOrg.value.id, request);
+    } else {
+      await dataPrepareApi.createOriginOrg(request);
+    }
+    closeOriginDictionaryForm();
+    await loadOriginDictionaries(false);
+  }, originDictionaryMode.value === 'org-edit' ? '原平台单位已更新' : '原平台单位已新增');
+}
+
+/**
+ * 业务功能：启用或停用原平台单位字典。
+ * 关键流程：停用后参与方下拉不再可选，但维护页签仍展示以便追溯和恢复。
+ */
+async function toggleOriginOrgStatus(org: OriginOrg) {
+  await run(async () => {
+    if (org.status === 'ACTIVE') {
+      await dataPrepareApi.disableOriginOrg(org.id);
+    } else {
+      await dataPrepareApi.enableOriginOrg(org.id);
+    }
+    await loadOriginDictionaries(false);
+  }, org.status === 'ACTIVE' ? '原平台单位已停用' : '原平台单位已启用');
+}
+
+/**
+ * 业务功能：打开原平台角色新增表单。
+ * 关键流程：预置当前原平台系统边界，新增角色保存后即可被步骤参与方选择。
+ */
+function openCreateOriginRoleForm() {
+  fillOriginRoleForm({
+    tenantId: tenantId.value,
+    connectorSystemId: currentConnectorSystemId.value,
+    roleCode: '',
+    roleName: '',
+    externalRoleId: '',
+    roleType: 'PROCESS_ROLE',
+    remark: ''
+  });
+  selectedOriginRole.value = null;
+  originDictionaryMode.value = 'role-create';
+}
+
+/**
+ * 业务功能：打开原平台角色编辑表单。
+ * 关键流程：角色编码编辑时保持稳定，避免已配置参与方失去映射。
+ */
+function openEditOriginRoleForm(role: OriginRole) {
+  fillOriginRoleForm(role);
+  selectedOriginRole.value = role;
+  originDictionaryMode.value = 'role-edit';
+}
+
+/**
+ * 业务功能：保存原平台角色字典。
+ * 关键流程：创建和更新都写入当前原平台系统，保存后重载全量字典供列表和参与方弹窗同步使用。
+ */
+async function saveOriginRole() {
+  if (!originRoleForm.roleCode.trim()) {
+    notify('error', '请填写原平台角色编码');
+    return;
+  }
+  if (!originRoleForm.roleName.trim()) {
+    notify('error', '请填写原平台角色名称');
+    return;
+  }
+  await run(async () => {
+    const request = buildOriginRoleRequest();
+    if (originDictionaryMode.value === 'role-edit' && selectedOriginRole.value) {
+      await dataPrepareApi.updateOriginRole(selectedOriginRole.value.id, request);
+    } else {
+      await dataPrepareApi.createOriginRole(request);
+    }
+    closeOriginDictionaryForm();
+    await loadOriginDictionaries(false);
+  }, originDictionaryMode.value === 'role-edit' ? '原平台角色已更新' : '原平台角色已新增');
+}
+
+/**
+ * 业务功能：启用或停用原平台角色字典。
+ * 关键流程：停用后参与方下拉不再可选，但维护页签仍展示以便追溯和恢复。
+ */
+async function toggleOriginRoleStatus(role: OriginRole) {
+  await run(async () => {
+    if (role.status === 'ACTIVE') {
+      await dataPrepareApi.disableOriginRole(role.id);
+    } else {
+      await dataPrepareApi.enableOriginRole(role.id);
+    }
+    await loadOriginDictionaries(false);
+  }, role.status === 'ACTIVE' ? '原平台角色已停用' : '原平台角色已启用');
 }
 
 function openCreateStepDialog() {
@@ -602,6 +789,27 @@ function fillActorForm(actor: BusinessModuleProcessActorRequest) {
   actorForm.remark = actor.remark || '';
 }
 
+function fillOriginOrgForm(org: OriginOrgRequest) {
+  originOrgForm.tenantId = org.tenantId || tenantId.value;
+  originOrgForm.connectorSystemId = org.connectorSystemId || currentConnectorSystemId.value;
+  originOrgForm.orgCode = org.orgCode || '';
+  originOrgForm.orgName = org.orgName || '';
+  originOrgForm.externalOrgId = org.externalOrgId || '';
+  originOrgForm.parentExternalOrgId = org.parentExternalOrgId || '';
+  originOrgForm.orgType = org.orgType || 'DEPT';
+  originOrgForm.remark = org.remark || '';
+}
+
+function fillOriginRoleForm(role: OriginRoleRequest) {
+  originRoleForm.tenantId = role.tenantId || tenantId.value;
+  originRoleForm.connectorSystemId = role.connectorSystemId || currentConnectorSystemId.value;
+  originRoleForm.roleCode = role.roleCode || '';
+  originRoleForm.roleName = role.roleName || '';
+  originRoleForm.externalRoleId = role.externalRoleId || '';
+  originRoleForm.roleType = role.roleType || 'PROCESS_ROLE';
+  originRoleForm.remark = role.remark || '';
+}
+
 function handleOriginOrgChange() {
   const org = originOrgs.value.find((item) => item.orgCode === actorForm.requiredOrgCode);
   actorForm.requiredOrgName = org?.orgName || '';
@@ -652,21 +860,59 @@ function buildActorRequest(): BusinessModuleProcessActorRequest {
   };
 }
 
+function buildOriginOrgRequest(): OriginOrgRequest {
+  return {
+    tenantId: tenantId.value,
+    connectorSystemId: currentConnectorSystemId.value,
+    orgCode: originOrgForm.orgCode.trim(),
+    orgName: originOrgForm.orgName.trim(),
+    externalOrgId: originOrgForm.externalOrgId?.trim() || undefined,
+    parentExternalOrgId: originOrgForm.parentExternalOrgId?.trim() || undefined,
+    orgType: originOrgForm.orgType?.trim() || undefined,
+    remark: originOrgForm.remark?.trim() || undefined,
+    createBy: session?.user.userId || 'admin',
+    updateBy: session?.user.userId || 'admin'
+  };
+}
+
+function buildOriginRoleRequest(): OriginRoleRequest {
+  return {
+    tenantId: tenantId.value,
+    connectorSystemId: currentConnectorSystemId.value,
+    roleCode: originRoleForm.roleCode.trim(),
+    roleName: originRoleForm.roleName.trim(),
+    externalRoleId: originRoleForm.externalRoleId?.trim() || undefined,
+    roleType: originRoleForm.roleType?.trim() || undefined,
+    remark: originRoleForm.remark?.trim() || undefined,
+    createBy: session?.user.userId || 'admin',
+    updateBy: session?.user.userId || 'admin'
+  };
+}
+
 function closeDialog() {
   selectedModule.value = null;
   processSteps.value = [];
   processActors.value = [];
   selectedStep.value = null;
   selectedActor.value = null;
+  selectedOriginOrg.value = null;
+  selectedOriginRole.value = null;
   detailTab.value = 'info';
   dialogMode.value = 'none';
   chainDialogMode.value = 'none';
+  originDictionaryMode.value = 'none';
   closeNotice();
 }
 
 function closeChainDialog() {
   selectedActor.value = null;
   chainDialogMode.value = 'none';
+}
+
+function closeOriginDictionaryForm() {
+  selectedOriginOrg.value = null;
+  selectedOriginRole.value = null;
+  originDictionaryMode.value = 'none';
 }
 
 async function run(action: () => Promise<void>, successMessage: string) {
@@ -862,10 +1108,10 @@ function relationText(value?: string) {
       class="modal-overlay"
       role="presentation"
       @click.self="closeDialog"
-    >
+      >
       <section
         class="edit-dialog"
-        :class="{ 'module-chain-dialog': dialogMode === 'detail' && detailTab === 'chain' }"
+        :class="{ 'module-chain-dialog': dialogMode === 'detail' && detailTab !== 'info' }"
         role="dialog"
         aria-modal="true"
         aria-labelledby="module-dialog-title"
@@ -905,6 +1151,15 @@ function relationText(value?: string) {
               @click="detailTab = 'chain'"
             >
               办理链路
+            </button>
+            <button
+              type="button"
+              :class="{ active: detailTab === 'dictionary' }"
+              role="tab"
+              :aria-selected="detailTab === 'dictionary'"
+              @click="openOriginDictionaryTab"
+            >
+              原平台字典
             </button>
           </div>
 
@@ -1047,6 +1302,192 @@ function relationText(value?: string) {
                   </div>
                 </div>
               </article>
+            </div>
+          </section>
+
+          <section v-if="detailTab === 'dictionary'" class="origin-dictionary">
+            <header class="chain-header">
+              <div>
+                <span>原平台字典</span>
+                <h3>单位与角色映射</h3>
+                <p>这里维护当前原平台系统下可被调用链参与方选择的单位和角色；停用项不会进入参与方下拉。</p>
+              </div>
+            </header>
+
+            <div class="dictionary-layout">
+              <section class="dictionary-section">
+                <header>
+                  <div>
+                    <strong>原平台单位</strong>
+                    <small>{{ originOrgs.length }} 条单位字典</small>
+                  </div>
+                  <button type="button" class="primary-action" @click="openCreateOriginOrgForm">
+                    新增单位
+                  </button>
+                </header>
+
+                <form v-if="isOriginOrgFormOpen" class="dictionary-form" @submit.prevent="saveOriginOrg">
+                  <label>
+                    <span>单位编码 <em>*</em></span>
+                    <input
+                      v-model="originOrgForm.orgCode"
+                      type="text"
+                      :readonly="originDictionaryMode === 'org-edit'"
+                    />
+                  </label>
+                  <label>
+                    <span>单位名称 <em>*</em></span>
+                    <input v-model="originOrgForm.orgName" type="text" />
+                  </label>
+                  <label>
+                    <span>原平台单位 ID</span>
+                    <input v-model="originOrgForm.externalOrgId" type="text" />
+                  </label>
+                  <label>
+                    <span>父级原平台单位 ID</span>
+                    <input v-model="originOrgForm.parentExternalOrgId" type="text" />
+                  </label>
+                  <label>
+                    <span>单位类型</span>
+                    <input v-model="originOrgForm.orgType" type="text" />
+                  </label>
+                  <label>
+                    <span>备注</span>
+                    <input v-model="originOrgForm.remark" type="text" />
+                  </label>
+                  <div class="dictionary-form-actions">
+                    <button type="button" class="secondary-action" @click="closeOriginDictionaryForm">
+                      取消
+                    </button>
+                    <button type="submit" class="primary-action" :disabled="loading">
+                      保存单位
+                    </button>
+                  </div>
+                </form>
+
+                <div v-if="originOrgs.length > 0" class="dictionary-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>单位名称</th>
+                        <th>单位编码</th>
+                        <th>原平台 ID</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="org in originOrgs" :key="org.id">
+                        <td>{{ org.orgName }}</td>
+                        <td>{{ org.orgCode }}</td>
+                        <td>{{ org.externalOrgId || '-' }}</td>
+                        <td>
+                          <span class="status-badge" :class="statusClass(org.status)">
+                            {{ org.status || '未设置' }}
+                          </span>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <button type="button" @click="openEditOriginOrgForm(org)">编辑</button>
+                            <button type="button" @click="toggleOriginOrgStatus(org)">
+                              {{ org.status === 'ACTIVE' ? '停用' : '启用' }}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="chain-empty">
+                  <strong>暂无原平台单位</strong>
+                  <p>先新增单位，步骤参与方下拉才会出现可选单位。</p>
+                </div>
+              </section>
+
+              <section class="dictionary-section">
+                <header>
+                  <div>
+                    <strong>原平台角色</strong>
+                    <small>{{ originRoles.length }} 条角色字典</small>
+                  </div>
+                  <button type="button" class="primary-action" @click="openCreateOriginRoleForm">
+                    新增角色
+                  </button>
+                </header>
+
+                <form v-if="isOriginRoleFormOpen" class="dictionary-form" @submit.prevent="saveOriginRole">
+                  <label>
+                    <span>角色编码 <em>*</em></span>
+                    <input
+                      v-model="originRoleForm.roleCode"
+                      type="text"
+                      :readonly="originDictionaryMode === 'role-edit'"
+                    />
+                  </label>
+                  <label>
+                    <span>角色名称 <em>*</em></span>
+                    <input v-model="originRoleForm.roleName" type="text" />
+                  </label>
+                  <label>
+                    <span>原平台角色 ID</span>
+                    <input v-model="originRoleForm.externalRoleId" type="text" />
+                  </label>
+                  <label>
+                    <span>角色类型</span>
+                    <input v-model="originRoleForm.roleType" type="text" />
+                  </label>
+                  <label class="field-wide">
+                    <span>备注</span>
+                    <input v-model="originRoleForm.remark" type="text" />
+                  </label>
+                  <div class="dictionary-form-actions">
+                    <button type="button" class="secondary-action" @click="closeOriginDictionaryForm">
+                      取消
+                    </button>
+                    <button type="submit" class="primary-action" :disabled="loading">
+                      保存角色
+                    </button>
+                  </div>
+                </form>
+
+                <div v-if="originRoles.length > 0" class="dictionary-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>角色名称</th>
+                        <th>角色编码</th>
+                        <th>原平台 ID</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="role in originRoles" :key="role.id">
+                        <td>{{ role.roleName }}</td>
+                        <td>{{ role.roleCode }}</td>
+                        <td>{{ role.externalRoleId || '-' }}</td>
+                        <td>
+                          <span class="status-badge" :class="statusClass(role.status)">
+                            {{ role.status || '未设置' }}
+                          </span>
+                        </td>
+                        <td>
+                          <div class="row-actions">
+                            <button type="button" @click="openEditOriginRoleForm(role)">编辑</button>
+                            <button type="button" @click="toggleOriginRoleStatus(role)">
+                              {{ role.status === 'ACTIVE' ? '停用' : '启用' }}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div v-else class="chain-empty">
+                  <strong>暂无原平台角色</strong>
+                  <p>先新增角色，步骤参与方下拉才会出现可选角色。</p>
+                </div>
+              </section>
             </div>
           </section>
         </template>
@@ -1751,6 +2192,126 @@ function relationText(value?: string) {
   line-height: 1.6;
 }
 
+.origin-dictionary {
+  margin: 0 22px 22px;
+  border: 1px solid #dbe6f2;
+  border-radius: 8px;
+  background: #f8fbff;
+  overflow: hidden;
+}
+
+.dictionary-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 16px;
+}
+
+.dictionary-section {
+  min-width: 0;
+  border: 1px solid #e5edf7;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.dictionary-section > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf2f7;
+  padding: 14px 16px;
+}
+
+.dictionary-section > header strong,
+.dictionary-section > header small {
+  display: block;
+}
+
+.dictionary-section > header strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.dictionary-section > header small {
+  margin-top: 2px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.dictionary-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-bottom: 1px solid #edf2f7;
+  background: #fbfdff;
+  padding: 14px 16px;
+}
+
+.dictionary-form label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.dictionary-form input {
+  width: 100%;
+  min-height: 38px;
+  box-sizing: border-box;
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+  padding: 0 10px;
+}
+
+.dictionary-form input[readonly] {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.dictionary-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dictionary-table {
+  overflow: auto;
+}
+
+.dictionary-table table {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+}
+
+.dictionary-table th,
+.dictionary-table td {
+  border-bottom: 1px solid #edf2f7;
+  padding: 11px 12px;
+  color: #334155;
+  font-size: 12px;
+  text-align: left;
+}
+
+.dictionary-table th {
+  background: #f8fafc;
+  color: #64748b;
+  font-weight: 900;
+}
+
+.dictionary-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 .modal-overlay-nested {
   z-index: 3200;
   background: rgba(15, 23, 42, 0.34);
@@ -1877,7 +2438,9 @@ function relationText(value?: string) {
   .context-panel,
   .detail-grid,
   .edit-form,
-  .readiness-checklist {
+  .readiness-checklist,
+  .dictionary-layout,
+  .dictionary-form {
     grid-template-columns: 1fr;
   }
 

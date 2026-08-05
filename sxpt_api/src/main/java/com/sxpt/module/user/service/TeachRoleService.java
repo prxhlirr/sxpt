@@ -26,6 +26,25 @@ public interface TeachRoleService {
     TeachRole createTeachRole(TeachRole teachRole);
 
     /**
+     * 更新教学平台角色基础信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param teachRole 角色实体，必须包含 ID 和可编辑字段。
+     * @return 已更新的角色实体。
+     */
+    TeachRole updateTeachRole(String tenantId, TeachRole teachRole);
+
+    /**
+     * 切换教学平台角色启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 角色 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的角色实体。
+     */
+    TeachRole updateTeachRoleStatus(String tenantId, String id, String status);
+
+    /**
      * 查询指定租户下的教学平台角色列表。
      *
      * @param tenantId 租户 ID。

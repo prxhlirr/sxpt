@@ -68,3 +68,5 @@ sxpt_api/src/main/resources/*.properties
 /sxpt_web/.chrome-role-flow-qa/*
 /sxpt_web/.chrome-platform-flow-qa/*
 /sxpt_web/node_modules/*
+
+.codex-runtime/

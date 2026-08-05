@@ -14,6 +14,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
+import javax.validation.constraints.Size;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -55,6 +57,33 @@ public class TeachRoleController {
     }
 
     /**
+     * 更新教学平台角色基础信息。
+     *
+     * @param request 更新教学角色请求。
+     * @return 已更新的教学平台角色。
+     */
+    @PostMapping("/update")
+    public ApiResult<TeachRoleVO> update(@Valid @RequestBody UpdateTeachRoleRequest request) {
+        TeachRole saved = teachRoleService.updateTeachRole(request.getTenantId(), toUpdateEntity(request));
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 更新教学平台角色启停用状态。
+     *
+     * @param request 角色状态切换请求。
+     * @return 已更新状态的教学平台角色。
+     */
+    @PostMapping("/status")
+    public ApiResult<TeachRoleVO> updateStatus(@Valid @RequestBody UpdateTeachRoleStatusRequest request) {
+        TeachRole saved = teachRoleService.updateTeachRoleStatus(
+                request.getTenantId(),
+                request.getId(),
+                request.getStatus());
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
      * 查询教学平台角色列表。
      *
      * @param tenantId 租户 ID。
@@ -87,6 +116,20 @@ public class TeachRoleController {
     }
 
     /**
+     * 将更新请求转换为角色实体。
+     *
+     * @param request 更新教学角色请求。
+     * @return 教学平台角色实体。
+     */
+    private TeachRole toUpdateEntity(UpdateTeachRoleRequest request) {
+        TeachRole teachRole = new TeachRole();
+        teachRole.setId(request.getId());
+        teachRole.setRoleName(request.getRoleName());
+        teachRole.setDescription(request.getDescription());
+        return teachRole;
+    }
+
+    /**
      * 将实体转换为前端返回对象。
      *
      * @param teachRole 教学平台角色实体。
@@ -112,5 +155,52 @@ public class TeachRoleController {
      */
     private String generateId() {
         return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    public static class UpdateTeachRoleRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "角色 ID 不能为空")
+        @Size(max = 64, message = "角色 ID 长度不能超过 64")
+        private String id;
+
+        @NotBlank(message = "角色名称不能为空")
+        @Size(max = 128, message = "角色名称长度不能超过 128")
+        private String roleName;
+
+        @Size(max = 500, message = "角色说明长度不能超过 500")
+        private String description;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getRoleName() { return roleName; }
+        public void setRoleName(String roleName) { this.roleName = roleName; }
+        public String getDescription() { return description; }
+        public void setDescription(String description) { this.description = description; }
+    }
+
+    public static class UpdateTeachRoleStatusRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "角色 ID 不能为空")
+        @Size(max = 64, message = "角色 ID 长度不能超过 64")
+        private String id;
+
+        @NotBlank(message = "状态不能为空")
+        @Size(max = 32, message = "状态长度不能超过 32")
+        private String status;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
+        public String getStatus() { return status; }
+        public void setStatus(String status) { this.status = status; }
     }
 }

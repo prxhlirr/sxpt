@@ -311,9 +311,129 @@
     });
   }
 
+  function copyPickerSnapshotMediaState(source, clone) {
+    var sourceImages = source.querySelectorAll('img');
+    var cloneImages = clone.querySelectorAll('img');
+    Array.prototype.forEach.call(sourceImages, function (image, index) {
+      var cloneImage = cloneImages[index];
+      if (!cloneImage) return;
+      var renderedSource =
+        image.currentSrc ||
+        image.src ||
+        image.getAttribute('data-src') ||
+        image.getAttribute('data-original');
+      if (renderedSource) {
+        cloneImage.setAttribute('src', renderedSource);
+        cloneImage.removeAttribute('srcset');
+      }
+      cloneImage.removeAttribute('crossorigin');
+      cloneImage.setAttribute('loading', 'eager');
+    });
+  }
+
+  function resolveSnapshotResourceUrl(value, baseUrl) {
+    value = String(value || '').trim();
+    if (!value || value.charAt(0) === '#') return '';
+    try {
+      var resolved = new URL(value, baseUrl);
+      return resolved.protocol === 'http:' || resolved.protocol === 'https:'
+        ? resolved.href
+        : '';
+    } catch (error) {
+      return '';
+    }
+  }
+
+  function rebaseSnapshotCssUrls(cssText, baseUrl) {
+    return String(cssText || '')
+      .replace(
+        /url\(\s*(?:(["'])(.*?)\1|([^\s"')][^)]*))\s*\)/gi,
+        function (source, quote, quotedValue, bareValue) {
+          var value = String(quotedValue || bareValue || '').trim();
+          if (/^(?:data:|blob:|https?:|#)/i.test(value)) return source;
+          var resolved = resolveSnapshotResourceUrl(value, baseUrl);
+          if (!resolved) return source;
+          var wrapper = quote || '';
+          return 'url(' + wrapper + resolved + wrapper + ')';
+        }
+      )
+      .replace(/@import\s+(["'])(.*?)\1/gi, function (source, quote, value) {
+        var resolved = resolveSnapshotResourceUrl(value, baseUrl);
+        return resolved ? '@import ' + quote + resolved + quote : source;
+      });
+  }
+
+  function rebaseSnapshotSrcset(value, baseUrl) {
+    value = String(value || '');
+    if (/^\s*(?:data:|blob:)/i.test(value)) return value;
+    return value.split(',').map(function (candidate) {
+      var match = candidate.trim().match(/^(\S+)(\s+.*)?$/);
+      if (!match) return candidate;
+      var resolved = resolveSnapshotResourceUrl(match[1], baseUrl);
+      return resolved ? resolved + (match[2] || '') : candidate.trim();
+    }).join(', ');
+  }
+
+  function rebaseSnapshotMarkupResources(root, baseUrl) {
+    var resourceAttributes = [
+      'src',
+      'poster',
+      'href',
+      'xlink:href',
+      'action',
+      'background'
+    ];
+    var elements = [root].concat(Array.prototype.slice.call(root.querySelectorAll('*')));
+    elements.forEach(function (element) {
+      resourceAttributes.forEach(function (attributeName) {
+        var value = element.getAttribute(attributeName);
+        if (!value || /^(?:data:|blob:|#)/i.test(value.trim())) return;
+        var resolved = resolveSnapshotResourceUrl(value, baseUrl);
+        if (resolved) {
+          element.setAttribute(attributeName, resolved);
+        } else if (/^(?:javascript:|vbscript:)/i.test(value.trim())) {
+          element.removeAttribute(attributeName);
+        }
+      });
+      var srcset = element.getAttribute('srcset');
+      if (srcset) {
+        element.setAttribute('srcset', rebaseSnapshotSrcset(srcset, baseUrl));
+      }
+      var inlineStyle = element.getAttribute('style');
+      if (inlineStyle) {
+        element.setAttribute('style', rebaseSnapshotCssUrls(inlineStyle, baseUrl));
+      }
+    });
+  }
+
+  function collectSnapshotStyles() {
+    var cssParts = [];
+    var styleUrls = [];
+    Array.prototype.forEach.call(document.styleSheets, function (sheet) {
+      var stylesheetBase = sheet.href || document.baseURI;
+      if (sheet.href) {
+        var styleUrl = resolveSnapshotResourceUrl(sheet.href, document.baseURI);
+        if (styleUrl && styleUrls.indexOf(styleUrl) === -1) styleUrls.push(styleUrl);
+      }
+      try {
+        var cssText = Array.prototype.map.call(sheet.cssRules, function (rule) {
+          return rule.cssText;
+        }).join('\n');
+        cssParts.push(rebaseSnapshotCssUrls(cssText, stylesheetBase));
+      } catch (error) {
+        // Cross-origin rules are restored from styleUrls during playback.
+      }
+    });
+    return {
+      cssText: cssParts.join('\n').slice(0, 1500000),
+      styleUrls: styleUrls.slice(0, 64)
+    };
+  }
+
   function createPickerPageSnapshot() {
     var clone = document.body.cloneNode(true);
     copyPickerSnapshotFormState(document.body, clone);
+    copyPickerSnapshotMediaState(document.body, clone);
     clone.querySelectorAll(
       'script,noscript,iframe,object,embed,[data-sxpt-element-picker]'
     ).forEach(function (element) {
@@ -333,23 +453,18 @@
         element.setAttribute('disabled', '');
       }
     });
-    var cssText = Array.prototype.flatMap.call(document.styleSheets, function (sheet) {
-      try {
-        return Array.prototype.map.call(sheet.cssRules, function (rule) {
-          return rule.cssText;
-        });
-      } catch (error) {
-        return [];
-      }
-    }).join('\n').slice(0, 400000);
+    rebaseSnapshotMarkupResources(clone, document.baseURI || window.location.href);
+    clone.classList.add('sxpt-recorded-business-root');
+    var styles = collectSnapshotStyles();
     return {
       version: 1,
       format: 'DOM',
-      pageUrl: getCurrentBusinessUrl(),
+      pageUrl: window.location.href,
       pageTitle: document.title,
       capturedAt: new Date().toISOString(),
       html: clone.outerHTML.slice(0, 700000),
-      cssText: cssText,
+      cssText: styles.cssText,
+      styleUrls: styles.styleUrls,
       viewport: getViewport()
     };
   }
@@ -397,7 +512,8 @@
       stableKey: action,
       pageTitle: document.title,
       inputValueMasked: value === undefined ? undefined : maskValue(value),
-      recordedViewport: getViewport()
+      recordedViewport: getViewport(),
+      pageSnapshot: createPickerPageSnapshot()
     };
     var signature = [
       payload.actionType,

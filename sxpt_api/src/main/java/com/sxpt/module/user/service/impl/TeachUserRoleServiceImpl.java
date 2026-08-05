@@ -32,6 +32,8 @@ public class TeachUserRoleServiceImpl implements TeachUserRoleService {
 
     private static final String DEFAULT_STATUS = "ACTIVE";
 
+    private static final String DISABLED_STATUS = "DISABLED";
+
     private static final String DEFAULT_GRANT_SOURCE = "MANUAL";
 
     private final TeachUserRoleMapper teachUserRoleMapper;
@@ -53,6 +55,25 @@ public class TeachUserRoleServiceImpl implements TeachUserRoleService {
         fillCreateDefaults(teachUserRole);
         teachUserRoleMapper.insert(teachUserRole);
         return teachUserRole;
+    }
+
+    /**
+     * 切换用户角色授权关系启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 授权关系 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的用户角色关系实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachUserRole updateUserRoleStatus(String tenantId, String id, String status) {
+        requireSupportedStatus(status);
+        TeachUserRole existing = getExistingUserRole(tenantId, id);
+        existing.setStatus(status);
+        existing.setUpdateTime(LocalDateTime.now());
+        teachUserRoleMapper.updateById(existing);
+        return existing;
     }
 
     /**
@@ -86,6 +107,38 @@ public class TeachUserRoleServiceImpl implements TeachUserRoleService {
         requireText(teachUserRole.getTenantId());
         requireText(teachUserRole.getUserId());
         requireText(teachUserRole.getRoleId());
+    }
+
+    /**
+     * 按租户和关系 ID 读取未删除授权关系，避免跨租户维护绑定。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 授权关系 ID。
+     * @return 未删除用户角色关系实体。
+     */
+    private TeachUserRole getExistingUserRole(String tenantId, String id) {
+        requireText(tenantId);
+        requireText(id);
+        TeachUserRole existing = teachUserRoleMapper.selectOne(new QueryWrapper<TeachUserRole>()
+                .eq("tenant_id", tenantId)
+                .eq("id", id)
+                .eq("deleted", Boolean.FALSE));
+        if (existing == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return existing;
+    }
+
+    /**
+     * 限制用户角色关系只允许启用和停用两种状态。
+     *
+     * @param status 目标状态。
+     */
+    private void requireSupportedStatus(String status) {
+        requireText(status);
+        if (!DEFAULT_STATUS.equals(status) && !DISABLED_STATUS.equals(status)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
     }
 
     /**

@@ -54,3 +54,8 @@ sxpt:
     # Formal authentication is connected. Demo identities must be enabled
     # explicitly when a developer needs the legacy simulated-login environment.
     enabled: "${SXPT_DEMO_IDENTITY_ENABLED:false}"
+  origin:
+    # local: 使用本地联调 Adapter；http: 按 platform_capability.endpoint_url 调用真实原平台。
+    adapter-mode: "${SXPT_ORIGIN_ADAPTER_MODE:http}"
+    local-adapter:
+      enabled: "${SXPT_ORIGIN_LOCAL_ADAPTER_ENABLED:false}"

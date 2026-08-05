@@ -36,6 +36,16 @@ public interface TeachUserOrgService {
     TeachUserOrg removeUserFromOrg(String tenantId, String orgId, String userId);
 
     /**
+     * 切换用户单位绑定关系启停用状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户单位关系 ID。
+     * @param status 目标状态。
+     * @return 已更新状态的用户单位关系实体。
+     */
+    TeachUserOrg updateUserOrgStatus(String tenantId, String id, String status);
+
+    /**
      * 查询租户下的用户教学组织关系列表。
      *
      * 业务功能：为后台单位绑定页面展示用户所属班级、课程班和分组关系，支撑任务发布范围和数据准备分配范围配置。
