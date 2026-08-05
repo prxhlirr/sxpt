@@ -64,6 +64,29 @@ describe('登录后的平台入口与身份导航', () => {
     expect(api).toContain('window.location.assign(`/login?redirect=');
   });
 
+  it('全局右上角提供演示用户切换并按新身份刷新菜单上下文', () => {
+    const shell = source('src/layouts/AppShell.vue');
+
+    expect(shell).toContain('class="account-switcher"');
+    expect(shell).toContain('usersApi.listUsers');
+    expect(shell).toContain('usersApi.listOrgs');
+    expect(shell).toContain('usersApi.listUserOrgs');
+    expect(shell).toContain('VITE_DEMO_SWITCH_PASSWORD');
+    expect(shell).toContain('authApi.login({');
+    expect(shell).toContain('ref="accountSwitcherRoot"');
+    expect(shell).toContain("document.addEventListener('pointerdown', closeAccountMenuOnOutsideClick)");
+    expect(shell).toContain("document.removeEventListener('pointerdown', closeAccountMenuOnOutsideClick)");
+    expect(shell).toContain('function closeAccountMenuOnOutsideClick(event: PointerEvent)');
+    expect(shell).toContain('accountMenuOpen.value = false');
+    expect(shell).toContain('store.initializeAuthenticatedWorkspace(session)');
+    expect(shell).toContain('runtimeContextStore.resetRuntimeContext()');
+    expect(shell).toContain('runtimeContextStore.loadRuntimeContext({ force: true })');
+    expect(shell).toContain('router.replace(authApi.getHomePath(session))');
+    expect(shell).not.toContain('class="environment-badge"');
+    expect(shell).not.toContain('class="icon-button"');
+    expect(shell).not.toContain('class="today"');
+  });
+
   it('路由按身份拦截后台和各端页面', () => {
     const router = source('src/router.ts');
 
