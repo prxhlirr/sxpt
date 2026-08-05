@@ -91,6 +91,15 @@ describe('后台教案编排页面', () => {
     expect(preview).toContain("'返回发布中心'");
   });
 
+  it('已完成过讲解的教案再次进入时仍可切换教学点和节点', () => {
+    const preview = source('src/views/admin/RecordingPreviewView.vue');
+
+    expect(preview).toContain('@next="move(1)"');
+    expect(preview).toContain('@select-step="selectStep"');
+    expect(preview).toContain('@select-stage="selectTeachingPoint"');
+    expect(preview).not.toContain(':action-disabled="Boolean(lesson.lectureCompletedAt)"');
+  });
+
   it('编排页调用基础信息保存和发布，并提供明显的考试设置入口', () => {
     const editor = source('src/views/admin/LessonEditorView.vue');
 

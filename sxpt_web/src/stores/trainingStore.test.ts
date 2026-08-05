@@ -6,12 +6,15 @@ import type {
   LessonPlan,
   LessonStage,
   StorageLike,
+  TrainingState,
   UnitDataPlan
 } from '../domain/models';
+import type { BackendTrainingApi } from '../services/backendTrainingApi';
 import {
   TRAINING_STORAGE_KEY,
   createMemoryStorage,
-  createTrainingApi
+  createTrainingApi,
+  type AuthSession
 } from '../services/trainingApi';
 import { TrainingValidationError, createTrainingStore } from './trainingStore';
 
@@ -172,6 +175,64 @@ describe('trainingApi repository', () => {
 });
 
 describe('lesson authoring', () => {
+  it('restores persisted lesson data after the same user logs in again', async () => {
+    const session: AuthSession = {
+      token: 'teacher-token',
+      tokenType: 'Bearer',
+      expiresIn: 7200,
+      issuedAt: Date.now(),
+      user: {
+        userId: 'teacher-1',
+        tenantId: 'tenant-1',
+        username: 'teacher01',
+        displayName: '张老师',
+        userType: 'TEACHER',
+        roles: ['TEACHER'],
+        orgIds: ['org-1']
+      }
+    };
+    let persistedState: TrainingState | null = null;
+    const cloneState = (state: TrainingState): TrainingState =>
+      JSON.parse(JSON.stringify(state)) as TrainingState;
+    const workspaceApi = {
+      async load(): Promise<TrainingState | null> {
+        return persistedState ? cloneState(persistedState) : null;
+      },
+      async save(
+        _session: AuthSession,
+        state: TrainingState
+      ): Promise<TrainingState> {
+        persistedState = cloneState(state);
+        return cloneState(state);
+      }
+    };
+    const store = createTrainingStore({
+      storage: createMemoryStorage(),
+      backend: { isEnabled: () => true } as BackendTrainingApi,
+      workspaceApi,
+      now: () => '2026-07-25T08:00:00.000Z',
+      idFactory: (prefix) => `${prefix}-persisted`
+    });
+
+    await store.initializeAuthenticatedWorkspace(session);
+    const lesson = await store.createLessonRemote({
+      code: 'LESSON-REAL-001',
+      title: '真实数据教案'
+    });
+    store.updateLesson(lesson.id, { description: '重新登录后仍需保留' });
+    await store.flushAuthenticatedWorkspace();
+
+    store.clearAuthenticatedWorkspace();
+    await store.initializeAuthenticatedWorkspace(session);
+
+    expect(store.getLesson(lesson.id)).toMatchObject({
+      code: 'LESSON-REAL-001',
+      title: '真实数据教案',
+      description: '重新登录后仍需保留',
+      teacherName: '张老师'
+    });
+  });
+
   it('creates, edits and duplicates a lesson without mutating the source', () => {
     const store = deterministicStore();
     const lesson = editableLesson(store);

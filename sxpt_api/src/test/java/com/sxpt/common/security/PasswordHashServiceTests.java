@@ -4,6 +4,11 @@ import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -75,5 +80,39 @@ class PasswordHashServiceTests {
                 .isInstanceOf(BusinessException.class)
                 .extracting("code")
                 .isEqualTo(ApiResultCode.PARAM_ERROR.getCode());
+    }
+
+    /**
+     * 校验重新执行采购演示种子后，学生开发账号仍可使用约定的初始密码登录。
+     */
+    @Test
+    void studentSeedAccountsShouldHaveUsableInitialPassword() throws IOException {
+        String seed = new String(Files.readAllBytes(Paths.get(
+                "src/main/resources/db/seed/R__origin_purchase_data_prepare_seed.sql"
+        )), StandardCharsets.UTF_8);
+
+        assertThat(seed).contains(
+                "password_hash, password_salt, password_algorithm, password_iterations",
+                "password_status, password_updated_time, failed_login_count, locked_until"
+        );
+        assertThat(seed).doesNotContain("'RESET_REQUIRED'");
+        assertThat(passwordHashService.matches(
+                "Sxpt@123456",
+                "c3hwdC1kZW1vLXN0dS0wMQ==",
+                "llJ2UbNkZ7eybx6JNYbQKIiBCiIk52pbd016Sk+uruE=",
+                PasswordHashService.DEFAULT_ITERATIONS
+        )).isTrue();
+        assertThat(passwordHashService.matches(
+                "Sxpt@123456",
+                "c3hwdC1kZW1vLXN0dS0wMg==",
+                "3r/EpPJwJp6dF+aImPdB8jcX2MNnvBmJMLrqDGFZ82I=",
+                PasswordHashService.DEFAULT_ITERATIONS
+        )).isTrue();
+        assertThat(passwordHashService.matches(
+                "Sxpt@123456",
+                "c3hwdC1kZW1vLXN0dS0wMw==",
+                "nPhM8GYgRRbZSapcQl+wDZ6D/1s8pbHxdDUjBvB3Iww=",
+                PasswordHashService.DEFAULT_ITERATIONS
+        )).isTrue();
     }
 }

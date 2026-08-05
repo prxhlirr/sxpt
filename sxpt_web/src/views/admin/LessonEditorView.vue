@@ -110,6 +110,19 @@ const effectiveBusinessPlatformUrl = computed(() =>
     businessPlatformModule.value?.path ?? ''
   )
 );
+
+function resolveRecordedBusinessUrl(value?: string) {
+  const platformUrl = effectiveBusinessPlatformUrl.value;
+  if (!platformUrl || platformUrl.startsWith('internal://')) {
+    return value || platformUrl;
+  }
+  try {
+    return new URL(value || platformUrl, platformUrl).href;
+  } catch {
+    return platformUrl;
+  }
+}
+
 const useEmbeddedBusinessSimulation = computed(
   () =>
     !effectiveBusinessPlatformUrl.value ||
@@ -121,7 +134,6 @@ const recording = ref(false);
 const controlsCollapsed = ref(false);
 const showStagePanel = ref(false);
 const showConfigPanel = ref(false);
-const previewEnabled = ref(true);
 const panelTab = ref<PanelTab>('stage');
 const pickerToolbarPosition = ref<PickerToolbarPosition>('top-right');
 const feedback = ref('');
@@ -132,7 +144,6 @@ const activityText = ref(
 const workspaceRef = ref<HTMLElement | null>(null);
 const businessLayerRef = ref<HTMLElement | null>(null);
 const captureFrameRef = ref<BusinessCaptureFrameApi | null>(null);
-const highlightStyle = ref<Record<string, string>>({});
 const elementPicking = ref(false);
 const pickTargetStepId = ref('');
 const pickedElementLabel = ref('');
@@ -357,30 +368,8 @@ const captureTargets = computed<Record<TargetKey, CaptureTarget>>(() => {
   };
 });
 
-const highlightClass = computed(() => {
-  const selector = selectedStep.value?.selector ?? '';
-  if (selector.includes('create')) return 'target-create';
-  if (selector.includes('subject')) return 'target-subject';
-  if (selector.includes('category')) return 'target-category';
-  if (selector.includes('counterparty')) return 'target-counterparty';
-  if (selector.includes('amount')) return 'target-amount';
-  if (selector.includes('date')) return 'target-date';
-  if (selector.includes('reason')) return 'target-reason';
-  if (selector.includes('save')) return 'target-save';
-  if (selector.includes('approve') || selector.includes('handle')) return 'target-approve';
-  if (selector.includes('submit')) return 'target-submit';
-  if (selector.includes('archive')) return 'target-submit';
-  return `target-generic-${Math.max(0, selectedStepIndex.value % 3)}`;
-});
-
 const selectedStepIndex = computed(
   () => selectedStage.value?.recordedSteps.findIndex((step) => step.id === selectedStepId.value) ?? -1
-);
-const previewText = computed(
-  () =>
-    selectedStep.value?.teachingText ||
-    selectedStep.value?.note ||
-    '在下层业务系统中完成高亮区域的操作。'
 );
 const statusSummary = computed(() => {
   if (!selectedStage.value) return '尚未选择教学点';
@@ -435,17 +424,9 @@ watch(selectedStageId, () => {
   selectedStepId.value = selectedStage.value?.recordedSteps[0]?.id ?? '';
 });
 
-watch(
-  () => `${selectedStep.value?.id ?? ''}:${selectedStep.value?.selector ?? ''}`,
-  () => void nextTick(updateHighlightPosition),
-  { flush: 'post' }
-);
-
 onMounted(async () => {
-  window.addEventListener('resize', updateHighlightPosition);
   window.addEventListener('message', handleBusinessPlatformMessage);
   window.addEventListener('keydown', handleElementPickerKeydown);
-  void nextTick(updateHighlightPosition);
   if (!store.remote.enabled) return;
   try {
     await store.syncBusinessPlatforms();
@@ -463,7 +444,6 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   continuousPickResumeToken += 1;
   if (elementPicking.value) captureFrameRef.value?.cancelElementPick();
-  window.removeEventListener('resize', updateHighlightPosition);
   window.removeEventListener('message', handleBusinessPlatformMessage);
   window.removeEventListener('keydown', handleElementPickerKeydown);
 });
@@ -484,56 +464,6 @@ function loadStageDraft() {
         attachments: [...(stage.attachments ?? [])]
       }
     : null;
-}
-
-function updateHighlightPosition() {
-  const workspace = workspaceRef.value;
-  const businessLayer = businessLayerRef.value;
-  const step = selectedStep.value;
-  if (!workspace || !businessLayer || !step) {
-    highlightStyle.value = {};
-    return;
-  }
-
-  const preferredSelector = resolvePreviewTargetSelector(step.selector);
-  let target: Element | null = null;
-  try {
-    target = businessLayer.querySelector(step.selector);
-  } catch {
-    target = null;
-  }
-  if (!target) target = businessLayer.querySelector(preferredSelector);
-  if (!target) {
-    highlightStyle.value = {};
-    return;
-  }
-
-  const workspaceRect = workspace.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const padding = 5;
-  highlightStyle.value = {
-    left: `${targetRect.left - workspaceRect.left - padding}px`,
-    top: `${targetRect.top - workspaceRect.top - padding}px`,
-    width: `${targetRect.width + padding * 2}px`,
-    height: `${targetRect.height + padding * 2}px`
-  };
-}
-
-function resolvePreviewTargetSelector(selector: string) {
-  if (selector.includes('create')) return '[data-action="create"]';
-  if (selector.includes('submit')) return '[data-action="submit"]';
-  if (selector.includes('approve') || selector.includes('handle')) {
-    return '[data-action="approve"]';
-  }
-  if (selector.includes('archive')) return '[data-action="submit"]';
-  if (selector.includes('save')) return '[data-action="save"]';
-  if (selector.includes('subject')) return '[data-business-field="subject"]';
-  if (selector.includes('category')) return '[data-business-field="category"]';
-  if (selector.includes('counterparty')) return '[data-business-field="counterparty"]';
-  if (selector.includes('amount')) return '[data-business-field="amount"]';
-  if (selector.includes('date')) return '[data-business-field="date"]';
-  if (selector.includes('reason')) return '[data-business-field="reason"]';
-  return '[data-business-target="form"]';
 }
 
 function startElementPick(targetStepId = '') {
@@ -691,7 +621,7 @@ function handleElementPicked(payload: PickedElementPayload) {
     return;
   }
   const label = payload.text?.trim() || '页面元素';
-  const pageUrl = payload.url || effectiveBusinessPlatformUrl.value;
+  const pageUrl = resolveRecordedBusinessUrl(payload.url);
   const pageTitle = payload.pageTitle || businessScenario.value.pageTitle;
   const pageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
     pageUrl,
@@ -713,7 +643,6 @@ function handleElementPicked(payload: PickedElementPayload) {
     });
     selectedStepId.value = targetStepId;
     finishElementPickState();
-    previewEnabled.value = true;
     showFeedback(`已将节点重新绑定到“${label}”。`);
     queueStepSync(selectedStage.value.id, targetStepId);
     return;
@@ -748,7 +677,6 @@ function handleElementPicked(payload: PickedElementPayload) {
   selectedStepId.value = step.id;
   const shouldContinuePicking = recording.value;
   finishElementPickState();
-  previewEnabled.value = true;
   if (shouldContinuePicking) {
     showConfigPanel.value = false;
     showFeedback(`已绑定“${label}”，可继续选择下一个业务元素。`);
@@ -795,7 +723,7 @@ function handleBusinessPlatformMessage(event: MessageEvent) {
       : message;
   const title = String(payload.title ?? payload.text ?? payload.actionLabel ?? '业务操作');
   const actionLabel = String(payload.actionLabel ?? payload.text ?? title);
-  const pageUrl = String(payload.url ?? effectiveBusinessPlatformUrl.value);
+  const pageUrl = resolveRecordedBusinessUrl(String(payload.url ?? ''));
   const pageTitle = String(payload.pageTitle ?? platform.name);
   const recordedViewport =
     payload.recordedViewport &&
@@ -1139,7 +1067,6 @@ async function captureBusinessAction(targetKey: TargetKey) {
     recordedSteps: [...selectedStage.value.recordedSteps, step]
   });
   selectedStepId.value = step.id;
-  previewEnabled.value = true;
   showFeedback(`已采集节点：${step.title}`);
   queueStepSync(selectedStage.value.id, step.id);
 }
@@ -1337,7 +1264,7 @@ function numberValue(event: Event) {
           <div class="business-page-title">
             <div>
               <h1>{{ businessScenario.pageTitle }}</h1>
-              <p>填写业务信息并提交审批，所有操作均可由上层教案编排蒙版采集。</p>
+              <p>填写业务信息并提交审批，所有操作均可由上层教案编排工具采集。</p>
             </div>
             <button
               class="business-primary target-create"
@@ -1504,41 +1431,6 @@ function numberValue(event: Event) {
       <button type="button" @click="cyclePickerToolbarPosition">换个角落</button>
       <button v-if="recording" type="button" @click="pauseRecording">暂停录制</button>
       <button type="button" @click="cancelElementPick">结束选取</button>
-    </div>
-
-    <div
-      v-if="!elementPicking && !controlsCollapsed && previewEnabled && selectedStep"
-      class="teaching-mask"
-      aria-label="录制节点蒙版预览"
-    >
-      <div
-        v-if="useEmbeddedBusinessSimulation"
-        class="target-highlight"
-        :class="highlightClass"
-        :style="highlightStyle"
-      />
-      <div class="teaching-bubble">
-        <span>步骤 {{ selectedStepIndex + 1 }} / {{ selectedStage?.recordedSteps.length }}</span>
-        <strong>{{ selectedStep.title }}</strong>
-        <p>{{ previewText }}</p>
-        <small>{{ selectedStep.pageTitle }} · {{ selectedStep.actionLabel }}</small>
-        <div>
-          <button
-            type="button"
-            :disabled="selectedStepIndex <= 0"
-            @click="selectedStepId = selectedStage!.recordedSteps[selectedStepIndex - 1].id"
-          >
-            上一步
-          </button>
-          <button
-            type="button"
-            :disabled="selectedStepIndex >= (selectedStage?.recordedSteps.length ?? 0) - 1"
-            @click="selectedStepId = selectedStage!.recordedSteps[selectedStepIndex + 1].id"
-          >
-            下一步
-          </button>
-        </div>
-      </div>
     </div>
 
     <header
@@ -2037,9 +1929,6 @@ function numberValue(event: Event) {
       <button type="button" @click="toggleConfigPanel('step')">
         ◆ 节点配置
       </button>
-      <button type="button" :class="{ active: previewEnabled }" @click="previewEnabled = !previewEnabled">
-        {{ previewEnabled ? '◉ 隐藏蒙版' : '○ 显示蒙版' }}
-      </button>
       <button type="button" @click="toggleConfigPanel('lesson')">⚙ 教案设置</button>
       <button type="button" @click="toggleConfigPanel('publish')">✓ 发布校验</button>
     </div>
@@ -2069,7 +1958,7 @@ function numberValue(event: Event) {
 
     <div v-if="configurationLocked" class="locked-shield">
       <strong>当前教案版本已冻结</strong>
-      <span>该教案已有考试任务，只能查看下层业务界面和已录制蒙版；请复制为新版本后再修改。</span>
+      <span>该教案已有考试任务，只能查看下层业务界面和已录制节点；请复制为新版本后再修改。</span>
       <RouterLink class="button primary" :to="{ name: 'lesson-list' }">返回教案列表</RouterLink>
     </div>
   </section>

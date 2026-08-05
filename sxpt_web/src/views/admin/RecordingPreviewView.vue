@@ -102,7 +102,6 @@ function finishLecture() {
     :return-to="returnRoute"
     :return-label="openedFromPublishCenter ? '返回发布中心' : '返回编辑'"
     finish-label="完成教师讲解"
-    :action-disabled="Boolean(lesson.lectureCompletedAt)"
     :feedback="lectureFeedback"
     :feedback-tone="lectureFeedbackSuccess ? 'success' : 'danger'"
     @previous="move(-1)"

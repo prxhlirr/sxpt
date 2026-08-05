@@ -106,6 +106,17 @@ function createRuntimeHarness(options: { clampRetryTimers?: boolean } = {}) {
 describe('training recorder runtime', () => {
   afterEach(() => vi.useRealTimers());
 
+  it('includes the styled page snapshot in ordinary recorded actions', () => {
+    expect(recorderScript).toContain('function collectSnapshotStyles()');
+    expect(recorderScript).toContain("cssParts.join('\\n').slice(0, 1500000)");
+    expect(recorderScript).toContain('styleUrls: styles.styleUrls');
+    expect(recorderScript).toContain(
+      'pageSnapshot: createPickerPageSnapshot()'
+    );
+    expect(recorderScript).toContain('rebaseSnapshotMarkupResources');
+    expect(recorderScript).toContain('pageUrl: window.location.href');
+  });
+
   it('waits for a delayed SPA target before reporting resolution failure', async () => {
     vi.useFakeTimers();
     const runtime = createRuntimeHarness();

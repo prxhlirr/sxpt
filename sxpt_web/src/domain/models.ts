@@ -50,6 +50,7 @@ export interface BusinessPageSnapshot {
   capturedAt: string;
   html: string;
   cssText?: string;
+  styleUrls?: string[];
   viewport?: {
     width: number;
     height: number;

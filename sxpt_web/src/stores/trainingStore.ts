@@ -36,6 +36,7 @@ import { usersApi } from '../api/users';
 export interface TrainingStoreOptions {
   api?: TrainingApi;
   backend?: BackendTrainingApi;
+  workspaceApi?: typeof trainingWorkspaceApi;
   storage?: StorageLike;
   now?: () => string;
   idFactory?: (prefix: string) => string;
@@ -67,6 +68,7 @@ export class TrainingValidationError extends Error {
 export function createTrainingStore(options: TrainingStoreOptions = {}) {
   const api = options.api ?? createTrainingApi(options.storage);
   const backend = options.backend ?? backendTrainingApi;
+  const workspaceApi = options.workspaceApi ?? trainingWorkspaceApi;
   const now = options.now ?? (() => new Date().toISOString());
   const idFactory = options.idFactory ?? defaultIdFactory;
   const state = reactive(api.loadState()) as TrainingState;
@@ -79,8 +81,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     lastSyncedAt: ''
   });
   let workspaceUserKey = '';
+  let workspaceSession: AuthSession | null = null;
   let workspaceLoadPromise: Promise<void> | undefined;
   let workspaceSaveTimer: ReturnType<typeof setTimeout> | undefined;
+  let workspaceSaveQueue: Promise<void> = Promise.resolve();
 
   const persist = () => {
     api.saveState(toPlain(state));
@@ -114,7 +118,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   }
 
   async function saveAuthenticatedWorkspace(): Promise<void> {
-    const session = authApi.getSession();
+    const session = workspaceSession ?? authApi.getSession();
     if (
       !session ||
       `${session.user.tenantId}:${session.user.userId}` !== workspaceUserKey ||
@@ -122,12 +126,32 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     ) {
       return;
     }
-    await trainingWorkspaceApi.save(session, toPlain(state));
-    remote.lastSyncedAt = now();
+    const userKey = workspaceUserKey;
+    const snapshot = toPlain(state);
+    const pendingSave = workspaceSaveQueue
+      .catch(() => undefined)
+      .then(async () => {
+        await workspaceApi.save(session, snapshot);
+        if (workspaceUserKey === userKey) {
+          remote.lastError = '';
+          remote.lastSyncedAt = now();
+        }
+      });
+    workspaceSaveQueue = pendingSave;
+    await pendingSave;
+  }
+
+  async function flushAuthenticatedWorkspace(): Promise<void> {
+    if (workspaceSaveTimer) {
+      clearTimeout(workspaceSaveTimer);
+      workspaceSaveTimer = undefined;
+    }
+    await saveAuthenticatedWorkspace();
   }
 
   function clearAuthenticatedWorkspace(): void {
     workspaceUserKey = '';
+    workspaceSession = null;
     workspaceLoadPromise = undefined;
     if (workspaceSaveTimer) {
       clearTimeout(workspaceSaveTimer);
@@ -146,10 +170,14 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   ): Promise<void> {
     if (!session) {
       workspaceUserKey = '';
+      workspaceSession = null;
       return;
     }
     const userKey = `${session.user.tenantId}:${session.user.userId}`;
-    if (workspaceUserKey === userKey) return;
+    if (workspaceUserKey === userKey) {
+      workspaceSession = session;
+      return;
+    }
     if (workspaceLoadPromise) return workspaceLoadPromise;
     const previousWorkspaceUserKey = workspaceUserKey;
     workspaceLoadPromise = (async () => {
@@ -163,9 +191,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         }
         api.saveState(toPlain(state));
         workspaceUserKey = userKey;
+        workspaceSession = session;
         return;
       }
-      const savedState = await trainingWorkspaceApi.load(session);
+      const savedState = await workspaceApi.load(session);
       if (savedState) {
         replaceState(savedState);
         state.currentRole = role;
@@ -177,10 +206,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
           replaceState(api.resetDemo());
           state.currentRole = role;
         }
-        await trainingWorkspaceApi.save(session, toPlain(state));
+        await workspaceApi.save(session, toPlain(state));
       }
       api.saveState(toPlain(state));
       workspaceUserKey = userKey;
+      workspaceSession = session;
       remote.initialized = true;
       remote.lastError = '';
       remote.lastSyncedAt = now();
@@ -849,7 +879,13 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       description: input.description?.trim() || '',
       version: 1,
       status: 'DRAFT',
-      teacherName: input.teacherName?.trim() || '当前管理员',
+      teacherName:
+        input.teacherName?.trim() ||
+        workspaceSession?.user.displayName.trim() ||
+        authApi.getSession()?.user.displayName.trim() ||
+        workspaceSession?.user.username ||
+        authApi.getSession()?.user.username ||
+        '当前教师',
       tags: input.tags ? [...input.tags] : [],
       objectiveMaxScore: input.objectiveMaxScore ?? 80,
       subjectiveMaxScore: input.subjectiveMaxScore ?? 20,
@@ -861,6 +897,12 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     addActivity('LESSON_CREATED', `新建教案：${created.title}`, created.code);
     persist();
     return requireLesson(lessonId);
+  }
+
+  async function createLessonRemote(
+    input: Partial<LessonPlan> = {}
+  ): Promise<LessonPlan> {
+    return persistLessonMutation(() => createLesson(input));
   }
 
   function duplicateLesson(lessonId: string): LessonPlan {
@@ -906,6 +948,33 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     );
     persist();
     return requireLesson(copiedId);
+  }
+
+  async function duplicateLessonRemote(lessonId: string): Promise<LessonPlan> {
+    return persistLessonMutation(() => duplicateLesson(lessonId));
+  }
+
+  async function persistLessonMutation(
+    mutate: () => LessonPlan
+  ): Promise<LessonPlan> {
+    if (!backend.isEnabled()) return mutate();
+    if (!workspaceUserKey || !workspaceSession) {
+      throw new Error('登录用户工作区尚未加载，请刷新页面后重试');
+    }
+    const previousState = toPlain(state);
+    try {
+      const lesson = mutate();
+      await flushAuthenticatedWorkspace();
+      return requireLesson(lesson.id);
+    } catch (error) {
+      if (workspaceSaveTimer) {
+        clearTimeout(workspaceSaveTimer);
+        workspaceSaveTimer = undefined;
+      }
+      replaceState(previousState);
+      api.saveState(previousState);
+      throw error;
+    }
   }
 
   function updateLesson(
@@ -2455,7 +2524,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     syncBusinessPlatforms,
     refreshPublishedTaskStatuses,
     createLesson,
+    createLessonRemote,
     duplicateLesson,
+    duplicateLessonRemote,
     updateLesson,
     addStage,
     updateStage,
@@ -2491,7 +2562,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     resetDemo,
     clearAuthenticatedWorkspace,
     initializeAuthenticatedWorkspace,
-    saveAuthenticatedWorkspace
+    saveAuthenticatedWorkspace,
+    flushAuthenticatedWorkspace
   };
 }
 
