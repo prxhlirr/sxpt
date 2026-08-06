@@ -15,6 +15,10 @@ withDefaults(
   }
 );
 
+const emit = defineEmits<{
+  preview: [attachment: TrainingAttachment];
+}>();
+
 function isImage(attachment: TrainingAttachment) {
   return attachment.mimeType.startsWith('image/');
 }
@@ -29,32 +33,40 @@ function isImage(attachment: TrainingAttachment) {
     </summary>
     <div class="attachment-list">
       <article v-for="attachment in attachments" :key="attachment.id">
-        <a
+        <button
           v-if="isImage(attachment)"
           class="attachment-preview"
-          :href="attachment.dataUrl"
-          target="_blank"
-          rel="noreferrer"
-          :title="`查看${attachment.name}`"
+          type="button"
+          :title="`预览 ${attachment.name}`"
+          @click="emit('preview', attachment)"
         >
           <img :src="attachment.dataUrl" :alt="attachment.name" />
-        </a>
-        <span v-else class="attachment-file-icon">附件</span>
+        </button>
+        <button
+          v-else
+          class="attachment-file-icon"
+          type="button"
+          :title="`预览 ${attachment.name}`"
+          @click="emit('preview', attachment)"
+        >
+          附件
+        </button>
         <div>
-          <strong>{{ attachment.name }}</strong>
+          <strong :title="attachment.name">{{ attachment.name }}</strong>
           <small>
-            {{ attachment.mimeType }} · {{ formatAttachmentSize(attachment.size) }}
+            {{ attachment.mimeType || '未知类型' }} ·
+            {{ formatAttachmentSize(attachment.size) }}
           </small>
         </div>
-        <a
-          class="attachment-open"
-          :href="attachment.dataUrl"
-          :download="attachment.name"
-          target="_blank"
-          rel="noreferrer"
-        >
-          下载
-        </a>
+        <div class="attachment-actions">
+          <button type="button" @click="emit('preview', attachment)">预览</button>
+          <a
+            :href="attachment.downloadUrl || attachment.dataUrl"
+            :download="attachment.name"
+          >
+            下载
+          </a>
+        </div>
       </article>
     </div>
   </details>
@@ -127,9 +139,13 @@ function isImage(attachment: TrainingAttachment) {
   height: 38px;
   overflow: hidden;
   place-items: center;
+  border: 0;
   border-radius: 7px;
+  padding: 0;
   color: #6857df;
   background: #ece9ff;
+  cursor: pointer;
+  font: inherit;
   font-size: 9px;
   font-weight: 800;
 }
@@ -140,7 +156,7 @@ function isImage(attachment: TrainingAttachment) {
   object-fit: cover;
 }
 
-.attachment-list article > div {
+.attachment-list article > div:not(.attachment-actions) {
   display: grid;
   min-width: 0;
   gap: 3px;
@@ -162,10 +178,27 @@ function isImage(attachment: TrainingAttachment) {
   font-size: 8px;
 }
 
-.attachment-open {
+.attachment-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.attachment-actions button,
+.attachment-actions a {
+  border: 0;
+  padding: 2px;
   color: #5c4ad5;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
   font-size: 9px;
   font-weight: 800;
   text-decoration: none;
+}
+
+.attachment-actions button:hover,
+.attachment-actions a:hover {
+  text-decoration: underline;
 }
 </style>

@@ -81,6 +81,14 @@ const dataItem = computed(() =>
       )
     : undefined
 );
+const isLearning = computed(() => task.value?.mode === 'LEARNING');
+const isPractice = computed(() => task.value?.mode === 'PRACTICE');
+const isExam = computed(() => task.value?.mode === 'EXAM');
+
+function isGuideStep(step: RecordedStep) {
+  return step.kind === 'guide' || step.actionType === 'guide';
+}
+
 const visibleStages = computed(() => {
   if (!lesson.value || !task.value) return [];
   if (task.value.mode === 'LEARNING') {
@@ -103,7 +111,11 @@ const assignedStageIds = computed(() => {
   );
 });
 const playbackStages = computed(() =>
-  visibleStages.value.filter((stage) => stage.recordedSteps.length > 0)
+  visibleStages.value.filter((stage) =>
+    stage.recordedSteps.some(
+      (step) => !isPractice.value || !isGuideStep(step)
+    )
+  )
 );
 const playbackStageIds = computed(() => {
   if (task.value?.mode === 'LEARNING') {
@@ -123,6 +135,7 @@ const learningSteps = computed(() =>
     .flatMap((stage) =>
       stage.recordedSteps.map((step) => ({ stage, step }))
     )
+    .filter(({ step }) => !isPractice.value || !isGuideStep(step))
 );
 const currentLearningStep = computed(
   () => learningSteps.value[learningStepIndex.value]
@@ -262,8 +275,6 @@ const modeLabel = computed(() =>
       ? '流程练习'
       : '正式考试'
 );
-const isLearning = computed(() => task.value?.mode === 'LEARNING');
-const isExam = computed(() => task.value?.mode === 'EXAM');
 const activeAllocationId = computed(() => launchAllocation.value?.id || '');
 const activeOperationTarget = computed<
   'start' | 'search' | 'open' | 'submit' | undefined
@@ -392,6 +403,9 @@ watch(
   () => {
     syncLearningProgress(task.value?.status === 'DOING');
     syncSubmissionValues();
+    if (task.value?.mode === 'PRACTICE' && task.value.status === 'DOING') {
+      showRunnerMenu.value = false;
+    }
   },
   { immediate: true }
 );
@@ -404,7 +418,7 @@ function syncLearningProgress(introduceStage = false) {
   ) {
     learningStepIndex.value = 0;
     showStageIntroduction.value =
-      introduceStage && Boolean(learningSteps.value[0]);
+      introduceStage && isLearning.value && Boolean(learningSteps.value[0]);
     return;
   }
   const firstIncompleteIndex = learningSteps.value.findIndex(
@@ -415,21 +429,28 @@ function syncLearningProgress(introduceStage = false) {
       ? firstIncompleteIndex
       : learningSteps.value.length;
   showStageIntroduction.value =
-    introduceStage && Boolean(learningSteps.value[learningStepIndex.value]);
+    introduceStage &&
+    isLearning.value &&
+    Boolean(learningSteps.value[learningStepIndex.value]);
 }
 
 async function startTask() {
   if (!task.value) return;
+  message.value = '';
+  errorMessage.value = '';
   try {
     syncing.value = true;
     await store.startStudentTaskRemote(task.value.id);
-    syncLearningProgress(task.value.mode !== 'EXAM');
+    syncLearningProgress(task.value.mode === 'LEARNING');
+    if (task.value.mode === 'PRACTICE') {
+      showRunnerMenu.value = false;
+    }
     message.value =
       task.value.mode === 'EXAM'
         ? '任务已开始。请按考试说明独立完成业务操作。'
         : task.value.mode === 'LEARNING'
           ? '学习已开始，可自由选择任意教学点或节点，学习内容与教师讲解一致。'
-          : '任务已开始。请在录制业务系统的高亮位置完成当前操作。';
+          : '';
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '任务启动失败。';
@@ -585,9 +606,12 @@ async function advanceLearningStep() {
       learningSteps.value.length
     );
     showStageIntroduction.value =
-      stageFinished && Boolean(learningSteps.value[learningStepIndex.value]);
-    message.value =
-      learningStepIndex.value >= learningSteps.value.length
+      isLearning.value &&
+      stageFinished &&
+      Boolean(learningSteps.value[learningStepIndex.value]);
+    message.value = isPractice.value
+      ? ''
+      : learningStepIndex.value >= learningSteps.value.length
         ? '教案录制的完整业务流程已操作完成，可以提交本次任务。'
         : `已完成“${current.step.title}”，请继续下一项录制操作。`;
   } catch (error) {
@@ -706,7 +730,6 @@ async function handleRecordedBusinessAction(payload: BusinessActionPayload) {
     return;
   }
   if (!actionMatchesStep(payload, currentLearningStep.value.step)) {
-    errorMessage.value = `当前应完成“${currentLearningStep.value.step.actionLabel}”，请操作高亮位置。`;
     return;
   }
   await advanceLearningStep();
@@ -784,6 +807,7 @@ async function restartTrainingTask() {
     class="runner-page"
     :class="{
       'runner-page--exam': isExam,
+      'runner-page--practice': isPractice,
       'learning-lecture-page': isLearning,
       'runner-menu-hidden': !showRunnerMenu
     }"
@@ -1203,10 +1227,14 @@ async function restartTrainingTask() {
       :class="{
         'help-hidden': !showHelp,
         'learning-mode': task.mode === 'LEARNING',
+        'practice-independent': isPractice,
         'exam-mode': isExam
       }"
     >
-      <aside v-if="!isExam && showRunnerMenu" class="stage-sidebar">
+      <aside
+        v-if="!isExam && !isPractice && showRunnerMenu"
+        class="stage-sidebar"
+      >
         <span class="runner-kicker">BUSINESS WORKFLOW</span>
         <h1>教学点导航</h1>
         <p>
@@ -1297,18 +1325,22 @@ async function restartTrainingTask() {
             :snapshot="displayedLearningStep.step.pageSnapshot"
             :fallback-url="displayedLearningStep.step.url"
             :selector="
-              showStageIntroduction ? undefined : currentLearningStep?.step.selector
+              isPractice || showStageIntroduction
+                ? undefined
+                : currentLearningStep?.step.selector
             "
             :selector-candidates="
-              showStageIntroduction
+              isPractice || showStageIntroduction
                 ? undefined
                 : currentLearningStep?.step.selectorCandidates
             "
             :rect="
-              showStageIntroduction ? undefined : currentLearningStep?.step.rect
+              isPractice || showStageIntroduction
+                ? undefined
+                : currentLearningStep?.step.rect
             "
             :recorded-viewport="
-              showStageIntroduction
+              isPractice || showStageIntroduction
                 ? undefined
                 : currentLearningStep?.step.recordedViewport
             "
@@ -1324,6 +1356,13 @@ async function restartTrainingTask() {
             :title="`${displayedLearningStep.step.pageTitle}${modeLabel}业务界面`"
             @business-action="handleRecordedBusinessAction"
           />
+
+          <p
+            v-if="isPractice && errorMessage"
+            class="practice-system-error"
+          >
+            {{ errorMessage }}
+          </p>
 
           <div
             v-if="!learningSteps.length"
@@ -1342,8 +1381,8 @@ async function restartTrainingTask() {
             class="training-state-overlay"
           >
             <span>01</span>
-            <h3>准备进入录制时的业务系统</h3>
-            <p>
+            <h3>{{ isPractice ? '开始本次练习' : '准备进入录制时的业务系统' }}</h3>
+            <p v-if="!isPractice">
               开始后将加载教师录制的 {{ learningSteps.length }}
               个业务节点。学习模式可自由切换，练习模式按实际操作推进。
             </p>
@@ -1377,7 +1416,9 @@ async function restartTrainingTask() {
           </div>
 
           <div
-            v-else-if="showStageIntroduction && currentLearningStep"
+            v-else-if="
+              !isPractice && showStageIntroduction && currentLearningStep
+            "
             class="training-state-overlay stage-introduction-overlay"
           >
             <span>{{ currentLearningStageIndex + 1 }}</span>
@@ -1439,6 +1480,7 @@ async function restartTrainingTask() {
 
           <div
             v-if="
+              !isPractice &&
               (showRunnerMenu || task.mode === 'LEARNING') &&
               task.status === 'DOING' &&
               currentLearningStep &&
@@ -1764,6 +1806,7 @@ async function restartTrainingTask() {
 
       <aside
         v-if="
+          !isPractice &&
           showRunnerMenu &&
           task.mode === 'PRACTICE' &&
           !showStageIntroduction
@@ -3378,6 +3421,22 @@ async function restartTrainingTask() {
 .learning-playback {
   height: 100vh;
   min-height: 0;
+}
+
+.practice-system-error {
+  position: absolute;
+  z-index: 24;
+  right: 14px;
+  bottom: 14px;
+  max-width: min(420px, calc(100vw - 28px));
+  margin: 0;
+  border: 1px solid rgb(217 78 89 / 28%);
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #b42332;
+  background: rgb(255 245 246 / 94%);
+  box-shadow: 0 10px 26px rgb(75 22 29 / 14%);
+  font-size: 10px;
 }
 
 .business-app {

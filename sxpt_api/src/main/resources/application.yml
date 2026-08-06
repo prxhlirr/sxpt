@@ -30,6 +30,10 @@ spring:
     port: "${SXPT_REDIS_PORT:6379}"
     password: "${SXPT_REDIS_PASSWORD:}"
     timeout: 3000
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
 
 jwt:
   # Development-only fallback. Production must provide SXPT_JWT_SECRET.
@@ -54,6 +58,10 @@ sxpt:
     # Formal authentication is connected. Demo identities must be enabled
     # explicitly when a developer needs the legacy simulated-login environment.
     enabled: "${SXPT_DEMO_IDENTITY_ENABLED:false}"
+  attachments:
+    storage-root: "${SXPT_ATTACHMENT_STORAGE_ROOT:./data/teaching-attachments}"
+    max-file-bytes: "${SXPT_ATTACHMENT_MAX_FILE_BYTES:5242880}"
+    url-token-secret: "${SXPT_ATTACHMENT_TOKEN_SECRET:sxpt_dev_attachment_url_secret}"
   origin:
     # local: 使用本地联调 Adapter；http: 按 platform_capability.endpoint_url 调用真实原平台。
     adapter-mode: "${SXPT_ORIGIN_ADAPTER_MODE:http}"

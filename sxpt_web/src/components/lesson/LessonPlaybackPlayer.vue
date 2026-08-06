@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { RouteLocationRaw } from 'vue-router';
-import type { LessonPlan, LessonStage, RecordedStep } from '../../domain/models';
+import type {
+  LessonPlan,
+  LessonStage,
+  RecordedStep,
+  TrainingAttachment
+} from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
 import AttachmentPanel from './AttachmentPanel.vue';
+import AttachmentPreviewLayer from './AttachmentPreviewLayer.vue';
 import BusinessSnapshotFrame from './BusinessSnapshotFrame.vue';
 
 interface PlaybackStep {
@@ -54,6 +60,8 @@ const emit = defineEmits<{
 const navigationOpen = ref(false);
 const promptCollapsed = ref(false);
 const promptPosition = ref<'left' | 'right' | 'bottom'>('left');
+const previewAttachment = ref<TrainingAttachment | null>(null);
+const attachmentPreviewMinimized = ref(false);
 
 const steps = computed<PlaybackStep[]>(() =>
   props.lesson.stages.flatMap((stage, stageIndex) =>
@@ -131,6 +139,24 @@ function cyclePromptPosition() {
       : promptPosition.value === 'right'
         ? 'bottom'
         : 'left';
+}
+
+function openAttachmentPreview(attachment: TrainingAttachment) {
+  previewAttachment.value = attachment;
+  attachmentPreviewMinimized.value = false;
+}
+
+function closeAttachmentPreview() {
+  previewAttachment.value = null;
+  attachmentPreviewMinimized.value = false;
+}
+
+function minimizeAttachmentPreview() {
+  if (previewAttachment.value) attachmentPreviewMinimized.value = true;
+}
+
+function restoreAttachmentPreview() {
+  attachmentPreviewMinimized.value = false;
 }
 </script>
 
@@ -321,7 +347,11 @@ function cyclePromptPosition() {
                 }}
               </p>
             </div>
-            <AttachmentPanel :attachments="current.stage.attachments" title="教学点附件" />
+            <AttachmentPanel
+              :attachments="current.stage.attachments"
+              title="教学点附件"
+              @preview="openAttachmentPreview"
+            />
             <dl>
               <div><dt>教学点节点</dt><dd>{{ current.stage.recordedSteps.length }} 个</dd></div>
               <div><dt>负责角色</dt><dd>{{ current.stage.groupKey || '未指定' }}</dd></div>
@@ -345,7 +375,11 @@ function cyclePromptPosition() {
                 }}
               </p>
             </div>
-            <AttachmentPanel :attachments="currentStep.attachments" title="节点附件" />
+            <AttachmentPanel
+              :attachments="currentStep.attachments"
+              title="节点附件"
+              @preview="openAttachmentPreview"
+            />
             <dl>
               <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
               <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
@@ -403,6 +437,14 @@ function cyclePromptPosition() {
       <div><i :style="{ width: `${progress}%` }"></i></div>
       <span>{{ formatDuration(totalDuration) }}</span>
     </footer>
+
+    <AttachmentPreviewLayer
+      :attachment="previewAttachment"
+      :minimized="attachmentPreviewMinimized"
+      @close="closeAttachmentPreview"
+      @minimize="minimizeAttachmentPreview"
+      @restore="restoreAttachmentPreview"
+    />
   </section>
 </template>
 

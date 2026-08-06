@@ -1,4 +1,6 @@
 import type { TrainingAttachment } from '../domain/models';
+import { teachingAttachmentApi } from '../api/attachments';
+import { authApi } from '../services/trainingApi';
 
 export const MAX_TRAINING_ATTACHMENT_BYTES = 5 * 1024 * 1024;
 
@@ -26,6 +28,10 @@ export async function createTrainingAttachments(
   );
   if (oversized) {
     throw new Error(`附件“${oversized.name}”超过 5 MB，无法上传。`);
+  }
+
+  if (authApi.getSession()?.token) {
+    return Promise.all(source.map((file) => teachingAttachmentApi.upload(file)));
   }
 
   return Promise.all(

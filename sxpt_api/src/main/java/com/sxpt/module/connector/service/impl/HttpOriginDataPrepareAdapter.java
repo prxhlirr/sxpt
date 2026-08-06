@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.ConnectorSystem;
@@ -23,8 +24,12 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * HTTP 原平台数据准备适配器。
@@ -61,6 +66,18 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
 
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
+    private static final TypeReference<Map<String, Object>> MAP_TYPE =
+            new TypeReference<Map<String, Object>>() {
+            };
+
+    private static final String HEADER_TRACE_ID = "X-Trace-Id";
+
+    private static final String HEADER_IDEMPOTENCY_KEY = "X-Idempotency-Key";
+
+    private static final String STATUS_SUCCESS = "SUCCESS";
+
+    private static final String STATUS_FAILED = "FAILED";
+
     private final ConnectorSystemMapper connectorSystemMapper;
 
     private final PlatformCapabilityMapper platformCapabilityMapper;
@@ -89,13 +106,17 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      */
     @Override
     public BatchCreateResponse createTeachingData(BatchCreateRequest request) {
-        System.out.println("66666666666666666666666666666666666666666");
-        System.out.println("request: " + request.getRequestBatchId() + request.getTenantId() + request.getConnectorSystemId() + ", items: " + request.getItems().size());
         OriginCallContext context = buildCallContext(
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_CREATE);
-        return exchange(context, request, BatchCreateResponse.class);
+        OriginBatchCreateRequest originRequest = buildOriginBatchCreateRequest(request);
+        OriginBatchCreateResponse originResponse = exchange(
+                context,
+                originRequest,
+                buildHeaders(context.getConnectorSystem(), request),
+                OriginBatchCreateResponse.class);
+        return toBatchCreateResponse(originResponse, request);
     }
 
     /**
@@ -110,7 +131,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_QUERY);
-        return exchange(context, request, QueryResponse.class);
+        return exchange(context, request, buildHeaders(context.getConnectorSystem(), null), QueryResponse.class);
     }
 
     /**
@@ -125,7 +146,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_RESULT_CHECK);
-        return exchange(context, request, ValidationResponse.class);
+        return exchange(context, request, buildHeaders(context.getConnectorSystem(), null), ValidationResponse.class);
     }
 
     /**
@@ -140,7 +161,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_LOCK);
-        return exchange(context, request, LockResponse.class);
+        return exchange(context, request, buildHeaders(context.getConnectorSystem(), null), LockResponse.class);
     }
 
     /**
@@ -155,7 +176,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_ARCHIVE);
-        return exchange(context, request, ArchiveResponse.class);
+        return exchange(context, request, buildHeaders(context.getConnectorSystem(), null), ArchiveResponse.class);
     }
 
     /**
@@ -209,8 +230,11 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param <T> 响应泛型。
      * @return 解析后的标准响应对象。
      */
-    private <T> T exchange(OriginCallContext context, Object request, Class<T> responseType) {
-        HttpEntity<Object> entity = new HttpEntity<>(request, buildHeaders(context.getConnectorSystem()));
+    private <T> T exchange(OriginCallContext context,
+                           Object request,
+                           HttpHeaders headers,
+                           Class<T> responseType) {
+        HttpEntity<Object> entity = new HttpEntity<>(request, headers);
         try {
             ResponseEntity<String> response = restTemplate.exchange(
                     context.getUrl(), context.getHttpMethod(), entity, String.class);
@@ -227,7 +251,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param connectorSystem 原平台系统配置。
      * @return HTTP 请求头。
      */
-    private HttpHeaders buildHeaders(ConnectorSystem connectorSystem) {
+    private HttpHeaders buildHeaders(ConnectorSystem connectorSystem, BatchCreateRequest request) {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
@@ -249,8 +273,11 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
             }
             headers.set(headerName, apiKey);
         }
-        System.out.println("888888");
-        System.out.println("原平台请求头: " + headers.toSingleValueMap());
+        if (request != null) {
+            requireText(request.getIdempotencyKey());
+            headers.set(HEADER_IDEMPOTENCY_KEY, request.getIdempotencyKey());
+            headers.set(HEADER_TRACE_ID, resolveTraceId(request));
+        }
         return headers;
     }
 
@@ -268,8 +295,6 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         }
         try {
             JsonNode root = JSON_MAPPER.readTree(responseBody);
-            System.out.println("************************");
-            System.out.println("原平台响应 JSON: " + root.toString());
             JsonNode payload = root.has("result") ? root.get("result") : root;
             return JSON_MAPPER.treeToValue(payload, responseType);
         } catch (JsonProcessingException ex) {
@@ -380,6 +405,255 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
     }
 
     /**
+     * 构造符合第三方造数接口文档的请求体。
+     *
+     * 业务功能：把教学平台内部批量创建请求转换为原平台公开 HTTP 契约，避免把内部批次、系统 ID 和明细字段泄漏给第三方。
+     * 关键流程：从数据准备快照中解析模板编码、初始状态和扩展参数；将每条明细转换为 participants。
+     *
+     * @param request 内部批量创建请求。
+     * @return 第三方造数请求。
+     */
+    private OriginBatchCreateRequest buildOriginBatchCreateRequest(BatchCreateRequest request) {
+        validateBatchCreateRequest(request);
+        JsonNode requestSnapshot = parseOptionalJson(request.getRequestJson());
+        OriginBatchCreateRequest originRequest = new OriginBatchCreateRequest();
+        originRequest.setBusinessModuleCode(request.getModuleCode());
+        originRequest.setTemplateCode(resolveTemplateCode(requestSnapshot));
+        originRequest.setInitState(resolveInitState(requestSnapshot));
+        originRequest.setSceneType(request.getSceneType());
+        originRequest.setParticipants(buildOriginParticipants(request));
+        originRequest.setBizParams(resolveBizParams(requestSnapshot));
+        return originRequest;
+    }
+
+    /**
+     * 校验内部批量创建请求满足转换外部契约所需的最小字段。
+     *
+     * @param request 内部批量创建请求。
+     */
+    private void validateBatchCreateRequest(BatchCreateRequest request) {
+        if (request == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(request.getTenantId());
+        requireText(request.getConnectorSystemId());
+        requireText(request.getModuleCode());
+        requireText(request.getSceneType());
+        requireText(request.getRequestBatchId());
+        requireText(request.getIdempotencyKey());
+        if (request.getItems() == null || request.getItems().isEmpty()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 构造第三方造数参与方列表。
+     *
+     * @param request 内部批量创建请求。
+     * @return 第三方造数参与方列表。
+     */
+    private List<OriginParticipant> buildOriginParticipants(BatchCreateRequest request) {
+        List<OriginParticipant> participants = new ArrayList<>();
+        for (RequestItem item : request.getItems()) {
+            if (item == null) {
+                continue;
+            }
+            requireText(item.getRequestItemId());
+            OriginParticipant participant = new OriginParticipant();
+            participant.setParticipantId(item.getRequestItemId());
+            participant.setOwnerUserId(item.getStudentId());
+            participant.setExternalOrgId(item.getRequiredExternalOrgId());
+            participant.setPoolKey(item.getQuestionId());
+            participants.add(participant);
+        }
+        if (participants.isEmpty()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        return participants;
+    }
+
+    /**
+     * 将第三方造数响应转换回内部适配器响应。
+     *
+     * @param originResponse 第三方造数响应。
+     * @param request 内部批量创建请求。
+     * @return 内部批量创建响应。
+     */
+    private BatchCreateResponse toBatchCreateResponse(OriginBatchCreateResponse originResponse,
+                                                      BatchCreateRequest request) {
+        if (originResponse == null) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(), "原平台接口返回为空");
+        }
+        BatchCreateResponse response = new BatchCreateResponse();
+        response.setExternalRequestId(originResponse.getOriginBatchId());
+        response.setRequestBatchId(request.getRequestBatchId());
+        response.setAdapterStatus(firstText(originResponse.getStatus(), STATUS_FAILED));
+        response.setResultJson(toJson(originResponse));
+        List<ResponseItem> items = new ArrayList<>();
+        if (originResponse.getItems() != null) {
+            for (OriginResponseItem originItem : originResponse.getItems()) {
+                items.add(toSuccessResponseItem(originItem));
+            }
+        }
+        if (originResponse.getFailedItems() != null) {
+            for (OriginFailedItem failedItem : originResponse.getFailedItems()) {
+                items.add(toFailedResponseItem(failedItem));
+            }
+        }
+        response.setItems(items);
+        return response;
+    }
+
+    /**
+     * 转换第三方成功明细。
+     *
+     * @param originItem 第三方成功明细。
+     * @return 内部响应明细。
+     */
+    private ResponseItem toSuccessResponseItem(OriginResponseItem originItem) {
+        ResponseItem item = new ResponseItem();
+        if (originItem == null) {
+            item.setItemStatus(STATUS_FAILED);
+            item.setErrorMessage("原平台返回空明细");
+            return item;
+        }
+        item.setRequestItemId(originItem.getParticipantId());
+        item.setExternalBusinessId(originItem.getExternalDataId());
+        item.setExternalBusinessNo(originItem.getExternalBizNo());
+        item.setExternalStatus(originItem.getExternalStatus());
+        item.setTargetUrl(originItem.getEntryUrl());
+        item.setCurrentOrgId(originItem.getExternalOrgId());
+        item.setItemStatus(StringUtils.hasText(originItem.getExternalDataId()) ? STATUS_SUCCESS : STATUS_FAILED);
+        item.setErrorMessage(StringUtils.hasText(originItem.getExternalDataId()) ? null : "原平台未返回业务数据 ID");
+        return item;
+    }
+
+    /**
+     * 转换第三方失败明细。
+     *
+     * @param failedItem 第三方失败明细。
+     * @return 内部响应明细。
+     */
+    private ResponseItem toFailedResponseItem(OriginFailedItem failedItem) {
+        ResponseItem item = new ResponseItem();
+        if (failedItem == null) {
+            item.setItemStatus(STATUS_FAILED);
+            item.setErrorMessage("原平台返回空失败明细");
+            return item;
+        }
+        item.setRequestItemId(failedItem.getParticipantId());
+        item.setItemStatus(STATUS_FAILED);
+        item.setErrorMessage(firstText(failedItem.getErrorMessage(), failedItem.getErrorCode()));
+        return item;
+    }
+
+    /**
+     * 从数据准备快照中解析模板编码。
+     *
+     * @param requestSnapshot 数据准备请求快照。
+     * @return 模板编码。
+     */
+    private String resolveTemplateCode(JsonNode requestSnapshot) {
+        String templateCode = firstText(
+                textValue(requestSnapshot, "templateCode"),
+                nestedTextValue(requestSnapshot, "template", "code"));
+        templateCode = firstText(templateCode, nestedTextValue(requestSnapshot, "template", "templateCode"));
+        if (!StringUtils.hasText(templateCode)) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "原平台造数请求缺少 templateCode，请在数据准备快照中固化模板编码");
+        }
+        return templateCode;
+    }
+
+    /**
+     * 从数据准备快照中解析初始状态。
+     *
+     * @param requestSnapshot 数据准备请求快照。
+     * @return 初始状态。
+     */
+    private String resolveInitState(JsonNode requestSnapshot) {
+        String initState = firstText(
+                textValue(requestSnapshot, "initState"),
+                nestedTextValue(requestSnapshot, "template", "initState"));
+        if (!StringUtils.hasText(initState)) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "原平台造数请求缺少 initState，请在数据准备快照中固化初始业务状态");
+        }
+        return initState;
+    }
+
+    /**
+     * 从快照中解析业务扩展参数。
+     *
+     * @param requestSnapshot 数据准备请求快照。
+     * @return 业务扩展参数。
+     */
+    private Map<String, Object> resolveBizParams(JsonNode requestSnapshot) {
+        JsonNode bizParams = requestSnapshot == null ? null : requestSnapshot.get("bizParams");
+        if (bizParams == null || bizParams.isNull() || !bizParams.isObject()) {
+            return new LinkedHashMap<>();
+        }
+        return JSON_MAPPER.convertValue(bizParams, MAP_TYPE);
+    }
+
+    /**
+     * 解析链路追踪 ID。
+     *
+     * @param request 内部批量创建请求。
+     * @return 追踪 ID。
+     */
+    private String resolveTraceId(BatchCreateRequest request) {
+        JsonNode requestSnapshot = parseOptionalJson(request.getRequestJson());
+        return firstText(textValue(requestSnapshot, "traceId"), request.getRequestBatchId());
+    }
+
+    /**
+     * 解析可选 JSON 文本。
+     *
+     * @param json JSON 文本。
+     * @return JSON 节点；空文本时返回 null。
+     */
+    private JsonNode parseOptionalJson(String json) {
+        if (!StringUtils.hasText(json)) {
+            return null;
+        }
+        try {
+            return JSON_MAPPER.readTree(json);
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), "数据准备请求快照不是合法 JSON");
+        }
+    }
+
+    /**
+     * 读取嵌套对象中的字符串字段。
+     *
+     * @param node JSON 节点。
+     * @param parentField 父字段名。
+     * @param childField 子字段名。
+     * @return 字符串字段。
+     */
+    private String nestedTextValue(JsonNode node, String parentField, String childField) {
+        if (node == null || !node.has(parentField) || node.get(parentField).isNull()) {
+            return null;
+        }
+        return textValue(node.get(parentField), childField);
+    }
+
+    /**
+     * 序列化原平台响应摘要。
+     *
+     * @param value 原平台响应对象。
+     * @return JSON 字符串。
+     */
+    private String toJson(Object value) {
+        try {
+            return JSON_MAPPER.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
+        }
+    }
+
+    /**
      * 原平台 HTTP 调用上下文。
      *
      * 业务功能：把一次能力调用需要的系统配置、能力配置、URL 和方法聚合起来，避免各方法重复解析配置。
@@ -424,6 +698,342 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
 
         public void setHttpMethod(HttpMethod httpMethod) {
             this.httpMethod = httpMethod;
+        }
+    }
+
+    /**
+     * 第三方造数请求 DTO。
+     *
+     * 业务功能：严格匹配《第三方造数接口对接文档》的最小请求字段。
+     */
+    private static class OriginBatchCreateRequest {
+
+        private String businessModuleCode;
+
+        private String templateCode;
+
+        private String initState;
+
+        private String sceneType;
+
+        private List<OriginParticipant> participants;
+
+        private Map<String, Object> bizParams;
+
+        public String getBusinessModuleCode() {
+            return businessModuleCode;
+        }
+
+        public void setBusinessModuleCode(String businessModuleCode) {
+            this.businessModuleCode = businessModuleCode;
+        }
+
+        public String getTemplateCode() {
+            return templateCode;
+        }
+
+        public void setTemplateCode(String templateCode) {
+            this.templateCode = templateCode;
+        }
+
+        public String getInitState() {
+            return initState;
+        }
+
+        public void setInitState(String initState) {
+            this.initState = initState;
+        }
+
+        public String getSceneType() {
+            return sceneType;
+        }
+
+        public void setSceneType(String sceneType) {
+            this.sceneType = sceneType;
+        }
+
+        public List<OriginParticipant> getParticipants() {
+            return participants;
+        }
+
+        public void setParticipants(List<OriginParticipant> participants) {
+            this.participants = participants;
+        }
+
+        public Map<String, Object> getBizParams() {
+            return bizParams;
+        }
+
+        public void setBizParams(Map<String, Object> bizParams) {
+            this.bizParams = bizParams;
+        }
+    }
+
+    /**
+     * 第三方造数参与方 DTO。
+     *
+     * 业务功能：只传稳定主体标识，不传姓名、角色名等展示字段。
+     */
+    private static class OriginParticipant {
+
+        private String participantId;
+
+        private String ownerUserId;
+
+        private String externalOrgId;
+
+        private String poolKey;
+
+        public String getParticipantId() {
+            return participantId;
+        }
+
+        public void setParticipantId(String participantId) {
+            this.participantId = participantId;
+        }
+
+        public String getOwnerUserId() {
+            return ownerUserId;
+        }
+
+        public void setOwnerUserId(String ownerUserId) {
+            this.ownerUserId = ownerUserId;
+        }
+
+        public String getExternalOrgId() {
+            return externalOrgId;
+        }
+
+        public void setExternalOrgId(String externalOrgId) {
+            this.externalOrgId = externalOrgId;
+        }
+
+        public String getPoolKey() {
+            return poolKey;
+        }
+
+        public void setPoolKey(String poolKey) {
+            this.poolKey = poolKey;
+        }
+    }
+
+    /**
+     * 第三方造数响应 DTO。
+     *
+     * 业务功能：承接文档中的 result 对象，并由 Adapter 转换为内部响应。
+     */
+    private static class OriginBatchCreateResponse {
+
+        private String originBatchId;
+
+        private String status;
+
+        private Long totalCount;
+
+        private Long successCount;
+
+        private Long failedCount;
+
+        private List<OriginResponseItem> items;
+
+        private List<OriginFailedItem> failedItems;
+
+        public String getOriginBatchId() {
+            return originBatchId;
+        }
+
+        public void setOriginBatchId(String originBatchId) {
+            this.originBatchId = originBatchId;
+        }
+
+        public String getStatus() {
+            return status;
+        }
+
+        public void setStatus(String status) {
+            this.status = status;
+        }
+
+        public Long getTotalCount() {
+            return totalCount;
+        }
+
+        public void setTotalCount(Long totalCount) {
+            this.totalCount = totalCount;
+        }
+
+        public Long getSuccessCount() {
+            return successCount;
+        }
+
+        public void setSuccessCount(Long successCount) {
+            this.successCount = successCount;
+        }
+
+        public Long getFailedCount() {
+            return failedCount;
+        }
+
+        public void setFailedCount(Long failedCount) {
+            this.failedCount = failedCount;
+        }
+
+        public List<OriginResponseItem> getItems() {
+            return items;
+        }
+
+        public void setItems(List<OriginResponseItem> items) {
+            this.items = items;
+        }
+
+        public List<OriginFailedItem> getFailedItems() {
+            return failedItems;
+        }
+
+        public void setFailedItems(List<OriginFailedItem> failedItems) {
+            this.failedItems = failedItems;
+        }
+    }
+
+    /**
+     * 第三方造数成功明细 DTO。
+     */
+    private static class OriginResponseItem {
+
+        private String participantId;
+
+        private String ownerUserId;
+
+        private String externalDataId;
+
+        private String externalBizNo;
+
+        private String externalStatus;
+
+        private String entryUrl;
+
+        private String externalUserId;
+
+        private String externalOrgId;
+
+        private JsonNode rawData;
+
+        public String getParticipantId() {
+            return participantId;
+        }
+
+        public void setParticipantId(String participantId) {
+            this.participantId = participantId;
+        }
+
+        public String getOwnerUserId() {
+            return ownerUserId;
+        }
+
+        public void setOwnerUserId(String ownerUserId) {
+            this.ownerUserId = ownerUserId;
+        }
+
+        public String getExternalDataId() {
+            return externalDataId;
+        }
+
+        public void setExternalDataId(String externalDataId) {
+            this.externalDataId = externalDataId;
+        }
+
+        public String getExternalBizNo() {
+            return externalBizNo;
+        }
+
+        public void setExternalBizNo(String externalBizNo) {
+            this.externalBizNo = externalBizNo;
+        }
+
+        public String getExternalStatus() {
+            return externalStatus;
+        }
+
+        public void setExternalStatus(String externalStatus) {
+            this.externalStatus = externalStatus;
+        }
+
+        public String getEntryUrl() {
+            return entryUrl;
+        }
+
+        public void setEntryUrl(String entryUrl) {
+            this.entryUrl = entryUrl;
+        }
+
+        public String getExternalUserId() {
+            return externalUserId;
+        }
+
+        public void setExternalUserId(String externalUserId) {
+            this.externalUserId = externalUserId;
+        }
+
+        public String getExternalOrgId() {
+            return externalOrgId;
+        }
+
+        public void setExternalOrgId(String externalOrgId) {
+            this.externalOrgId = externalOrgId;
+        }
+
+        public JsonNode getRawData() {
+            return rawData;
+        }
+
+        public void setRawData(JsonNode rawData) {
+            this.rawData = rawData;
+        }
+    }
+
+    /**
+     * 第三方造数失败明细 DTO。
+     */
+    private static class OriginFailedItem {
+
+        private String participantId;
+
+        private String ownerUserId;
+
+        private String errorCode;
+
+        private String errorMessage;
+
+        public String getParticipantId() {
+            return participantId;
+        }
+
+        public void setParticipantId(String participantId) {
+            this.participantId = participantId;
+        }
+
+        public String getOwnerUserId() {
+            return ownerUserId;
+        }
+
+        public void setOwnerUserId(String ownerUserId) {
+            this.ownerUserId = ownerUserId;
+        }
+
+        public String getErrorCode() {
+            return errorCode;
+        }
+
+        public void setErrorCode(String errorCode) {
+            this.errorCode = errorCode;
+        }
+
+        public String getErrorMessage() {
+            return errorMessage;
+        }
+
+        public void setErrorMessage(String errorMessage) {
+            this.errorMessage = errorMessage;
         }
     }
 }

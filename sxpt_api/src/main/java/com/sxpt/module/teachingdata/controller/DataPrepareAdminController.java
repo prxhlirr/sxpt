@@ -1,5 +1,8 @@
 package com.sxpt.module.teachingdata.controller;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResult;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
@@ -62,6 +65,12 @@ import java.util.UUID;
 @RequestMapping("/api/v1/teaching-data")
 @ConditionalOnProperty(name = "sxpt.teaching-data.admin-controller.enabled", havingValue = "true", matchIfMissing = true)
 public class DataPrepareAdminController {
+
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
+    private static final TypeReference<LinkedHashMap<String, Object>> REQUEST_JSON_TYPE =
+            new TypeReference<LinkedHashMap<String, Object>>() {
+            };
 
     private final DataRequirementService dataRequirementService;
 
@@ -250,6 +259,7 @@ public class DataPrepareAdminController {
         String requestBatchId = StringUtils.hasText(request.getRequestBatchId())
                 ? request.getRequestBatchId()
                 : "attempt-" + System.currentTimeMillis();
+        String effectiveRequestJson = buildTaskPrepareRequestJson(currentUser.getTenantId(), request);
 
         DataRequirement requirement = new DataRequirement();
         requirement.setId(generateId());
@@ -287,7 +297,7 @@ public class DataPrepareAdminController {
                 ? request.getIdempotencyKey()
                 : "task-prepare:" + taskId + ":" + request.getSceneType() + ":" + requestBatchId);
         prepareRequest.setTraceId(request.getTraceId());
-        prepareRequest.setRequestJson(request.getRequestJson());
+        prepareRequest.setRequestJson(effectiveRequestJson);
         prepareRequest.setGenerateRequest(generateRequest);
 
         DataPrepareJob job = dataPrepareFacadeService.prepareAndExecute(prepareRequest);
@@ -773,6 +783,119 @@ public class DataPrepareAdminController {
                 request.getSceneType());
         if (!preflightResult.isReady()) {
             throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+    }
+
+    /**
+     * 构造按任务触发造数时的服务端请求快照。
+     *
+     * 业务功能：把第三方造数文档要求的模板编码、初始状态和追踪号固定到本次 requestJson，
+     * 避免前端漏传或伪造运行契约字段导致 HTTP adapter 在运行期拿不到必需参数。
+     *
+     * 关键流程：先解析前端已有业务参数，再按当前租户、平台、模块和场景选择启用模板，
+     * 最后用服务端模板覆盖 requestJson 中的模板快照，并保留原有 bizParams 等业务扩展字段。
+     *
+     * @param tenantId 当前登录用户所属租户 ID。
+     * @param request 页面提交的任务造数触发请求。
+     * @return 可直接冻结到批次和任务上的 JSON 快照。
+     */
+    private String buildTaskPrepareRequestJson(String tenantId, TriggerTaskPrepareRequest request) {
+        LinkedHashMap<String, Object> requestJson = parseRequestJson(request.getRequestJson());
+        TeachingDataTemplate template = resolveTaskPrepareTemplate(tenantId, request);
+        requireTemplateRuntimeText(template.getTemplateCode());
+        requireTemplateRuntimeText(template.getInitState());
+
+        LinkedHashMap<String, Object> templateSnapshot = new LinkedHashMap<>();
+        templateSnapshot.put("id", template.getId());
+        templateSnapshot.put("code", template.getTemplateCode());
+        templateSnapshot.put("templateCode", template.getTemplateCode());
+        templateSnapshot.put("name", template.getTemplateName());
+        templateSnapshot.put("initState", template.getInitState());
+
+        requestJson.put("template", templateSnapshot);
+        requestJson.put("templateCode", template.getTemplateCode());
+        requestJson.put("initState", template.getInitState());
+        if (StringUtils.hasText(request.getTraceId())) {
+            requestJson.put("traceId", request.getTraceId());
+        }
+        return toJson(requestJson);
+    }
+
+    /**
+     * 解析页面透传的业务 JSON。
+     *
+     * 业务功能：允许页面继续传递 bizParams 等业务扩展，但要求顶层必须是 JSON 对象，
+     * 这样后续服务端可以稳定合并模板快照字段。
+     *
+     * @param requestJson 页面透传 JSON 文本。
+     * @return 可修改的有序 Map。
+     */
+    private LinkedHashMap<String, Object> parseRequestJson(String requestJson) {
+        if (!StringUtils.hasText(requestJson)) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return JSON_MAPPER.readValue(requestJson, REQUEST_JSON_TYPE);
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 解析本次按任务触发造数应使用的启用模板。
+     *
+     * 业务功能：把模板选择收敛在后端可信配置中，支持页面指定 templateId，
+     * 未指定时使用当前模块和场景下的第一个启用模板。
+     *
+     * @param tenantId 当前登录用户所属租户 ID。
+     * @param request 页面提交的任务造数触发请求。
+     * @return 与当前平台、模块和场景匹配的启用模板。
+     */
+    private TeachingDataTemplate resolveTaskPrepareTemplate(String tenantId, TriggerTaskPrepareRequest request) {
+        List<TeachingDataTemplate> templates = teachingDataTemplateService.listActiveTemplatesByModuleAndScene(
+                tenantId, request.getConnectorSystemId(), request.getModuleCode(), request.getSceneType());
+        if (templates == null || templates.isEmpty()) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+        if (!StringUtils.hasText(request.getTemplateId())) {
+            return templates.get(0);
+        }
+        for (TeachingDataTemplate template : templates) {
+            if (request.getTemplateId().equals(template.getId())) {
+                return template;
+            }
+        }
+        throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+    }
+
+    /**
+     * 校验启用模板的运行时字段非空。
+     *
+     * 业务功能：模板已被后台启用但缺少造数必需字段时，明确归类为配置不完整，
+     * 让页面和排障日志指向后台配置修复，而不是误判为前端参数错误。
+     *
+     * @param value 模板运行时字段值。
+     */
+    private void requireTemplateRuntimeText(String value) {
+        if (!StringUtils.hasText(value)) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE);
+        }
+    }
+
+    /**
+     * 序列化服务端请求快照。
+     *
+     * 业务功能：将已合并的模板和业务参数写回 requestJson，
+     * 供后续批次冻结、任务审计和 HTTP adapter 构造第三方造数请求共同使用。
+     *
+     * @param value 待序列化对象。
+     * @return JSON 文本。
+     */
+    private String toJson(Object value) {
+        try {
+            return JSON_MAPPER.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
         }
     }
 

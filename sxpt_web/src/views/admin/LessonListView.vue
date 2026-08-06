@@ -9,7 +9,6 @@ import {
   watch
 } from 'vue';
 import { useRouter } from 'vue-router';
-import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import type { LessonPlan, LessonStatus } from '../../domain/models';
@@ -315,31 +314,39 @@ async function publishLesson(lesson: LessonPlan) {
 <template>
   <div class="page lesson-list-page">
     <PageHeader
-      eyebrow="LESSON AUTHORING"
+      eyebrow="LESSONS"
       title="教案管理"
-      description="集中管理业务录制成果，从教案编排一路进入考试、分组、数据与发布。"
+      description="统一维护教案录制、业务配置、备案发布与后续数据准备状态。"
     >
       <button class="primary" type="button" @click="openCreateDialog">＋ 新建教案</button>
     </PageHeader>
 
-    <section class="metric-grid">
-      <MetricCard label="教案总数" :value="metrics.total" hint="覆盖全部业务模块">
-        <template #icon>▤</template>
-      </MetricCard>
-      <MetricCard label="待完善" :value="metrics.editing" hint="草稿与已录制教案" tone="amber">
-        <template #icon>✎</template>
-      </MetricCard>
-      <MetricCard label="已发布" :value="metrics.published" hint="可进入考试设置" tone="green">
-        <template #icon>✓</template>
-      </MetricCard>
-      <MetricCard label="教学点" :value="metrics.stages" hint="动态串联办理角色" tone="blue">
-        <template #icon>⌘</template>
-      </MetricCard>
+    <section class="lesson-summary" aria-label="教案概览">
+      <article>
+        <span>教案总数</span>
+        <strong>{{ metrics.total }}</strong>
+        <small>全部业务模块</small>
+      </article>
+      <article>
+        <span>待完善</span>
+        <strong>{{ metrics.editing }}</strong>
+        <small>草稿与已录制</small>
+      </article>
+      <article>
+        <span>已发布</span>
+        <strong>{{ metrics.published }}</strong>
+        <small>可进入任务发布</small>
+      </article>
+      <article>
+        <span>教学点</span>
+        <strong>{{ metrics.stages }}</strong>
+        <small>录制节点总量</small>
+      </article>
     </section>
 
     <div v-if="feedback" class="notice" :class="feedbackTone">{{ feedback }}</div>
 
-    <section class="card lesson-catalog">
+    <section class="lesson-catalog">
       <div class="catalog-toolbar">
         <label class="search-field">
           <span>搜索教案</span>
@@ -629,15 +636,79 @@ async function publishLesson(lesson: LessonPlan) {
 <style scoped>
 .lesson-list-page {
   display: grid;
-  gap: 18px;
+  gap: 16px;
 }
 
 .lesson-list-page :deep(.page-header) {
   margin-bottom: 0;
 }
 
+.lesson-list-page :deep(.page-header) {
+  align-items: center;
+  border-bottom: 1px solid #e8edf4;
+  padding-bottom: 18px;
+}
+
+.lesson-list-page :deep(.eyebrow) {
+  margin-bottom: 5px;
+  color: #2563eb;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+}
+
+.lesson-list-page :deep(.page-header h1) {
+  font-size: 30px;
+  letter-spacing: 0;
+}
+
+.lesson-list-page :deep(.page-header p) {
+  margin-top: 7px;
+  color: #697589;
+}
+
+.lesson-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.lesson-summary article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 12px;
+  min-height: 78px;
+  align-content: center;
+  border-right: 1px solid #edf1f6;
+  padding: 14px 18px;
+}
+
+.lesson-summary article:last-child {
+  border-right: 0;
+}
+
+.lesson-summary span,
+.lesson-summary small {
+  color: #7a8597;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lesson-summary strong {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  color: #172033;
+  font-size: 28px;
+  line-height: 1;
+}
+
 .lesson-catalog {
   overflow: hidden;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  background: #fff;
 }
 
 .catalog-toolbar {
@@ -645,8 +716,9 @@ async function publishLesson(lesson: LessonPlan) {
   grid-template-columns: minmax(260px, 1.4fr) minmax(150px, 0.5fr) minmax(170px, 0.6fr) auto;
   align-items: end;
   gap: 12px;
-  border-bottom: 1px solid #eceff5;
-  padding: 16px 18px;
+  border-bottom: 1px solid #edf1f6;
+  padding: 14px 16px;
+  background: #fbfcfe;
 }
 
 .result-count {
@@ -660,6 +732,22 @@ async function publishLesson(lesson: LessonPlan) {
   display: grid;
   min-width: 190px;
   gap: 4px;
+}
+
+.table-wrap table {
+  border-collapse: collapse;
+}
+
+.table-wrap th {
+  background: #fbfcfe;
+}
+
+.table-wrap tbody tr {
+  transition: background 0.16s ease;
+}
+
+.table-wrap tbody tr:hover {
+  background: #f8fbff;
 }
 
 .lesson-name > span,
@@ -836,6 +924,18 @@ async function publishLesson(lesson: LessonPlan) {
 }
 
 @media (max-width: 960px) {
+  .lesson-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .lesson-summary article:nth-child(2) {
+    border-right: 0;
+  }
+
+  .lesson-summary article:nth-child(-n + 2) {
+    border-bottom: 1px solid #edf1f6;
+  }
+
   .catalog-toolbar {
     grid-template-columns: 1fr 1fr;
   }
@@ -846,6 +946,19 @@ async function publishLesson(lesson: LessonPlan) {
 }
 
 @media (max-width: 620px) {
+  .lesson-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .lesson-summary article {
+    border-right: 0;
+    border-bottom: 1px solid #edf1f6;
+  }
+
+  .lesson-summary article:last-child {
+    border-bottom: 0;
+  }
+
   .catalog-toolbar {
     grid-template-columns: 1fr;
   }

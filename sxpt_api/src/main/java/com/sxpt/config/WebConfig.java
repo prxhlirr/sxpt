@@ -105,6 +105,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/system/**",
                         "/api/v1/auth/login",
                         "/api/v1/auth/token",
+                        "/api/v1/teaching-attachments/*/content",
                         "/swagger-ui.html",
                         "/swagger-resources/**",
                         "/webjars/**",
