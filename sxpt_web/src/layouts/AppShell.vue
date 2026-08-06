@@ -11,9 +11,14 @@ import { useTrainingStore } from '../stores/trainingStore';
 
 interface NavigationItem {
   label: string;
-  icon: string;
   to: RouteLocationRaw;
   group?: 'data-prepare' | 'basic-config';
+}
+
+interface NavigationSection {
+  label: string;
+  items: NavigationItem[];
+  to?: RouteLocationRaw;
 }
 
 interface DemoSwitchUser {
@@ -60,6 +65,9 @@ const navigation = computed<NavigationItem[]>(() => {
   const runtimeItems = buildRuntimeNavigation(runtimeContextStore.getVisibleMenus());
   return runtimeItems.length > 0 ? runtimeItems : staticItems;
 });
+const navigationSections = computed<NavigationSection[]>(() =>
+  buildNavigationSections(navigation.value)
+);
 const currentSession = ref<AuthSession | null>(authApi.getSession());
 const demoUsers = ref<DemoSwitchUser[]>([]);
 const accountMenuOpen = ref(false);
@@ -93,34 +101,34 @@ watch(
 function buildStaticNavigation(): NavigationItem[] {
   if (store.state.currentRole === 'teacher') {
     return [
-      { label: '教学工作台', icon: '01', to: '/teacher/dashboard' },
-      { label: '评阅反馈', icon: '02', to: '/teacher/review' },
-      { label: '批次准备', icon: '03', to: '/teacher/data-prepare', group: 'data-prepare' }
+      { label: '教学工作台', to: '/teacher/dashboard' },
+      { label: '评阅反馈', to: '/teacher/review' },
+      { label: '批次准备', to: '/teacher/data-prepare', group: 'data-prepare' }
     ];
   }
   if (store.state.currentRole === 'student') {
     return [
-      { label: '我的任务', icon: '01', to: '/student/tasks' },
-      { label: '成绩反馈', icon: '02', to: '/student/results' }
+      { label: '我的任务', to: '/student/tasks' },
+      { label: '成绩反馈', to: '/student/results' }
     ];
   }
   return [
-    { label: '运营总览', icon: '01', to: '/admin/overview' },
-    { label: '用户管理', icon: '02', to: '/admin/basic/users', group: 'basic-config' },
-    { label: '角色管理', icon: '03', to: '/admin/basic/roles', group: 'basic-config' },
-    { label: '单位管理', icon: '04', to: '/admin/basic/orgs', group: 'basic-config' },
-    { label: '用户角色', icon: '05', to: '/admin/basic/user-roles', group: 'basic-config' },
-    { label: '用户单位', icon: '06', to: '/admin/basic/user-orgs', group: 'basic-config' },
-    { label: '菜单管理', icon: '07', to: '/admin/basic/menus', group: 'basic-config' },
-    { label: '权限管理', icon: '08', to: '/admin/basic/permissions', group: 'basic-config' },
-    { label: '角色权限', icon: '09', to: '/admin/basic/role-permissions', group: 'basic-config' },
-    { label: '字典配置', icon: '10', to: '/admin/basic/dict-items', group: 'basic-config' },
-    { label: '教案管理', icon: '11', to: '/admin/lessons' },
-    { label: '平台接入', icon: '16', to: '/admin/data-prepare/systems', group: 'data-prepare' },
-    { label: '业务模块', icon: '17', to: '/admin/data-prepare/modules', group: 'data-prepare' },
-    { label: '模板管理', icon: '18', to: '/admin/data-prepare/templates', group: 'data-prepare' },
-    { label: '策略管理', icon: '19', to: '/admin/data-prepare/strategies', group: 'data-prepare' },
-    { label: '批次准备', icon: '20', to: '/admin/data-prepare', group: 'data-prepare' }
+    { label: '运营总览', to: '/admin/overview' },
+    { label: '用户管理', to: '/admin/basic/users', group: 'basic-config' },
+    { label: '角色管理', to: '/admin/basic/roles', group: 'basic-config' },
+    { label: '单位管理', to: '/admin/basic/orgs', group: 'basic-config' },
+    { label: '用户角色', to: '/admin/basic/user-roles', group: 'basic-config' },
+    { label: '用户单位', to: '/admin/basic/user-orgs', group: 'basic-config' },
+    { label: '菜单管理', to: '/admin/basic/menus', group: 'basic-config' },
+    { label: '权限管理', to: '/admin/basic/permissions', group: 'basic-config' },
+    { label: '角色权限', to: '/admin/basic/role-permissions', group: 'basic-config' },
+    { label: '字典配置', to: '/admin/basic/dict-items', group: 'basic-config' },
+    { label: '教案管理', to: '/admin/lessons' },
+    { label: '平台接入', to: '/admin/data-prepare/systems', group: 'data-prepare' },
+    { label: '业务模块', to: '/admin/data-prepare/modules', group: 'data-prepare' },
+    { label: '模板管理', to: '/admin/data-prepare/templates', group: 'data-prepare' },
+    { label: '策略管理', to: '/admin/data-prepare/strategies', group: 'data-prepare' },
+    { label: '批次准备', to: '/admin/data-prepare', group: 'data-prepare' }
   ];
 }
 
@@ -142,9 +150,8 @@ function buildRuntimeNavigation(menus: SysMenuConfig[]): NavigationItem[] {
       (menu) =>
         Boolean(menu.routePath) && !hiddenNavigationMenuCodes.has(menu.menuCode)
     )
-    .map((menu, index) => ({
+    .map((menu) => ({
       label: menu.menuName,
-      icon: menu.icon || String(menu.sortNo || index + 1).padStart(2, '0'),
       to: menu.routePath as string,
       group: resolveNavigationGroup(menu.routePath)
     }));
@@ -154,6 +161,46 @@ function resolveNavigationGroup(routePath?: string): NavigationItem['group'] {
   if (routePath?.startsWith('/admin/basic/')) return 'basic-config';
   if (routePath?.includes('/data-prepare')) return 'data-prepare';
   return undefined;
+}
+
+/**
+ * 业务功能：把运行时菜单整理成侧边栏展示层级。
+ * 关键流程：系统配置和数据准备类路由归入一级分组，其它业务入口保持一级菜单，
+ * 避免把用户、权限、模板等二级能力平铺成一长串导航。
+ */
+function buildNavigationSections(items: NavigationItem[]): NavigationSection[] {
+  const sections: NavigationSection[] = [];
+  const systemItems = items.filter((item) => item.group === 'basic-config');
+  const dataPrepareItems = items.filter((item) => item.group === 'data-prepare');
+  const primaryItems = items.filter((item) => !item.group);
+  const overviewItems = primaryItems.filter((item) => router.resolve(item.to).path === '/admin/overview');
+  const businessItems = primaryItems.filter((item) => router.resolve(item.to).path !== '/admin/overview');
+
+  overviewItems.forEach((item) => sections.push({ label: item.label, to: item.to, items: [] }));
+  if (systemItems.length > 0) {
+    sections.push({ label: '系统管理', items: systemItems });
+  }
+  businessItems.forEach((item) => sections.push({ label: item.label, to: item.to, items: [] }));
+  if (dataPrepareItems.length > 0) {
+    sections.push({ label: '数据准备', items: dataPrepareItems });
+  }
+  return sections;
+}
+
+/**
+ * 业务功能：判断一级分组是否包含当前路由。
+ * 关键流程：使用 vue-router 解析后的路径比较，保证刷新页面时当前分组默认展开。
+ */
+function isNavigationSectionActive(section: NavigationSection) {
+  if (section.to && isNavigationTargetActive(section.to)) {
+    return true;
+  }
+  return section.items.some((item) => isNavigationTargetActive(item.to));
+}
+
+function isNavigationTargetActive(target: RouteLocationRaw) {
+  const targetPath = router.resolve(target).path;
+  return route.path === targetPath || route.path.startsWith(`${targetPath}/`);
 }
 
 const currentRole = computed(
@@ -316,53 +363,43 @@ async function switchDemoUser(user: DemoSwitchUser) {
         </span>
       </RouterLink>
 
-      <div class="identity-card" aria-label="当前登录身份">
-        <span>{{ currentRole.shortLabel }}</span>
-        <div>
-          <small>当前身份</small>
-          <strong>{{ currentRole.label }}</strong>
-        </div>
-        <RouterLink to="/platforms" title="返回平台选择">↗</RouterLink>
-      </div>
-
       <p class="nav-caption">{{ currentRole.label }}功能</p>
       <nav class="main-nav">
-        <RouterLink
-          v-for="item in navigation"
-          :key="item.label"
-          :to="item.to"
-          :class="{
-            'data-prepare-nav': item.group === 'data-prepare',
-            'basic-config-nav': item.group === 'basic-config'
-          }"
-        >
-          <span class="nav-icon">{{ item.icon }}</span>
-          <span>{{ item.label }}</span>
-        </RouterLink>
+        <template v-for="section in navigationSections" :key="section.label">
+          <RouterLink
+            v-if="section.to"
+            class="nav-link nav-link--primary"
+            :to="section.to"
+          >
+            <span>{{ section.label }}</span>
+          </RouterLink>
+          <details
+            v-else
+            class="nav-section"
+            :open="isNavigationSectionActive(section)"
+          >
+            <summary>
+              <span>{{ section.label }}</span>
+              <span aria-hidden="true">⌄</span>
+            </summary>
+            <div class="nav-section__children">
+              <RouterLink
+                v-for="item in section.items"
+                :key="item.label"
+                class="nav-link nav-link--child"
+                :to="item.to"
+              >
+                <span>{{ item.label }}</span>
+              </RouterLink>
+            </div>
+          </details>
+        </template>
       </nav>
-
-      <section class="sidebar-flow">
-        <span class="sidebar-flow__label">当前业务链</span>
-        <strong>采购审批实训</strong>
-        <div class="mini-progress">
-          <span style="width: 72%"></span>
-        </div>
-        <small>教案 / 考试 / 分组 / 数据 / 发布</small>
-      </section>
-
-      <footer class="sidebar-footer">
-        <span class="avatar">师</span>
-        <span><strong>教师账号</strong><small>平台管理员</small></span>
-        <button type="button" aria-label="更多账号操作">···</button>
-      </footer>
     </aside>
 
     <section class="app-workspace">
       <header class="topbar">
-        <div>
-          <span class="breadcrumb">业务实训平台 / {{ currentRole.label }}</span>
-          <strong>{{ String(route.meta.title ?? '工作台') }}</strong>
-        </div>
+        <div aria-hidden="true"></div>
         <div class="topbar-actions">
           <div ref="accountSwitcherRoot" class="account-switcher">
             <button

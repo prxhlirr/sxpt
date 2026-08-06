@@ -20,6 +20,7 @@ import com.sxpt.module.teachingdata.mapper.TeachingDataPoolMapper;
 import com.sxpt.module.teachingdata.service.DataInstanceAllocationService;
 import com.sxpt.module.teachingdata.service.DataPrepareFacadeService;
 import com.sxpt.module.teachingdata.service.DataRequirementGenerationService;
+import com.sxpt.module.teachingdata.service.PracticeRestartOrchestrationService;
 import com.sxpt.module.teachingdata.service.StudentDataLaunchService;
 import com.sxpt.module.teachingdata.vo.StudentDataLaunchVO;
 import com.sxpt.module.user.entity.TeachUser;
@@ -70,6 +71,8 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
 
     private final PlatformLaunchContextService platformLaunchContextService;
 
+    private final PracticeRestartOrchestrationService practiceRestartOrchestrationService;
+
     @Autowired
     public StudentDataLaunchServiceImpl(DataInstanceAllocationMapper dataInstanceAllocationMapper,
                                         TeachUserMapper teachUserMapper,
@@ -77,7 +80,8 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
                                         TeachingDataPoolMapper teachingDataPoolMapper,
                                         DataPrepareFacadeService dataPrepareFacadeService,
                                         DataInstanceAllocationService dataInstanceAllocationService,
-                                        PlatformLaunchContextService platformLaunchContextService) {
+                                        PlatformLaunchContextService platformLaunchContextService,
+                                        PracticeRestartOrchestrationService practiceRestartOrchestrationService) {
         this.dataInstanceAllocationMapper = dataInstanceAllocationMapper;
         this.teachUserMapper = teachUserMapper;
         this.dataRequirementItemMapper = dataRequirementItemMapper;
@@ -85,11 +89,12 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         this.dataPrepareFacadeService = dataPrepareFacadeService;
         this.dataInstanceAllocationService = dataInstanceAllocationService;
         this.platformLaunchContextService = platformLaunchContextService;
+        this.practiceRestartOrchestrationService = practiceRestartOrchestrationService;
     }
 
     public StudentDataLaunchServiceImpl(DataInstanceAllocationMapper dataInstanceAllocationMapper,
                                         PlatformLaunchContextService platformLaunchContextService) {
-        this(dataInstanceAllocationMapper, null, null, null, null, null, platformLaunchContextService);
+        this(dataInstanceAllocationMapper, null, null, null, null, null, platformLaunchContextService, null);
     }
 
     /**
@@ -136,6 +141,9 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
     @Override
     @Transactional(rollbackFor = Exception.class)
     public DataInstanceAllocation recreateAllocationForCurrentStudentTask(CreateStudentTaskLaunchRequest request) {
+        if (practiceRestartOrchestrationService != null) {
+            return practiceRestartOrchestrationService.restartCurrentStudentTaskData(request);
+        }
         requireRestartDependencies();
         validateTaskLaunchRequest(request);
         CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();

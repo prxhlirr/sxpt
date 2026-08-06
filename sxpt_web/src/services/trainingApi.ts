@@ -582,6 +582,7 @@ export interface CreateStudentTaskLaunchRequest {
   taskId: string;
   sceneType: string;
   executionId?: string;
+  sourceAllocationId?: string;
 }
 
 export interface StudentDataLaunchResult {
