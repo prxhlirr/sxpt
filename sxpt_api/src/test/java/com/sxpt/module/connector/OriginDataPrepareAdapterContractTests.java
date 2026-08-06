@@ -1,14 +1,11 @@
 package com.sxpt.module.connector;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.module.connector.entity.ConnectorSystem;
-import com.sxpt.module.connector.entity.IdentityBinding;
 import com.sxpt.module.connector.entity.PlatformCapability;
-import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
-import com.sxpt.module.connector.mapper.IdentityBindingMapper;
 import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
-import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.connector.service.impl.HttpOriginDataPrepareAdapter;
 import org.junit.jupiter.api.Test;
@@ -156,8 +153,6 @@ class OriginDataPrepareAdapterContractTests {
     void httpAdapterShouldMapOaStandardBatchCreateContract() {
         ConnectorSystemMapper systemMapper = mock(ConnectorSystemMapper.class);
         PlatformCapabilityMapper capabilityMapper = mock(PlatformCapabilityMapper.class);
-        TeachingDataTemplateMapper templateMapper = mock(TeachingDataTemplateMapper.class);
-        IdentityBindingMapper identityBindingMapper = mock(IdentityBindingMapper.class);
         RestTemplate restTemplate = mock(RestTemplate.class);
 
         ConnectorSystem system = new ConnectorSystem();
@@ -174,23 +169,15 @@ class OriginDataPrepareAdapterContractTests {
                 "{\"contract\":\"TEACHING_DATA_BATCH_CREATE_V1\","
                         + "\"defaultPoolKey\":\"incoming-default\",\"preferPoolKey\":true}");
 
-        TeachingDataTemplate template = new TeachingDataTemplate();
-        template.setId("template-1");
-        template.setTemplateCode("incoming_pending_reg_v1");
-        template.setInitState("PENDING_REG");
-        template.setConfigJson("{\"bizParams\":{}}");
-
         when(systemMapper.selectOne(any(QueryWrapper.class))).thenReturn(system);
         when(capabilityMapper.selectOne(any(QueryWrapper.class))).thenReturn(capability);
-        when(templateMapper.selectOne(any(QueryWrapper.class))).thenReturn(template);
-        when(identityBindingMapper.selectOne(any(QueryWrapper.class))).thenReturn((IdentityBinding) null);
         when(restTemplate.exchange(
                 eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
                 eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
                 .thenReturn(new ResponseEntity<>(standardSuccessResponse(), HttpStatus.OK));
 
         HttpOriginDataPrepareAdapter adapter = new HttpOriginDataPrepareAdapter(
-                systemMapper, capabilityMapper, templateMapper, identityBindingMapper, restTemplate);
+                systemMapper, capabilityMapper, restTemplate);
         OriginDataPrepareAdapter.BatchCreateResponse response =
                 adapter.createTeachingData(createStandardRequest());
 
@@ -199,7 +186,7 @@ class OriginDataPrepareAdapterContractTests {
                 eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
                 eq(HttpMethod.POST), entityCaptor.capture(), eq(String.class));
         HttpEntity entity = entityCaptor.getValue();
-        Map<String, Object> body = (Map<String, Object>) entity.getBody();
+        Map<String, Object> body = new ObjectMapper().convertValue(entity.getBody(), Map.class);
         assertNotNull(body);
         assertEquals("doc_incoming", body.get("businessModuleCode"));
         assertEquals("incoming_pending_reg_v1", body.get("templateCode"));
@@ -226,6 +213,7 @@ class OriginDataPrepareAdapterContractTests {
         item.setRequestItemId("item-1");
         item.setStudentId("student-1");
         item.setRequiredExternalOrgId("teaching-org-1");
+        item.setQuestionId("incoming-default");
 
         OriginDataPrepareAdapter.BatchCreateRequest request = new OriginDataPrepareAdapter.BatchCreateRequest();
         request.setTenantId("tenant-1");
@@ -237,6 +225,8 @@ class OriginDataPrepareAdapterContractTests {
         request.setRequestBatchId("batch-1");
         request.setTraceId("trace-1");
         request.setIdempotencyKey("idem-1");
+        request.setRequestJson("{\"templateCode\":\"incoming_pending_reg_v1\","
+                + "\"initState\":\"PENDING_REG\",\"traceId\":\"trace-1\",\"bizParams\":{}}");
         request.setItems(Collections.singletonList(item));
         return request;
     }
