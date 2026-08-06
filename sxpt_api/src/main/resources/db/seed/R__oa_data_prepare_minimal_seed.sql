@@ -229,8 +229,12 @@ INSERT INTO platform_capability (
             "requiredHeaders": ["Authorization", "X-Trace-Id", "X-Idempotency-Key"],
             "required": ["businessModuleCode", "templateCode", "initState", "participants"],
             "participantFields": ["participantId", "ownerUserId", "externalUserId", "externalOrgId", "poolKey"],
+            "businessModuleCode": "doc_incoming",
+            "templateCode": "incoming_pending_reg_v1",
+            "initState": "PENDING_REG",
             "defaultPoolKey": "incoming-default",
-            "preferPoolKey": true
+            "preferPoolKey": true,
+            "forwardBizParams": false
         }$$::jsonb,
         $${
             "wrapper": "ApiResult",
