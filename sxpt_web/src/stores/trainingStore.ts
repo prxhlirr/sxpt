@@ -10,6 +10,7 @@ import type {
   LessonPlan,
   LessonStage,
   PortalRole,
+  PracticeStepResult,
   PublishedTask,
   RecordedStep,
   RunMode,
@@ -27,11 +28,11 @@ import {
 } from '../services/trainingApi';
 import {
   backendTrainingApi,
-  type BackendTrainingApi
+  type BackendTrainingApi,
+  type PracticeActionEvidence
 } from '../services/backendTrainingApi';
 import { getApiConfig } from '../config/api';
 import { createDefaultBusinessPlatforms } from '../data/mockSeed';
-import { usersApi } from '../api/users';
 
 export interface TrainingStoreOptions {
   api?: TrainingApi;
@@ -954,6 +955,28 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return persistLessonMutation(() => duplicateLesson(lessonId));
   }
 
+  function deleteLesson(lessonId: string): LessonPlan {
+    const lesson = requireLesson(lessonId);
+    state.lessons = state.lessons.filter((candidate) => candidate.id !== lessonId);
+    delete state.examSettings[lessonId];
+    delete state.groupPlans[lessonId];
+    delete state.unitDataPlans[lessonId];
+    delete state.dataItems[lessonId];
+    state.publishedTasks = state.publishedTasks.filter(
+      (task) => task.lessonId !== lessonId
+    );
+    state.studentTasks = state.studentTasks.filter(
+      (task) => task.lessonId !== lessonId
+    );
+    addActivity('LESSON_DELETED', `删除教案：${lesson.title}`, lesson.code);
+    persist();
+    return lesson;
+  }
+
+  async function deleteLessonRemote(lessonId: string): Promise<LessonPlan> {
+    return persistLessonMutation(() => deleteLesson(lessonId));
+  }
+
   async function persistLessonMutation(
     mutate: () => LessonPlan
   ): Promise<LessonPlan> {
@@ -965,7 +988,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     try {
       const lesson = mutate();
       await flushAuthenticatedWorkspace();
-      return requireLesson(lesson.id);
+      return lesson;
     } catch (error) {
       if (workspaceSaveTimer) {
         clearTimeout(workspaceSaveTimer);
@@ -1162,15 +1185,12 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
 
   function markLessonLectureCompleted(lessonId: string): LessonPlan {
     const lesson = requireLesson(lessonId);
-    if (lesson.status !== 'PUBLISHED') {
-      throw new Error('请先完成教案备案并发布，再进行教师讲解');
-    }
     lesson.lectureCompletedAt = now();
     lesson.updatedAt = lesson.lectureCompletedAt;
     addActivity(
       'LESSON_LECTURE_COMPLETED',
       `完成教师讲解：${lesson.title}`,
-      '已按备案步骤完整讲解，可发布学习与练习任务'
+      '教师讲解已完成，可发布学习与练习任务'
     );
     persist();
     return lesson;
@@ -1393,6 +1413,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         status: 'TODO',
         currentStageIndex: 0,
         completedStageIds: [],
+        completedPracticeStepIds: [],
+        practiceStepResults: [],
         syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
       });
     });
@@ -1459,14 +1481,16 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
           (task) =>
             task.publishedTaskId === published.id && task.mode === mode
         );
-        published.dataCount = await runRemote('自动准备原平台初始数据', () =>
-          backend.prepareInitialDataForPublishedTask(
-            toPlain(lesson),
-            toPlain(platform),
-            toPlain(published),
-            toPlain(assignedStudentTasks)
-          )
-        );
+        published.dataCount = assignedStudentTasks.length
+          ? await runRemote('自动准备原平台初始数据', () =>
+              backend.prepareInitialDataForPublishedTask(
+                toPlain(lesson),
+                toPlain(platform),
+                toPlain(published),
+                toPlain(assignedStudentTasks)
+              )
+            )
+          : 0;
       }
       published.syncStatus = 'SYNCED';
       delete published.syncError;
@@ -1503,38 +1527,29 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     lessonId: string
   ): Promise<PublishedTask[]> {
     let lesson = requireLesson(lessonId);
-    if (lesson.status !== 'PUBLISHED') {
-      throw new Error('请先完成教案备案并发布');
-    }
-    if (!lesson.teachingPointId && backend.isEnabled()) {
-      await publishLessonRemote(lessonId);
-      lesson = requireLesson(lessonId);
-    }
-    if (!lesson.teachingPointId) {
-      throw new Error('教案教学点尚未发布，请重新执行备案发布');
-    }
+    // 学习、练习发布只设置一个业务门槛：教师已完成讲解。
     if (!lesson.lectureCompletedAt) {
       throw new Error('请先在教师讲解页完整讲解一遍备案流程');
     }
-    if (
-      backend.isEnabled() &&
-      !(state.groupPlans[lessonId]?.members.length)
-    ) {
-      throw new Error('请先在分组设置中选择真实学生账号，再发布学习与练习任务');
-    }
-    if (backend.isEnabled() && authApi.getSession()) {
-      const realStudents = await usersApi.listStudents();
-      const realStudentIds = new Set(
-        realStudents.map((student) => student.studentId)
+    if (!lesson.teachingPointId && backend.isEnabled()) {
+      const platform = requireBusinessPlatform(lesson.businessPlatformId);
+      const binding = await runRemote('自动创建任务教学点', () =>
+        backend.publishLesson(toPlain(lesson), toPlain(platform))
       );
-      const invalidMembers = (
-        state.groupPlans[lessonId]?.members ?? []
-      ).filter((member) => !realStudentIds.has(member.studentId));
-      if (invalidMembers.length) {
-        throw new Error(
-          `分组中有 ${invalidMembers.length} 个演示或已失效账号，请进入分组设置重新选择真实学生`
-        );
-      }
+      lesson.teachingPointId = binding.teachingPointId;
+      lesson.captureSessionFinished =
+        lesson.captureSessionFinished || binding.finishedCaptureSession;
+      lesson.stages.forEach((stage) => {
+        stage.recordedSteps.forEach((step) => {
+          const resourceId = binding.resourceIdsByStepId[step.id];
+          if (resourceId) step.remoteResourceId = resourceId;
+        });
+      });
+      lesson.status = 'PUBLISHED';
+      lesson.publishedAt ??= now();
+      lesson.updatedAt = now();
+      persist();
+      lesson = requireLesson(lessonId);
     }
     const learning = ensureSimulatedModeTask(lessonId, 'LEARNING');
     const practice = ensureSimulatedModeTask(lessonId, 'PRACTICE');
@@ -2069,6 +2084,124 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     }
   }
 
+  function syncPracticeStagesFromEvidence(
+    task: StudentTask,
+    lesson: LessonPlan
+  ): void {
+    const completedStepIds = new Set(task.completedPracticeStepIds ?? []);
+    const practiceStages = lesson.stages.filter(
+      (stage) =>
+        stage.visibility.PRACTICE &&
+        stage.recordedSteps.some(
+          (step) => step.kind !== 'guide' && step.actionType !== 'guide'
+        )
+    );
+
+    for (const stage of practiceStages) {
+      const monitoredSteps = stage.recordedSteps.filter(
+        (step) => step.kind !== 'guide' && step.actionType !== 'guide'
+      );
+      if (
+        task.completedStageIds.includes(stage.id) ||
+        !monitoredSteps.every((step) => completedStepIds.has(step.id))
+      ) {
+        continue;
+      }
+      task.completedStageIds.push(stage.id);
+      addActivity(
+        'STUDENT_PRACTICE_STAGE_EVIDENCE_COMPLETED',
+        `${task.studentName}完成练习教学点：${stage.name}`,
+        '依据原业务系统实际操作点轨迹自动判定'
+      );
+    }
+    task.currentStageIndex = Math.max(
+      task.currentStageIndex,
+      ...task.completedStageIds.map(
+        (stageId) =>
+          lesson.stages.findIndex((candidate) => candidate.id === stageId) + 1
+      )
+    );
+  }
+
+  async function recordStudentPracticeStepRemote(
+    taskId: string,
+    stageId: string,
+    stepId: string,
+    evidence: PracticeActionEvidence
+  ): Promise<StudentTask> {
+    const task = requireStudentTask(taskId);
+    requireRunningExam(task);
+    assertAttemptWithinDuration(task);
+    if (task.mode !== 'PRACTICE' || task.status !== 'DOING') {
+      throw new Error('只有进行中的练习任务可以记录操作点');
+    }
+    if (task.completedPracticeStepIds?.includes(stepId)) return task;
+
+    const lesson = requireLesson(task.lessonId);
+    const stage = requireStage(lesson, stageId);
+    const step = stage.recordedSteps.find((candidate) => candidate.id === stepId);
+    if (!step || step.kind === 'guide' || step.actionType === 'guide') {
+      throw new Error('未找到可评分的练习操作点');
+    }
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    if (backend.isEnabled() && (!published || !task.remoteExecutionId)) {
+      throw new Error('后端练习执行尚未开始，不能记录操作点');
+    }
+
+    task.syncStatus = backend.isEnabled() ? 'SYNCING' : 'LOCAL';
+    delete task.syncError;
+    persist();
+    try {
+      const binding =
+        backend.isEnabled() && published
+          ? await runRemote('上报学生练习操作点', () =>
+              backend.reportStudentPracticeStep(
+                toPlain(lesson),
+                toPlain(stage),
+                toPlain(step),
+                toPlain(published),
+                toPlain(task),
+                toPlain(evidence)
+              )
+            )
+          : {
+              clientTraceId: `${task.id}:${task.attemptNumber}:${step.id}:practice-completed`,
+              traceId: ''
+            };
+      if (task.completedPracticeStepIds?.includes(stepId)) return task;
+
+      const recordedActionType: PracticeStepResult['recordedActionType'] =
+        step.actionType ?? 'click';
+      task.completedPracticeStepIds ??= [];
+      task.practiceStepResults ??= [];
+      task.completedPracticeStepIds.push(stepId);
+      task.practiceStepResults.push({
+        stepId,
+        stageId,
+        clientTraceId: binding.clientTraceId,
+        recordedActionType,
+        observedActionType: evidence.actionType,
+        observedSelector: evidence.selector,
+        observedUrl: evidence.url,
+        completedAt: evidence.completedAt,
+        remoteTraceId: binding.traceId || undefined
+      });
+      syncPracticeStagesFromEvidence(task, lesson);
+      task.syncStatus = backend.isEnabled() ? 'SYNCED' : 'LOCAL';
+      delete task.syncError;
+      persist();
+      return task;
+    } catch (error) {
+      task.syncStatus = 'FAILED';
+      task.syncError =
+        error instanceof Error ? error.message : '练习操作点轨迹上报失败';
+      persist();
+      throw error;
+    }
+  }
+
   function submitStudentTask(
     taskId: string,
     submissionValues: Record<string, string> = {}
@@ -2078,11 +2211,20 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     assertAttemptWithinDuration(task);
     if (task.status !== 'DOING') throw new Error('只有办理中的任务可以提交');
     const lesson = requireLesson(task.lessonId);
-    const assignedStages = lesson.stages.filter(
-      (stage) =>
-        stage.visibility[task.mode] &&
-        task.groupKeys.includes(stage.groupKey)
-    );
+    const assignedStages =
+      task.mode === 'PRACTICE'
+        ? lesson.stages.filter(
+            (stage) =>
+              stage.visibility.PRACTICE &&
+              stage.recordedSteps.some(
+                (step) => step.kind !== 'guide' && step.actionType !== 'guide'
+              )
+          )
+        : lesson.stages.filter(
+            (stage) =>
+              stage.visibility[task.mode] &&
+              task.groupKeys.includes(stage.groupKey)
+          );
     if (
       assignedStages.some(
         (stage) => stage.required && !task.completedStageIds.includes(stage.id)
@@ -2203,6 +2345,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     task.status = 'TODO';
     task.currentStageIndex = 0;
     task.completedStageIds = [];
+    task.completedPracticeStepIds = [];
+    task.practiceStepResults = [];
     task.submissionValues = {};
     delete task.objectiveScore;
     delete task.subjectiveScore;
@@ -2527,6 +2671,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     createLessonRemote,
     duplicateLesson,
     duplicateLessonRemote,
+    deleteLesson,
+    deleteLessonRemote,
     updateLesson,
     addStage,
     updateStage,
@@ -2554,6 +2700,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     startStudentTaskRemote,
     completeStudentStage,
     completeStudentStageRemote,
+    recordStudentPracticeStepRemote,
     submitStudentTask,
     submitStudentTaskRemote,
     restartLearningOrPractice,

@@ -248,6 +248,48 @@ describe('lesson authoring', () => {
     expect(copied.id).not.toBe(lesson.id);
   });
 
+  it('deletes a lesson together with its release configuration and student tasks', async () => {
+    const store = createTrainingStore({
+      storage: createMemoryStorage(),
+      backend: { isEnabled: () => false } as BackendTrainingApi,
+      now: () => '2026-07-25T08:00:00.000Z'
+    });
+    const { lesson } = configurePublishableExam(store);
+    store.markLessonLectureCompleted(lesson.id);
+    await store.publishLearningAndPracticeRemote(lesson.id);
+
+    expect(store.state.publishedTasks.some((task) => task.lessonId === lesson.id)).toBe(true);
+    expect(store.state.studentTasks.some((task) => task.lessonId === lesson.id)).toBe(true);
+
+    const deleted = store.deleteLesson(lesson.id);
+
+    expect(deleted.id).toBe(lesson.id);
+    expect(store.getLesson(lesson.id)).toBeUndefined();
+    expect(store.state.examSettings[lesson.id]).toBeUndefined();
+    expect(store.state.groupPlans[lesson.id]).toBeUndefined();
+    expect(store.state.unitDataPlans[lesson.id]).toBeUndefined();
+    expect(store.state.dataItems[lesson.id]).toBeUndefined();
+    expect(store.state.publishedTasks.some((task) => task.lessonId === lesson.id)).toBe(false);
+    expect(store.state.studentTasks.some((task) => task.lessonId === lesson.id)).toBe(false);
+  });
+
+  it('uses teacher lecture as the only learning and practice release gate', async () => {
+    const store = createTrainingStore({
+      storage: createMemoryStorage(),
+      backend: { isEnabled: () => false } as BackendTrainingApi,
+      now: () => '2026-07-25T08:00:00.000Z'
+    });
+    const lesson = editableLesson(store);
+    store.addStage(lesson.id, recordedStage('handler', 80, '经办'));
+
+    await expect(store.publishLearningAndPracticeRemote(lesson.id)).rejects.toThrow('教师讲解');
+
+    store.markLessonLectureCompleted(lesson.id);
+    const tasks = await store.publishLearningAndPracticeRemote(lesson.id);
+
+    expect(tasks.map((task) => task.mode)).toEqual(['LEARNING', 'PRACTICE']);
+  });
+
   it('adds, updates, reorders and removes serial stages', () => {
     const store = deterministicStore();
     const lesson = editableLesson(store);
@@ -826,6 +868,85 @@ describe('published exam business chain', () => {
       revision: 2
     });
     expect(published.completedCount).toBe(0);
+  });
+
+  it('completes the whole practice flow even when an old task role no longer matches lesson stages', async () => {
+    let sequence = 0;
+    const store = createTrainingStore({
+      storage: createMemoryStorage(),
+      backend: { isEnabled: () => false } as BackendTrainingApi,
+      now: () => '2026-07-25T08:00:00.000Z',
+      idFactory: (prefix) => `${prefix}-${++sequence}`
+    });
+    const lesson = editableLesson(store);
+    const first = store.addStage(lesson.id, recordedStage('handler', 40, '经办'));
+    const second = store.addStage(lesson.id, recordedStage('reviewer', 40, '审核'));
+    const taskId = 'student-practice-legacy-role';
+    store.state.publishedTasks.push({
+      id: 'published-practice',
+      lessonId: lesson.id,
+      title: '完整业务流程练习',
+      mode: 'PRACTICE',
+      status: 'RUNNING',
+      startAt: '2026-07-25T07:00:00.000Z',
+      endAt: '2026-07-25T09:00:00.000Z',
+      assignedCount: 1,
+      groupCount: 1,
+      dataCount: 0,
+      completedCount: 0
+    });
+    store.state.studentTasks.push({
+      id: taskId,
+      publishedTaskId: 'published-practice',
+      lessonId: lesson.id,
+      studentId: 'student-practice',
+      studentName: '练习学员',
+      title: '完整业务流程练习',
+      mode: 'PRACTICE',
+      groupKey: 'legacy-role',
+      groupKeys: ['legacy-role'],
+      unitId: 'unit-practice',
+      unitName: '练习班级',
+      dataItemId: 'simulated-practice',
+      attemptNumber: 1,
+      submissionValues: {},
+      status: 'TODO',
+      currentStageIndex: 0,
+      completedStageIds: [],
+      completedPracticeStepIds: [],
+      practiceStepResults: []
+    });
+
+    store.startStudentTask(taskId);
+    await store.recordStudentPracticeStepRemote(
+      taskId,
+      first.id,
+      first.recordedSteps[0].id,
+      {
+        actionType: 'click',
+        selector: first.recordedSteps[0].selector,
+        completedAt: '2026-07-25T08:10:00.000Z'
+      }
+    );
+    await store.recordStudentPracticeStepRemote(
+      taskId,
+      second.id,
+      second.recordedSteps[0].id,
+      {
+        actionType: 'click',
+        selector: second.recordedSteps[0].selector,
+        completedAt: '2026-07-25T08:20:00.000Z'
+      }
+    );
+
+    expect(store.state.studentTasks.at(-1)?.completedStageIds).toEqual([
+      first.id,
+      second.id
+    ]);
+    expect(store.submitStudentTask(taskId)).toMatchObject({
+      status: 'SUBMITTED',
+      objectiveScore: 80
+    });
   });
 
   it('restarts a completed learning task from the first recorded stage', () => {

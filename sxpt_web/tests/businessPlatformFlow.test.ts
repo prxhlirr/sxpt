@@ -236,15 +236,12 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(runner).toContain('<LessonPlaybackPlayer');
     expect(runner).toContain('v-if="isLearning"');
     expect(runner).toContain('legacyLearningPlaybackEnabled = false');
-    expect(runner).toContain(
-      "() => [task.value?.id, task.value?.status] as const"
-    );
+    expect(runner).toContain('task.value?.attemptNumber] as const');
     expect(runner).toContain('正在初始化任务');
     expect(runner).toContain("if (task.value.mode === 'LEARNING')");
     expect(runner).toContain('return lesson.value.stages');
-    expect(runner).toContain(
-      "if (task.value?.mode === 'LEARNING')"
-    );
+    expect(runner).toContain("task.value?.mode === 'LEARNING'");
+    expect(runner).toContain("task.value?.mode === 'PRACTICE'");
     expect(runner).toContain('playbackStages.value.map((stage) => stage.id)');
     expect(runner).toContain('currentLearningInstruction');
     expect(runner).toContain('学习内容与教师讲解一致');
@@ -288,43 +285,36 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(businessPage).toContain('pageSnapshot: createPageSnapshot()');
   });
 
-  it('练习清空备案表单值，并在点击或录入后按节点自动推进', () => {
-    const snapshot = source('src/utils/businessSnapshot.ts');
-    const snapshotFrame = source(
-      'src/components/lesson/BusinessSnapshotFrame.vue'
-    );
-    const businessPage = source('public/lesson-business-capture.html');
+  it('练习全屏打开原业务系统，自由操作并在后台静默记录评分点', () => {
     const runner = source('src/views/student/StudentTaskRunnerView.vue');
+    const captureFrame = source(
+      'src/components/lesson/BusinessCaptureFrame.vue'
+    );
+    const backend = source('src/services/backendTrainingApi.ts');
+    const store = source('src/stores/trainingStore.ts');
 
+    expect(runner).toContain('<BusinessCaptureFrame');
+    expect(runner).toContain('class="practice-live-business-view"');
+    expect(runner).toContain(':src="practiceBusinessUrl"');
+    expect(runner).toContain('monitor-actions');
+    expect(runner).toContain(':show-resolution="false"');
+    expect(runner).toContain('v-else-if="!isPractice && displayedLearningStep"');
+    expect(runner).toContain('pendingPracticeStepIds');
+    expect(runner).toContain('recordStudentPracticeStepRemote');
+    expect(runner).toContain('finishPracticeWhenEvidenceComplete');
+    expect(runner).toContain("task.value?.mode === 'PRACTICE'");
     expect(runner).toContain(
-      ':clear-form-values="task.mode === \'PRACTICE\'"'
+      'return new Set(playbackStages.value.map((stage) => stage.id))'
     );
-    expect(runner).toContain(
-      "const isPractice = computed(() => task.value?.mode === 'PRACTICE');"
-    );
-    expect(runner).toContain(
-      '.filter(({ step }) => !isPractice.value || !isGuideStep(step))'
-    );
-    expect(runner).toContain('isPractice || showStageIntroduction');
-    expect(runner).toContain(
-      '!isPractice && showStageIntroduction && currentLearningStep'
-    );
-    expect(runner).toContain('!isPractice &&');
-    expect(runner).not.toContain(
-      'errorMessage.value = `当前应完成“${currentLearningStep.value.step.actionLabel}”'
-    );
-    expect(snapshotFrame).toContain('SXPT_SET_STUDENT_MODE');
-    expect(snapshotFrame).toContain('snapshotFrameKey');
-    expect(snapshotFrame).toContain("'is-interactive': interactive && frameReady");
-    expect(snapshotFrame).toContain('@load="handleFrameLoad"');
-    expect(snapshotFrame).toContain("message.type === 'SXPT_TARGET_RECT'");
-    expect(snapshotFrame).toContain('window.setTimeout(markFrameReady, 300)');
-    expect(snapshotFrame).toContain('正在初始化当前操作');
-    expect(snapshot).toContain('clearFormValues');
-    expect(snapshot).toContain("document.addEventListener('input'");
-    expect(businessPage).toContain('message.type === "SXPT_SET_STUDENT_MODE"');
-    expect(businessPage).toContain('studentMode !== "PRACTICE"');
-    expect(businessPage).toContain('composingStudentInput');
+    expect(captureFrame).toContain("studentMode?: 'LEARNING' | 'PRACTICE'");
+    expect(captureFrame).toContain('monitorActions?: boolean');
+    expect(captureFrame).toContain("type: 'SET_RECORDING_STATE', enabled: true, monitorOnly: true");
+    expect(backend).toContain('reportStudentPracticeStep(');
+    expect(backend).toContain('traceType: mapStepActionType(step)');
+    expect(store).toContain('completedPracticeStepIds');
+    expect(store).toContain('syncPracticeStagesFromEvidence');
+    expect(store).toContain("task.mode === 'PRACTICE'");
+    expect(store).toContain('stage.visibility.PRACTICE &&');
   });
 
   it('考试界面仅保留可隐藏的任务说明浮栏', () => {

@@ -49,7 +49,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = SxptApiApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@TestPropertySource(properties = "sxpt.connector.launch-context-controller.enabled=true")
+@TestPropertySource(properties = {
+        "sxpt.connector.launch-context-controller.enabled=true",
+        "sxpt.origin.adapter-mode=local"
+})
 class PlatformLaunchContextControllerTests {
 
     @Autowired
@@ -154,6 +157,16 @@ class PlatformLaunchContextControllerTests {
                 .andExpect(jsonPath("$.timestamp", notNullValue()));
     }
 
+    @Test
+    void createShouldStillRequireTeachingPlatformLogin() throws Exception {
+        mockMvc.perform(post("/api/v1/connector/launch-contexts/create")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"connectorSystemId\":\"connector_001\",\"sceneType\":\"RECORD\",\"sdkMode\":\"CAPTURE\",\"targetUrl\":\"/record/apply\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.code", is(401)));
+    }
+
     /**
      * 构造 Service 返回的已保存启动上下文。
      *
@@ -182,7 +195,6 @@ class PlatformLaunchContextControllerTests {
         when(platformLaunchContextService.verifyLaunchToken("tenant_001", "ctx_token_001")).thenReturn(saved);
 
         mockMvc.perform(post("/api/v1/connector/launch-contexts/verify")
-                        .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tenantId\":\"tenant_001\",\"launchToken\":\"ctx_token_001\"}"))
                 .andExpect(status().isOk())
@@ -210,7 +222,6 @@ class PlatformLaunchContextControllerTests {
     @Test
     void verifyShouldRejectMissingLaunchToken() throws Exception {
         mockMvc.perform(post("/api/v1/connector/launch-contexts/verify")
-                        .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tenantId\":\"tenant_001\"}"))
                 .andExpect(status().isBadRequest())
@@ -232,7 +243,6 @@ class PlatformLaunchContextControllerTests {
         when(platformLaunchContextService.markLaunchContextUsed("launch_001")).thenReturn(saved);
 
         mockMvc.perform(post("/api/v1/connector/launch-contexts/used")
-                        .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"id\":\"launch_001\"}"))
                 .andExpect(status().isOk())
@@ -259,7 +269,6 @@ class PlatformLaunchContextControllerTests {
         when(platformLaunchContextService.markLaunchContextFailed("launch_001", "原平台 session 建立失败")).thenReturn(saved);
 
         mockMvc.perform(post("/api/v1/connector/launch-contexts/failed")
-                        .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"id\":\"launch_001\",\"errorMessage\":\"原平台 session 建立失败\"}"))
                 .andExpect(status().isOk())
@@ -281,7 +290,6 @@ class PlatformLaunchContextControllerTests {
     @Test
     void markFailedShouldRejectMissingErrorMessage() throws Exception {
         mockMvc.perform(post("/api/v1/connector/launch-contexts/failed")
-                        .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"id\":\"launch_001\"}"))
                 .andExpect(status().isBadRequest())

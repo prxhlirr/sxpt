@@ -224,8 +224,7 @@ describe('后台考试链路页面', () => {
     const pages = [
       examSetupSource,
       groupSetupSource,
-      examDataSource,
-      publishCenterSource
+      examDataSource
     ];
 
     pages.forEach((page) => {
@@ -239,7 +238,8 @@ describe('后台考试链路页面', () => {
     expect(pages[0]).toContain('store.saveExamSettings');
     expect(pages[1]).toContain('store.saveGroupPlan');
     expect(pages[2]).toContain('store.generateData');
-    expect(pages[3]).toContain('store.publishExam');
+    expect(publishCenterSource).not.toContain('WorkflowStepper');
+    expect(publishCenterSource).not.toContain('store.publishExam');
   });
 
   it('分组界面不写死 A/B，支持角色增删、成员多角色和账号映射', () => {
@@ -269,13 +269,15 @@ describe('后台考试链路页面', () => {
     ].forEach((keyword) => expect(page).toContain(keyword));
   });
 
-  it('发布中心展示阻断原因，并在发布成功后连接教师监控和学生任务', () => {
+  it('发布中心只保留教师讲解与学习练习发布，并自动准备练习数据', () => {
     const page = publishCenterSource;
 
-    expect(page).toContain('buildPublishChecklist');
-    expect(page).toContain('阻断原因');
-    expect(page).toContain('store.publishExam');
-    expect(page).toContain("name: 'teacher-dashboard'");
+    expect(page).toContain('教师讲解');
+    expect(page).toContain('发布学生学习与练习');
+    expect(page).toContain('store.publishLearningAndPracticeRemote');
+    expect(page).toContain('批次准备的数据生成操作');
     expect(page).toContain("name: 'student-tasks'");
+    expect(page).not.toContain('buildPublishChecklist');
+    expect(page).not.toContain('store.publishExam');
   });
 });

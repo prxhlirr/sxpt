@@ -2,6 +2,7 @@ package com.sxpt.module.teachingdata.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
@@ -258,10 +259,15 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         request.setTenantId(job.getTenantId());
         request.setConnectorSystemId(job.getConnectorSystemId());
         request.setModuleCode(job.getModuleCode());
+        if (!items.isEmpty()) {
+            request.setTemplateId(items.get(0).getTemplateId());
+            request.setInitState(items.get(0).getInitExternalStatus());
+        }
         request.setSceneType(job.getSceneType());
         request.setRequestBatchId(job.getRequestBatchId());
         request.setIdempotencyKey(job.getIdempotencyKey());
         request.setRequestJson(job.getRequestJson());
+        request.setTraceId(job.getTraceId());
         request.setItems(items.stream().map(this::buildRequestItem).collect(Collectors.toList()));
         return request;
     }
@@ -397,7 +403,50 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         dataRequirementItemMapper.updateById(item);
         TeachingDataInstance instance = buildTeachingDataInstance(job, item, responseItem, pool, now);
         teachingDataInstanceMapper.insert(instance);
-        validatePreparedInstance(instance.getId());
+        if (requiresOriginValidation(item)) {
+            validatePreparedInstance(instance.getId());
+        } else {
+            markCreateResponseValidated(item, instance, now);
+        }
+    }
+
+    /**
+     * 判断造数成功后是否仍需调用原平台独立校验能力。
+     *
+     * 默认保持历史行为；仅当策略明确配置 validateAfterCreate=false 时，信任 DATA_CREATE
+     * 已完成的模块、模板、状态和主体校验，避免要求原平台额外实现非标准校验接口。
+     */
+    private boolean requiresOriginValidation(DataRequirementItem item) {
+        if (!StringUtils.hasText(item.getValidationPolicyJson())) {
+            return true;
+        }
+        try {
+            JsonNode policy = JSON_MAPPER.readTree(item.getValidationPolicyJson());
+            return !policy.has("validateAfterCreate") || policy.get("validateAfterCreate").asBoolean(true);
+        } catch (JsonProcessingException ex) {
+            return true;
+        }
+    }
+
+    /**
+     * 将标准 DATA_CREATE 成功结果直接标记为已校验。
+     */
+    private void markCreateResponseValidated(DataRequirementItem item,
+                                             TeachingDataInstance instance,
+                                             LocalDateTime now) {
+        String resultJson = "{\"source\":\"DATA_CREATE\",\"passed\":true}";
+        item.setValidationStatus(ValidationStatus.PASSED.getValue());
+        item.setValidationTime(now);
+        item.setValidationResultJson(resultJson);
+        item.setUpdateTime(now);
+        dataRequirementItemMapper.updateById(item);
+
+        instance.setValidationStatus(ValidationStatus.PASSED.getValue());
+        instance.setValidationTime(now);
+        instance.setValidationResultJson(resultJson);
+        instance.setInstanceStatus(DataInstanceStatus.READY.getValue());
+        instance.setUpdateTime(now);
+        teachingDataInstanceMapper.updateById(instance);
     }
 
     /**

@@ -1,13 +1,36 @@
 package com.sxpt.module.connector;
 
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.sxpt.module.connector.entity.ConnectorSystem;
+import com.sxpt.module.connector.entity.IdentityBinding;
+import com.sxpt.module.connector.entity.PlatformCapability;
+import com.sxpt.module.connector.entity.TeachingDataTemplate;
+import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
+import com.sxpt.module.connector.mapper.IdentityBindingMapper;
+import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
+import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
+import com.sxpt.module.connector.service.impl.HttpOriginDataPrepareAdapter;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.client.RestTemplate;
 
 import java.lang.reflect.Method;
 import java.util.Collections;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * 原平台数据准备适配器契约测试。
@@ -62,9 +85,12 @@ class OriginDataPrepareAdapterContractTests {
         request.setTenantId("tenant_001");
         request.setConnectorSystemId("connector_001");
         request.setModuleCode("BUSINESS_APPLY");
+        request.setTemplateId("template_001");
+        request.setInitState("DRAFT");
         request.setSceneType("PRACTICE");
         request.setRequestBatchId("batch_001");
         request.setIdempotencyKey("prepare:tenant_001:batch_001");
+        request.setTraceId("trace_001");
         request.setItems(Collections.singletonList(requestItem));
 
         OriginDataPrepareAdapter.ResponseItem responseItem = new OriginDataPrepareAdapter.ResponseItem();
@@ -82,6 +108,8 @@ class OriginDataPrepareAdapterContractTests {
 
         assertEquals("batch_001:item_001", request.getItems().get(0).getRequestItemId());
         assertEquals("student_001", request.getItems().get(0).getStudentId());
+        assertEquals("template_001", request.getTemplateId());
+        assertEquals("trace_001", request.getTraceId());
         assertEquals("origin_req_001", response.getExternalRequestId());
         assertEquals("biz_001", response.getItems().get(0).getExternalBusinessId());
         assertNotNull(response.getItems().get(0).getTargetUrl());
@@ -118,5 +146,109 @@ class OriginDataPrepareAdapterContractTests {
         assertEquals("PASSED", validationResponse.getValidationStatus());
         assertEquals("LOCKED", lockResponse.getExternalStatus());
         assertEquals("{\"archived\":true}", archiveResponse.getResultJson());
+    }
+
+    /**
+     * 校验内部批次会被映射为 OA 标准收文造数协议，且不会发送学生姓名等非契约字段。
+     */
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void httpAdapterShouldMapOaStandardBatchCreateContract() {
+        ConnectorSystemMapper systemMapper = mock(ConnectorSystemMapper.class);
+        PlatformCapabilityMapper capabilityMapper = mock(PlatformCapabilityMapper.class);
+        TeachingDataTemplateMapper templateMapper = mock(TeachingDataTemplateMapper.class);
+        IdentityBindingMapper identityBindingMapper = mock(IdentityBindingMapper.class);
+        RestTemplate restTemplate = mock(RestTemplate.class);
+
+        ConnectorSystem system = new ConnectorSystem();
+        system.setId("origin-oa");
+        system.setTenantId("tenant-1");
+        system.setBaseUrl("http://127.0.0.1:9527");
+        system.setAuthType("BEARER");
+        system.setConfigJson("{\"token\":\"oa-token\"}");
+
+        PlatformCapability capability = new PlatformCapability();
+        capability.setEndpointUrl("/openapi/teaching-data/batch-create");
+        capability.setMethod("POST");
+        capability.setRequestSchemaJson(
+                "{\"contract\":\"TEACHING_DATA_BATCH_CREATE_V1\","
+                        + "\"defaultPoolKey\":\"incoming-default\",\"preferPoolKey\":true}");
+
+        TeachingDataTemplate template = new TeachingDataTemplate();
+        template.setId("template-1");
+        template.setTemplateCode("incoming_pending_reg_v1");
+        template.setInitState("PENDING_REG");
+        template.setConfigJson("{\"bizParams\":{}}");
+
+        when(systemMapper.selectOne(any(QueryWrapper.class))).thenReturn(system);
+        when(capabilityMapper.selectOne(any(QueryWrapper.class))).thenReturn(capability);
+        when(templateMapper.selectOne(any(QueryWrapper.class))).thenReturn(template);
+        when(identityBindingMapper.selectOne(any(QueryWrapper.class))).thenReturn((IdentityBinding) null);
+        when(restTemplate.exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>(standardSuccessResponse(), HttpStatus.OK));
+
+        HttpOriginDataPrepareAdapter adapter = new HttpOriginDataPrepareAdapter(
+                systemMapper, capabilityMapper, templateMapper, identityBindingMapper, restTemplate);
+        OriginDataPrepareAdapter.BatchCreateResponse response =
+                adapter.createTeachingData(createStandardRequest());
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), entityCaptor.capture(), eq(String.class));
+        HttpEntity entity = entityCaptor.getValue();
+        Map<String, Object> body = (Map<String, Object>) entity.getBody();
+        assertNotNull(body);
+        assertEquals("doc_incoming", body.get("businessModuleCode"));
+        assertEquals("incoming_pending_reg_v1", body.get("templateCode"));
+        assertEquals("PENDING_REG", body.get("initState"));
+        assertEquals("PRACTICE", body.get("sceneType"));
+        Map<String, Object> participant =
+                (Map<String, Object>) ((java.util.List) body.get("participants")).get(0);
+        assertEquals("item-1", participant.get("participantId"));
+        assertEquals("student-1", participant.get("ownerUserId"));
+        assertEquals("incoming-default", participant.get("poolKey"));
+        assertFalse(participant.containsKey("studentName"));
+        assertFalse(body.containsKey("tenantId"));
+        assertEquals("Bearer oa-token", entity.getHeaders().getFirst("Authorization"));
+        assertEquals("trace-1", entity.getHeaders().getFirst("X-Trace-Id"));
+        assertEquals("idem-1", entity.getHeaders().getFirst("X-Idempotency-Key"));
+        assertEquals("oa-batch-1", response.getExternalRequestId());
+        assertEquals("oa-data-1", response.getItems().get(0).getExternalBusinessId());
+        assertEquals("PENDING_REG", response.getItems().get(0).getExternalStatus());
+        assertEquals("/workspace/incoming/detail/oa-data-1", response.getItems().get(0).getTargetUrl());
+    }
+
+    private OriginDataPrepareAdapter.BatchCreateRequest createStandardRequest() {
+        OriginDataPrepareAdapter.RequestItem item = new OriginDataPrepareAdapter.RequestItem();
+        item.setRequestItemId("item-1");
+        item.setStudentId("student-1");
+        item.setRequiredExternalOrgId("teaching-org-1");
+
+        OriginDataPrepareAdapter.BatchCreateRequest request = new OriginDataPrepareAdapter.BatchCreateRequest();
+        request.setTenantId("tenant-1");
+        request.setConnectorSystemId("origin-oa");
+        request.setModuleCode("doc_incoming");
+        request.setTemplateId("template-1");
+        request.setInitState("PENDING_REG");
+        request.setSceneType("PRACTICE");
+        request.setRequestBatchId("batch-1");
+        request.setTraceId("trace-1");
+        request.setIdempotencyKey("idem-1");
+        request.setItems(Collections.singletonList(item));
+        return request;
+    }
+
+    private String standardSuccessResponse() {
+        return "{\"success\":true,\"code\":200,\"message\":\"success\",\"result\":{"
+                + "\"originBatchId\":\"oa-batch-1\",\"status\":\"SUCCESS\","
+                + "\"totalCount\":1,\"successCount\":1,\"failedCount\":0,\"items\":[{"
+                + "\"participantId\":\"item-1\",\"ownerUserId\":\"student-1\","
+                + "\"externalDataId\":\"oa-data-1\",\"externalBizNo\":\"收文〔2026〕1号\","
+                + "\"externalStatus\":\"PENDING_REG\","
+                + "\"entryUrl\":\"/workspace/incoming/detail/oa-data-1\","
+                + "\"externalOrgId\":\"oa-org-1\",\"rawData\":{\"title\":\"测试收文\"}}]}}";
     }
 }

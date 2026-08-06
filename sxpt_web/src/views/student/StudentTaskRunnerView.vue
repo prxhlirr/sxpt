@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import AttachmentPanel from '../../components/lesson/AttachmentPanel.vue';
+import BusinessCaptureFrame from '../../components/lesson/BusinessCaptureFrame.vue';
 import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import LessonPlaybackPlayer from '../../components/lesson/LessonPlaybackPlayer.vue';
 import type { RecordedStep } from '../../domain/models';
@@ -19,6 +20,9 @@ interface BusinessActionPayload {
   selector: string;
   selectorCandidates?: string[];
   text: string;
+  url?: string;
+  pageTitle?: string;
+  valueMasked?: string;
 }
 
 const store = useTrainingStore();
@@ -44,6 +48,9 @@ const launchAllocation = ref<DataInstanceAllocation | null>(null);
 const showHelp = ref(true);
 const showRunnerMenu = ref(true);
 const syncing = ref(false);
+const practiceRuntimeLoading = ref(false);
+const practiceRuntimeReady = ref(false);
+const practiceSubmitting = ref(false);
 const learningStepIndex = ref(0);
 const showStageIntroduction = ref(false);
 const checks = reactive({
@@ -84,6 +91,39 @@ const dataItem = computed(() =>
 const isLearning = computed(() => task.value?.mode === 'LEARNING');
 const isPractice = computed(() => task.value?.mode === 'PRACTICE');
 const isExam = computed(() => task.value?.mode === 'EXAM');
+const practiceBusinessPlatform = computed(() =>
+  lesson.value
+    ? store.getBusinessPlatform(lesson.value.businessPlatformId)
+    : undefined
+);
+const practiceBusinessBaseUrl = computed(() => {
+  if (!lesson.value || !practiceBusinessPlatform.value) return '';
+  const platform = practiceBusinessPlatform.value;
+  if (platform.baseUrl.startsWith('internal://')) return '';
+  const businessModule = store.getBusinessPlatformModule(
+    lesson.value.businessPlatformId,
+    lesson.value.businessPlatformModuleId
+  );
+  try {
+    return new URL(
+      businessModule?.path || platform.baseUrl,
+      platform.baseUrl
+    ).href;
+  } catch {
+    return platform.baseUrl;
+  }
+});
+const practiceBusinessUrl = computed(
+  () => launchResult.value?.launchUrl || practiceBusinessBaseUrl.value
+);
+const practiceAllowedOrigins = computed(() =>
+  [
+    practiceBusinessPlatform.value?.baseUrl,
+    practiceBusinessBaseUrl.value,
+    launchResult.value?.targetUrl,
+    launchResult.value?.launchUrl
+  ].filter((url): url is string => Boolean(url))
+);
 
 function isGuideStep(step: RecordedStep) {
   return step.kind === 'guide' || step.actionType === 'guide';
@@ -118,7 +158,10 @@ const playbackStages = computed(() =>
   )
 );
 const playbackStageIds = computed(() => {
-  if (task.value?.mode === 'LEARNING') {
+  if (
+    task.value?.mode === 'LEARNING' ||
+    task.value?.mode === 'PRACTICE'
+  ) {
     return new Set(playbackStages.value.map((stage) => stage.id));
   }
   return new Set(
@@ -345,7 +388,7 @@ async function loadStudentAllocation() {
  * 业务功能：基于已分配数据生成进入原平台的一次性凭证。
  * 关键流程：必须先查询到分配记录，再由后端创建 launchContext，避免学生端拼接不可信原平台入口。
  */
-async function launchOriginPlatform() {
+async function prepareOriginPlatformLaunch(openInNewWindow: boolean) {
   if (!task.value) return;
   const taskId = resolveDataPrepareTaskId();
   if (!taskId) {
@@ -363,13 +406,48 @@ async function launchOriginPlatform() {
     });
     launchResult.value = result;
     launchAllocation.value = result.allocation;
-    window.open(result.launchUrl, '_blank', 'noopener,noreferrer');
-    launchMessage.value = '原平台进入凭证已生成，请在新窗口继续办理。';
+    if (openInNewWindow) {
+      window.open(result.launchUrl, '_blank', 'noopener,noreferrer');
+      launchMessage.value = '原平台进入凭证已生成，请在新窗口继续办理。';
+    }
   } catch (error) {
     launchErrorMessage.value =
       error instanceof Error ? error.message : '原平台进入凭证生成失败。';
   } finally {
     launchLoading.value = false;
+  }
+}
+
+async function launchOriginPlatform() {
+  await prepareOriginPlatformLaunch(true);
+}
+
+async function ensurePracticeRuntime() {
+  if (
+    !task.value ||
+    task.value.mode !== 'PRACTICE' ||
+    task.value.status === 'SUBMITTED' ||
+    task.value.status === 'GRADED' ||
+    practiceRuntimeLoading.value
+  ) {
+    return;
+  }
+  practiceRuntimeLoading.value = true;
+  practiceRuntimeReady.value = false;
+  try {
+    if (task.value.status === 'TODO') {
+      await startTask();
+    }
+    if (
+      task.value.status === 'DOING' &&
+      publishedTask.value?.remoteTaskId &&
+      !launchResult.value
+    ) {
+      await prepareOriginPlatformLaunch(false);
+    }
+  } finally {
+    practiceRuntimeReady.value = true;
+    practiceRuntimeLoading.value = false;
   }
 }
 
@@ -398,13 +476,23 @@ watch(
   }
 );
 
+let practiceRuntimeKey = '';
+
 watch(
-  () => [task.value?.id, task.value?.status] as const,
+  () =>
+    [task.value?.id, task.value?.status, task.value?.attemptNumber] as const,
   () => {
     syncLearningProgress(task.value?.status === 'DOING');
     syncSubmissionValues();
-    if (task.value?.mode === 'PRACTICE' && task.value.status === 'DOING') {
+    if (task.value?.mode === 'PRACTICE') {
+      const nextRuntimeKey = `${task.value.id}:${task.value.attemptNumber}`;
+      if (practiceRuntimeKey !== nextRuntimeKey) {
+        practiceRuntimeKey = nextRuntimeKey;
+        launchResult.value = null;
+        practiceRuntimeReady.value = false;
+      }
       showRunnerMenu.value = false;
+      void ensurePracticeRuntime();
     }
   },
   { immediate: true }
@@ -572,6 +660,27 @@ function actionMatchesStep(
   payload: BusinessActionPayload,
   step: RecordedStep
 ) {
+  const expectedActionType =
+    step.actionType && step.actionType !== 'guide' ? step.actionType : 'click';
+  const compatibleAction =
+    payload.actionType === expectedActionType ||
+    ((expectedActionType === 'click' || expectedActionType === 'submit') &&
+      (payload.actionType === 'click' || payload.actionType === 'submit'));
+  if (!compatibleAction) return false;
+
+  const expectedUrl = step.url || step.pageSnapshot?.pageUrl;
+  if (expectedUrl && payload.url) {
+    try {
+      const baseUrl = practiceBusinessBaseUrl.value || window.location.href;
+      const expectedPath = new URL(expectedUrl, baseUrl).pathname.replace(/\/$/, '');
+      const observedPath = new URL(payload.url, baseUrl).pathname.replace(/\/$/, '');
+      if (expectedPath && observedPath && expectedPath !== observedPath) {
+        return false;
+      }
+    } catch {
+      // URL 只作为辅助条件；无法规范化时继续使用稳定元素选择器判定。
+    }
+  }
   const expected = [step.selector, ...(step.selectorCandidates ?? [])]
     .filter(Boolean)
     .map(selectorToken);
@@ -717,22 +826,84 @@ async function finishLearningTask() {
   }
 }
 
-async function handleRecordedBusinessAction(payload: BusinessActionPayload) {
+const pendingPracticeStepIds = new Set<string>();
+let practiceTraceQueue: Promise<void> = Promise.resolve();
+
+async function finishPracticeWhenEvidenceComplete() {
   if (
     !task.value ||
-    task.value.mode === 'EXAM' ||
-    task.value.mode === 'LEARNING' ||
+    task.value.mode !== 'PRACTICE' ||
     task.value.status !== 'DOING' ||
-    !currentLearningStep.value ||
-    showStageIntroduction.value ||
-    syncing.value
+    practiceSubmitting.value ||
+    !learningSteps.value.length ||
+    !learningSteps.value.every(({ step }) =>
+      task.value?.completedPracticeStepIds?.includes(step.id)
+    )
   ) {
     return;
   }
-  if (!actionMatchesStep(payload, currentLearningStep.value.step)) {
+  practiceSubmitting.value = true;
+  try {
+    await store.submitStudentTaskRemote(task.value.id, {});
+  } finally {
+    practiceSubmitting.value = false;
+  }
+}
+
+function handleRecordedBusinessAction(payload: BusinessActionPayload) {
+  if (
+    !task.value ||
+    task.value.mode !== 'PRACTICE' ||
+    task.value.status !== 'DOING' ||
+    !payload.selector
+  ) {
     return;
   }
-  await advanceLearningStep();
+  const matched = learningSteps.value.find(
+    ({ step }) =>
+      !task.value?.completedPracticeStepIds?.includes(step.id) &&
+      !pendingPracticeStepIds.has(step.id) &&
+      actionMatchesStep(payload, step)
+  );
+  if (!matched) {
+    void finishPracticeWhenEvidenceComplete().catch((error) => {
+      console.warn('练习任务自动提交失败，将在后续操作时重试。', error);
+    });
+    return;
+  }
+
+  pendingPracticeStepIds.add(matched.step.id);
+  const work = practiceTraceQueue.then(async () => {
+    if (
+      !task.value ||
+      task.value.status !== 'DOING' ||
+      task.value.completedPracticeStepIds?.includes(matched.step.id)
+    ) {
+      return;
+    }
+    await store.recordStudentPracticeStepRemote(
+      task.value.id,
+      matched.stage.id,
+      matched.step.id,
+      {
+        actionType: payload.actionType,
+        selector: payload.selector,
+        selectorCandidates: payload.selectorCandidates,
+        url: payload.url,
+        pageTitle: payload.pageTitle,
+        completedAt: new Date().toISOString()
+      }
+    );
+    await finishPracticeWhenEvidenceComplete();
+  });
+  practiceTraceQueue = work.catch(() => undefined);
+  void work
+    .catch((error) => {
+      console.warn('练习操作点轨迹记录失败，学生可再次执行该操作重试。', error);
+    })
+    .finally(() => {
+      pendingPracticeStepIds.delete(matched.step.id);
+    });
 }
 
 function continueGuideStep() {
@@ -813,7 +984,7 @@ async function restartTrainingTask() {
     }"
   >
     <button
-      v-if="!isExam && !isLearning"
+      v-if="!isExam && !isLearning && !isPractice"
       class="runner-menu-toggle"
       type="button"
       @click="showRunnerMenu = !showRunnerMenu"
@@ -829,7 +1000,11 @@ async function restartTrainingTask() {
       }}
     </button>
 
-    <header v-if="!isExam && !isLearning" v-show="showRunnerMenu" class="runner-header">
+    <header
+      v-if="!isExam && !isLearning && !isPractice"
+      v-show="showRunnerMenu"
+      class="runner-header"
+    >
       <div>
         <RouterLink to="/student/tasks">← 返回任务中心</RouterLink>
         <span class="runner-divider"></span>
@@ -1320,8 +1495,26 @@ async function restartTrainingTask() {
           v-if="!isExam"
           class="learning-playback training-business-flow"
         >
+          <BusinessCaptureFrame
+            v-if="
+              isPractice &&
+              task.status === 'DOING' &&
+              practiceRuntimeReady &&
+              practiceBusinessUrl &&
+              learningSteps.length
+            "
+            class="practice-live-business-view"
+            :src="practiceBusinessUrl"
+            :title="`${lesson.title}原业务系统练习界面`"
+            fit-mode="fill"
+            student-mode="PRACTICE"
+            monitor-actions
+            :show-resolution="false"
+            :allowed-origins="practiceAllowedOrigins"
+            @business-action="handleRecordedBusinessAction"
+          />
           <BusinessSnapshotFrame
-            v-if="displayedLearningStep"
+            v-else-if="!isPractice && displayedLearningStep"
             :snapshot="displayedLearningStep.step.pageSnapshot"
             :fallback-url="displayedLearningStep.step.url"
             :selector="
@@ -1357,13 +1550,6 @@ async function restartTrainingTask() {
             @business-action="handleRecordedBusinessAction"
           />
 
-          <p
-            v-if="isPractice && errorMessage"
-            class="practice-system-error"
-          >
-            {{ errorMessage }}
-          </p>
-
           <div
             v-if="!learningSteps.length"
             class="training-state-overlay"
@@ -1377,7 +1563,7 @@ async function restartTrainingTask() {
           </div>
 
           <div
-            v-else-if="task.status === 'TODO'"
+            v-else-if="!isPractice && task.status === 'TODO'"
             class="training-state-overlay"
           >
             <span>01</span>
@@ -1394,6 +1580,36 @@ async function restartTrainingTask() {
             >
               {{ syncing ? '正在创建会话…' : `开始${modeLabel}` }}
             </button>
+          </div>
+
+          <div
+            v-else-if="
+              isPractice &&
+              task.status === 'DOING' &&
+              (!practiceRuntimeReady || practiceRuntimeLoading)
+            "
+            class="training-state-overlay practice-runtime-state"
+          >
+            <span>…</span>
+            <h3>正在进入原业务系统</h3>
+            <p>平台正在创建独立练习会话。</p>
+          </div>
+
+          <div
+            v-else-if="
+              isPractice &&
+              task.status === 'DOING' &&
+              practiceRuntimeReady &&
+              !practiceBusinessUrl
+            "
+            class="training-state-overlay"
+          >
+            <span>!</span>
+            <h3>原业务系统暂时无法打开</h3>
+            <p>{{ launchErrorMessage || '请检查业务平台及业务模块入口配置。' }}</p>
+            <RouterLink class="button secondary" to="/student/tasks">
+              返回任务中心
+            </RouterLink>
           </div>
 
           <div
@@ -1454,27 +1670,6 @@ async function restartTrainingTask() {
               @click="enterCurrentStage"
             >
               {{ syncing ? '正在初始化任务…' : '进入本教学点' }}
-            </button>
-          </div>
-
-          <div
-            v-else-if="
-              task.mode === 'PRACTICE' &&
-              allPlaybackStagesComplete &&
-              !currentLearningStep
-            "
-            class="training-state-overlay success"
-          >
-            <span>✓</span>
-            <h3>教案录制的整个业务流程已完成</h3>
-            <p>确认提交后，平台将保存本次{{ modeLabel }}的完整流程轨迹。</p>
-            <button
-              class="primary"
-              type="button"
-              :disabled="syncing"
-              @click="submitTask"
-            >
-              {{ syncing ? '正在提交…' : `完成本次${modeLabel}` }}
             </button>
           </div>
 
@@ -3423,20 +3618,13 @@ async function restartTrainingTask() {
   min-height: 0;
 }
 
-.practice-system-error {
+.practice-live-business-view {
   position: absolute;
-  z-index: 24;
-  right: 14px;
-  bottom: 14px;
-  max-width: min(420px, calc(100vw - 28px));
-  margin: 0;
-  border: 1px solid rgb(217 78 89 / 28%);
-  border-radius: 10px;
-  padding: 9px 12px;
-  color: #b42332;
-  background: rgb(255 245 246 / 94%);
-  box-shadow: 0 10px 26px rgb(75 22 29 / 14%);
-  font-size: 10px;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  min-height: 0;
+  background: #fff;
 }
 
 .business-app {

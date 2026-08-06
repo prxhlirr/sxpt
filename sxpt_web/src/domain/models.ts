@@ -236,6 +236,22 @@ export interface PublishedTask {
   syncError?: string;
 }
 
+/**
+ * 学生练习时由原业务系统 SDK 静默采集的操作点完成记录。
+ * 该数据只用于恢复练习进度、审计和后续评分，不在学生练习界面展示。
+ */
+export interface PracticeStepResult {
+  stepId: string;
+  stageId: string;
+  clientTraceId: string;
+  recordedActionType: Exclude<RecordedStep['actionType'], 'guide'>;
+  observedActionType: 'click' | 'input' | 'select' | 'submit';
+  observedSelector: string;
+  observedUrl?: string;
+  completedAt: string;
+  remoteTraceId?: string;
+}
+
 export interface StudentTask {
   id: string;
   publishedTaskId: string;
@@ -254,6 +270,8 @@ export interface StudentTask {
   status: 'TODO' | 'DOING' | 'SUBMITTED' | 'GRADED';
   currentStageIndex: number;
   completedStageIds: string[];
+  completedPracticeStepIds?: string[];
+  practiceStepResults?: PracticeStepResult[];
   objectiveScore?: number;
   subjectiveScore?: number;
   comment?: string;

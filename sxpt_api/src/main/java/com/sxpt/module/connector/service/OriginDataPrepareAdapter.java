@@ -73,6 +73,10 @@ public interface OriginDataPrepareAdapter {
 
         private String moduleCode;
 
+        private String templateId;
+
+        private String initState;
+
         private String sceneType;
 
         private String requestBatchId;
@@ -80,6 +84,8 @@ public interface OriginDataPrepareAdapter {
         private String idempotencyKey;
 
         private String requestJson;
+
+        private String traceId;
 
         private List<RequestItem> items;
 
@@ -105,6 +111,22 @@ public interface OriginDataPrepareAdapter {
 
         public void setModuleCode(String moduleCode) {
             this.moduleCode = moduleCode;
+        }
+
+        public String getTemplateId() {
+            return templateId;
+        }
+
+        public void setTemplateId(String templateId) {
+            this.templateId = templateId;
+        }
+
+        public String getInitState() {
+            return initState;
+        }
+
+        public void setInitState(String initState) {
+            this.initState = initState;
         }
 
         public String getSceneType() {
@@ -137,6 +159,14 @@ public interface OriginDataPrepareAdapter {
 
         public void setRequestJson(String requestJson) {
             this.requestJson = requestJson;
+        }
+
+        public String getTraceId() {
+            return traceId;
+        }
+
+        public void setTraceId(String traceId) {
+            this.traceId = traceId;
         }
 
         public List<RequestItem> getItems() {

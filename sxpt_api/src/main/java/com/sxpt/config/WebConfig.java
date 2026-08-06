@@ -105,6 +105,10 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/system/**",
                         "/api/v1/auth/login",
                         "/api/v1/auth/token",
+                        // 原平台凭一次性 launchToken 校验并回写启动状态，不使用教学平台登录 JWT。
+                        "/api/v1/connector/launch-contexts/verify",
+                        "/api/v1/connector/launch-contexts/used",
+                        "/api/v1/connector/launch-contexts/failed",
                         "/api/v1/teaching-attachments/*/content",
                         "/swagger-ui.html",
                         "/swagger-resources/**",

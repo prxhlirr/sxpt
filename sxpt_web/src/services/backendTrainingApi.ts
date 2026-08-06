@@ -65,6 +65,20 @@ export interface StartedTaskExecutionBinding {
   contextLoaded: boolean;
 }
 
+export interface PracticeActionEvidence {
+  actionType: 'click' | 'input' | 'select' | 'submit';
+  selector: string;
+  selectorCandidates?: string[];
+  url?: string;
+  pageTitle?: string;
+  completedAt: string;
+}
+
+export interface ReportedPracticeStepBinding {
+  clientTraceId: string;
+  traceId: string;
+}
+
 export const MAX_RECORDED_STEP_SNAPSHOT_JSON_LENGTH = 4 * 1024 * 1024;
 
 export interface BackendTrainingApi {
@@ -120,6 +134,14 @@ export interface BackendTrainingApi {
     publishedTask: PublishedTask,
     studentTask: StudentTask
   ): Promise<void>;
+  reportStudentPracticeStep(
+    lesson: LessonPlan,
+    stage: LessonStage,
+    step: RecordedStep,
+    publishedTask: PublishedTask,
+    studentTask: StudentTask,
+    evidence: PracticeActionEvidence
+  ): Promise<ReportedPracticeStepBinding>;
   submitStudentTaskExecution(
     studentTask: StudentTask
   ): Promise<TaskExecution>;
@@ -637,6 +659,64 @@ export const backendTrainingApi: BackendTrainingApi = {
     }
   },
 
+  async reportStudentPracticeStep(
+    lesson,
+    stage,
+    step,
+    publishedTask,
+    studentTask,
+    evidence
+  ) {
+    if (!studentTask.remoteExecutionId) {
+      throw new Error('后端执行记录尚未创建，请先开始练习');
+    }
+    const taskStepId = publishedTask.remoteTaskStepIdsByStepId?.[step.id];
+    if (!taskStepId) {
+      throw new Error(`操作点“${step.title}”尚未生成后端任务步骤`);
+    }
+    const allSteps = lesson.stages.flatMap((candidate) =>
+      candidate.recordedSteps.map((candidateStep) => candidateStep)
+    );
+    const sequenceNo =
+      Math.max(0, allSteps.findIndex((candidate) => candidate.id === step.id)) + 1;
+    const config = getApiConfig();
+    const clientTraceId = `${studentTask.remoteExecutionId}:${taskStepId}:practice-completed`;
+    const trace = await executionApi.reportTrace({
+      tenantId: config.tenantId,
+      executionId: studentTask.remoteExecutionId,
+      sdkSessionId: `web-${studentTask.remoteExecutionId}`,
+      clientTraceId,
+      taskStepId,
+      teachingPointId: publishedTask.remoteTeachingPointId,
+      resourceId: step.remoteResourceId,
+      traceType: mapStepActionType(step),
+      traceTime: toLocalDateTime(new Date(evidence.completedAt)),
+      sequenceNo,
+      retryCount: 0,
+      outputDataJson: JSON.stringify({
+        lessonId: lesson.id,
+        stageId: stage.id,
+        localStepId: step.id,
+        mode: publishedTask.mode,
+        recordedActionType: step.actionType ?? 'click',
+        observedActionType: evidence.actionType
+      }),
+      evidenceJson: JSON.stringify({
+        source: 'sxpt_web_practice_monitor',
+        matchStrategy: 'recorded_element_selector',
+        observedSelector: evidence.selector,
+        observedSelectorCandidates: evidence.selectorCandidates ?? [],
+        observedUrl: evidence.url,
+        observedPageTitle: evidence.pageTitle
+      }),
+      success: true
+    });
+    return {
+      clientTraceId,
+      traceId: trace.id
+    };
+  },
+
   async submitStudentTaskExecution(studentTask) {
     if (!studentTask.remoteExecutionId) {
       throw new Error('后端执行记录尚未创建，不能提交任务');
@@ -923,6 +1003,12 @@ async function ensureTaskSteps(
     const stage = lesson.stages[stageIndex];
     if (!stage.visibility[mode]) continue;
     for (const step of stage.recordedSteps) {
+      if (
+        mode === 'PRACTICE' &&
+        (step.kind === 'guide' || step.actionType === 'guide')
+      ) {
+        continue;
+      }
       sequenceNo += 1;
       const stepCode = safeCode(`${mode}-${step.id}`, 64);
       let remoteStep = existing.find(
@@ -995,7 +1081,13 @@ async function ensureEvaluation(
   );
   const steps = lesson.stages.flatMap((stage) =>
     stage.visibility[mode]
-      ? stage.recordedSteps.map((step) => ({ stage, step }))
+      ? stage.recordedSteps
+          .filter(
+            (step) =>
+              mode !== 'PRACTICE' ||
+              (step.kind !== 'guide' && step.actionType !== 'guide')
+          )
+          .map((step) => ({ stage, step }))
       : []
   );
   for (let index = 0; index < steps.length; index += 1) {
@@ -1189,7 +1281,11 @@ function buildPublishDataParticipant(
 ) {
   const actorType = studentTask.groupKeys[0] || studentTask.groupKey || 'student';
   const visibleStages = lesson.stages.filter(
-    (stage) => stage.visibility[publishedTask.mode] && studentTask.groupKeys.includes(stage.groupKey)
+    (stage) =>
+      stage.visibility[publishedTask.mode] &&
+      (publishedTask.mode === 'LEARNING' ||
+        publishedTask.mode === 'PRACTICE' ||
+        studentTask.groupKeys.includes(stage.groupKey))
   );
   return {
     studentId: studentTask.studentId,
@@ -1212,13 +1308,19 @@ function buildPublishDataParticipant(
     }),
     requiredActionsJson: JSON.stringify(
       visibleStages.flatMap((stage) =>
-        stage.recordedSteps.map((step) => ({
-          stageId: stage.id,
-          stageName: stage.name,
-          stepId: step.id,
-          actionType: step.actionType,
-          title: step.title
-        }))
+        stage.recordedSteps
+          .filter(
+            (step) =>
+              publishedTask.mode !== 'PRACTICE' ||
+              (step.kind !== 'guide' && step.actionType !== 'guide')
+          )
+          .map((step) => ({
+            stageId: stage.id,
+            stageName: stage.name,
+            stepId: step.id,
+            actionType: step.actionType,
+            title: step.title
+          }))
       )
     ),
     scorePointSnapshotJson: JSON.stringify({

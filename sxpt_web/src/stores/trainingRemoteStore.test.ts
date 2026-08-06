@@ -59,6 +59,7 @@ describe('训练 Store 后端同步', () => {
       prepareInitialDataForPublishedTask: vi.fn(async () => 0),
       startStudentTaskExecution: vi.fn(),
       reportStudentStageCompletion: vi.fn(),
+      reportStudentPracticeStep: vi.fn(),
       submitStudentTaskExecution: vi.fn()
     };
     const store = createTrainingStore({ backend, storage });
@@ -111,6 +112,7 @@ describe('训练 Store 后端同步', () => {
       prepareInitialDataForPublishedTask: vi.fn(async () => 0),
       startStudentTaskExecution: vi.fn(),
       reportStudentStageCompletion: vi.fn(),
+      reportStudentPracticeStep: vi.fn(),
       submitStudentTaskExecution: vi.fn()
     };
     const store = createTrainingStore({
@@ -184,6 +186,10 @@ describe('训练 Store 后端同步', () => {
       contextLoaded: true
     }));
     const reportStudentStageCompletion = vi.fn(async () => undefined);
+    const reportStudentPracticeStep = vi.fn(async () => ({
+      clientTraceId: 'practice-trace-client-1',
+      traceId: 'practice-trace-server-1'
+    }));
     const prepareInitialDataForPublishedTask = vi.fn(async () => 1);
     const submitStudentTaskExecution = vi.fn(async (studentTask) => ({
       id: studentTask.remoteExecutionId!,
@@ -215,13 +221,15 @@ describe('训练 Store 后端同步', () => {
       prepareInitialDataForPublishedTask,
       startStudentTaskExecution,
       reportStudentStageCompletion,
+      reportStudentPracticeStep,
       submitStudentTaskExecution
     };
+    let generatedId = 0;
     const store = createTrainingStore({
       backend,
       storage: createMemoryStorage(),
       now: () => '2026-07-28T12:00:00.000Z',
-      idFactory: (prefix) => `${prefix}-test`
+      idFactory: (prefix) => `${prefix}-test-${++generatedId}`
     });
     const lesson = store.state.lessons.find(
       (candidate) => candidate.id === 'lesson-purchase-v3'
@@ -261,6 +269,37 @@ describe('训练 Store 后端同步', () => {
       published.find((candidate) => candidate.mode === 'PRACTICE')?.dataCount
     ).toBe(1);
 
+    const practicePublished = published.find(
+      (candidate) => candidate.mode === 'PRACTICE'
+    )!;
+    const practiceTask = store.state.studentTasks.find(
+      (candidate) => candidate.publishedTaskId === practicePublished.id
+    )!;
+    const practiceStage = lesson.stages[0];
+    const practiceStep = practiceStage.recordedSteps[0];
+    await store.startStudentTaskRemote(practiceTask.id);
+    await store.recordStudentPracticeStepRemote(
+      practiceTask.id,
+      practiceStage.id,
+      practiceStep.id,
+      {
+        actionType: practiceStep.actionType === 'input' ? 'input' : 'click',
+        selector: practiceStep.selector,
+        selectorCandidates: practiceStep.selectorCandidates,
+        url: practiceStep.url,
+        pageTitle: practiceStep.pageTitle,
+        completedAt: '2026-07-28T12:00:00.000Z'
+      }
+    );
+    expect(reportStudentPracticeStep).toHaveBeenCalledOnce();
+    expect(practiceTask.completedPracticeStepIds).toEqual([practiceStep.id]);
+    expect(practiceTask.practiceStepResults).toEqual([
+      expect.objectContaining({
+        stepId: practiceStep.id,
+        remoteTraceId: 'practice-trace-server-1'
+      })
+    ]);
+
     const learningPublished = published.find(
       (candidate) => candidate.mode === 'LEARNING'
     )!;
@@ -274,7 +313,7 @@ describe('训练 Store 后端同步', () => {
     }
     await store.submitStudentTaskRemote(studentTask.id);
 
-    expect(startStudentTaskExecution).toHaveBeenCalledOnce();
+    expect(startStudentTaskExecution).toHaveBeenCalledTimes(2);
     expect(reportStudentStageCompletion).toHaveBeenCalledTimes(
       lesson.stages.length
     );

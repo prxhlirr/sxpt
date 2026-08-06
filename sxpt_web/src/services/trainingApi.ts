@@ -1990,7 +1990,13 @@ function normalizeState(state: TrainingState): TrainingState {
     submissionValues:
       task.submissionValues && typeof task.submissionValues === 'object'
         ? task.submissionValues
-        : {}
+        : {},
+    completedPracticeStepIds: Array.isArray(task.completedPracticeStepIds)
+      ? [...new Set(task.completedPracticeStepIds)]
+      : [],
+    practiceStepResults: Array.isArray(task.practiceStepResults)
+      ? task.practiceStepResults
+      : []
   }));
   Object.values(normalized.dataItems).forEach((items) => {
     items.forEach((item) => {

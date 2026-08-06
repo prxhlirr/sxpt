@@ -1,4 +1,4 @@
--- OA 数据准备最小闭环配置脚本。
+-- OA 收文待登记数据准备配置脚本。
 -- 业务边界：
 -- 1. 只写入平台、能力、业务模块、数据模板、模块策略这些静态配置。
 -- 2. 不写入教学任务、学生账号、数据实例或原平台业务明细，避免污染真实联调数据。
@@ -17,14 +17,16 @@ INSERT INTO connector_system (
     'OA_DEMO',
     'OA 协同办公系统',
     'OA',
-    'http://127.0.0.1:5174/oa',
-    'LAUNCH_TOKEN',
+    'http://127.0.0.1:9527',
+    'BEARER',
     $${
         "sourceSystem": "oa",
         "embeddedMode": "iframe",
-        "entryPath": "/oa",
+        "entryPath": "/workspace/incoming",
         "dataPrepareMode": "CALL_ORIGIN_API",
-        "maintainScope": "仅作为教学平台 OA 数据准备最小对接样例"
+        "token": "oa-data-center-incoming-token",
+        "tokenEnv": "DATA_CENTER_INCOMING_API_TOKEN",
+        "maintainScope": "OA 收文待登记教学造数"
     }$$::jsonb,
     'seed', now(), 'seed', now(), 'ACTIVE', false
 )
@@ -217,18 +219,23 @@ INSERT INTO platform_capability (
         'demo-tenant',
         'origin-oa-demo-system',
         'DATA_CREATE',
-        '批量创建 OA 审批教学数据',
+        '批量创建 OA 收文待登记数据',
         'DATA_CREATE',
         true,
-        '/openapi/teaching-data/oa/approvals/batch-create',
+        '/openapi/teaching-data/batch-create',
         'POST',
         $${
-            "required": ["requestBatchId", "items"],
-            "itemFields": ["requestItemId", "title", "applicantExternalOrgId", "applicantExternalRoleId", "initExternalStatus"]
+            "contract": "TEACHING_DATA_BATCH_CREATE_V1",
+            "requiredHeaders": ["Authorization", "X-Trace-Id", "X-Idempotency-Key"],
+            "required": ["businessModuleCode", "templateCode", "initState", "participants"],
+            "participantFields": ["participantId", "ownerUserId", "externalUserId", "externalOrgId", "poolKey"],
+            "defaultPoolKey": "incoming-default",
+            "preferPoolKey": true
         }$$::jsonb,
         $${
-            "required": ["requestBatchId", "items"],
-            "itemFields": ["requestItemId", "externalBusinessId", "externalBusinessNo", "externalStatus", "targetUrl"]
+            "wrapper": "ApiResult",
+            "required": ["originBatchId", "status", "totalCount", "successCount", "failedCount", "items"],
+            "itemFields": ["participantId", "ownerUserId", "externalDataId", "externalBizNo", "externalStatus", "entryUrl", "externalUserId", "externalOrgId", "rawData"]
         }$$::jsonb,
         10000,
         '{"maxAttempts":3,"backoffMs":1000}'::jsonb,
@@ -239,9 +246,9 @@ INSERT INTO platform_capability (
         'demo-tenant',
         'origin-oa-demo-system',
         'DATA_VALIDATE',
-        '校验 OA 审批教学数据可用性',
+        '旧 OA 审批数据校验（已停用）',
         'DATA_QUERY',
-        true,
+        false,
         '/openapi/teaching-data/oa/approvals/validate',
         'POST',
         $${
@@ -252,23 +259,23 @@ INSERT INTO platform_capability (
         }$$::jsonb,
         5000,
         '{"maxAttempts":2,"backoffMs":500}'::jsonb,
-        'seed', now(), 'seed', now(), 'ACTIVE', false
+        'seed', now(), 'seed', now(), 'DISABLED', false
     ),
     (
         'cap-oa-demo-result-check',
         'demo-tenant',
         'origin-oa-demo-system',
         'RESULT_CHECK',
-        '校验 OA 审批办理结果',
+        '旧 OA 审批结果校验（已停用）',
         'RESULT_CHECK',
-        true,
+        false,
         '/openapi/teaching-data/oa/approvals/result-check',
         'POST',
         '{"required":["externalBusinessId","expectedStatus","expectedActions"]}'::jsonb,
         '{"required":["passed","externalStatus","matchedActions","matchedFields"]}'::jsonb,
         5000,
         '{"maxAttempts":2,"backoffMs":500}'::jsonb,
-        'seed', now(), 'seed', now(), 'ACTIVE', false
+        'seed', now(), 'seed', now(), 'DISABLED', false
     )
 ON CONFLICT (tenant_id, connector_system_id, capability_code) WHERE deleted = false
 DO UPDATE SET
@@ -283,7 +290,7 @@ DO UPDATE SET
     retry_policy_json = EXCLUDED.retry_policy_json,
     update_by = 'seed',
     update_time = now(),
-    status = 'ACTIVE';
+    status = EXCLUDED.status;
 
 INSERT INTO business_module (
     id, tenant_id, connector_system_id, module_code, module_name, external_module_id,
@@ -291,21 +298,21 @@ INSERT INTO business_module (
     default_target_status, capability_codes_json, default_template_id, remark, lock_version,
     create_by, create_time, update_by, update_time, status, deleted
 ) VALUES (
-    'bm-oa-demo-approval',
+    'bm-oa-incoming',
     'demo-tenant',
     'origin-oa-demo-system',
-    'OA_APPROVAL',
-    'OA 审批',
-    'oa-approval',
-    '/oa/approvals',
-    'APPROVAL',
-    'LEARN,PRACTICE,EXAM',
+    'doc_incoming',
+    '收文管理',
+    'doc_incoming',
+    '/workspace/incoming',
+    'DOCUMENT_INCOMING',
+    'PRACTICE,EXAM',
     true,
-    'DRAFT',
-    'APPROVED',
-    '["DATA_CREATE","DATA_VALIDATE","RESULT_CHECK"]'::jsonb,
-    'tdt-oa-demo-approval-practice-v1',
-    'OA 审批模块最小教学数据准备样例，用于验证创建、提交、审批和结果校验链路。',
+    'PENDING_REG',
+    'REGISTERED',
+    '["DATA_CREATE"]'::jsonb,
+    'tdt-oa-incoming-pending-reg-v1',
+    '通过 OA 标准 DATA_CREATE 接口生成收文待登记数据，供学生练习和考试使用。',
     0,
     'seed', now(), 'seed', now(), 'ACTIVE', false
 )
@@ -329,50 +336,60 @@ DO UPDATE SET
 
 INSERT INTO teaching_data_template (
     id, tenant_id, connector_system_id, teaching_point_id, template_code, template_name,
-    scene_type, init_state, support_mode, config_json,
+    scene_type, module_code, strategy_id, init_state, support_mode, config_json,
     request_schema_json, required_org_role_json, result_check_schema_json, sensitive_field_policy_json,
     create_by, create_time, update_by, update_time, status, deleted
 ) VALUES (
-    'tdt-oa-demo-approval-practice-v1',
+    'tdt-oa-incoming-pending-reg-v1',
     'demo-tenant',
     'origin-oa-demo-system',
     null,
-    'OA_APPROVAL_PRACTICE_V1',
-    'OA 审批练习数据模板 V1',
+    'incoming_pending_reg_v1',
+    'OA 收文待登记模板 V1',
     'PRACTICE',
-    'DRAFT',
+    'doc_incoming',
+    'mds-oa-incoming-practice-v1',
+    'PENDING_REG',
     'PRACTICE,EXAM',
     $${
-        "moduleCode": "OA_APPROVAL",
+        "moduleCode": "doc_incoming",
         "templateVersion": 1,
+        "bizParams": {},
         "fields": [
             {"name":"title","type":"string","required":true},
-            {"name":"reason","type":"string","required":true},
-            {"name":"amount","type":"number","required":false},
-            {"name":"applicantExternalOrgId","type":"string","required":true},
-            {"name":"applicantExternalRoleId","type":"string","required":true}
+            {"name":"sourceOrgCode","type":"string","required":false},
+            {"name":"sourceOrgName","type":"string","required":false},
+            {"name":"docNumber","type":"string","required":false},
+            {"name":"receiveDate","type":"date","required":false},
+            {"name":"copies","type":"number","required":false},
+            {"name":"urgency","type":"enum","required":false},
+            {"name":"handleType","type":"enum","required":false},
+            {"name":"remark","type":"string","required":false},
+            {"name":"pdfPath","type":"string","required":false},
+            {"name":"stationeryId","type":"string","required":false}
         ]
     }$$::jsonb,
     $${
-        "required": ["requestBatchId", "items"],
-        "itemFields": ["requestItemId", "title", "reason", "amount", "applicantExternalOrgId", "applicantExternalRoleId", "initExternalStatus"]
+        "contract": "TEACHING_DATA_BATCH_CREATE_V1",
+        "required": ["businessModuleCode", "templateCode", "initState", "participants"],
+        "businessModuleCode": "doc_incoming",
+        "templateCode": "incoming_pending_reg_v1",
+        "initState": "PENDING_REG"
     }$$::jsonb,
     $${
-        "defaultOrgType": "DEPARTMENT",
-        "defaultRoleCode": "OA_APPLICANT",
-        "requiredActors": ["APPLICANT", "APPROVER"]
+        "mappingModes": ["EXTERNAL_USER", "EXTERNAL_ORG", "POOL"],
+        "defaultPoolKey": "incoming-default"
     }$$::jsonb,
-    $${
-        "expectedStatus": "APPROVED",
-        "expectedActions": ["CREATE", "SUBMIT", "APPROVE"]
-    }$$::jsonb,
-    '{"maskFields":["applicantPhone"],"forbidFields":["idCardNo"],"storeRawBusinessPayload":false}'::jsonb,
+    '{"createResponseIsValidationEvidence":true}'::jsonb,
+    '{"forbidFields":["roleName","ownerUsername","studentName","phone","email"],"storeRawBusinessPayload":false}'::jsonb,
     'seed', now(), 'seed', now(), 'ACTIVE', false
 )
 ON CONFLICT (tenant_id, connector_system_id, template_code) WHERE deleted = false
 DO UPDATE SET
     template_name = EXCLUDED.template_name,
     scene_type = EXCLUDED.scene_type,
+    module_code = EXCLUDED.module_code,
+    strategy_id = EXCLUDED.strategy_id,
     init_state = EXCLUDED.init_state,
     support_mode = EXCLUDED.support_mode,
     config_json = EXCLUDED.config_json,
@@ -393,33 +410,31 @@ INSERT INTO module_data_strategy (
     archive_policy_json, strategy_version, lock_version,
     create_by, create_time, update_by, update_time, status, deleted
 ) VALUES (
-    'mds-oa-demo-approval-practice-v1',
+    'mds-oa-incoming-practice-v1',
     'demo-tenant',
     'origin-oa-demo-system',
-    'OA_APPROVAL',
-    'OA 审批',
+    'doc_incoming',
+    '收文管理',
     'PRACTICE',
     true,
     'PULL_ORIGIN',
-    'DRAFT',
-    'APPROVED',
+    'PENDING_REG',
+    'REGISTERED',
     $${
-        "requiredActors": [
-            {"actorType":"APPLICANT","orgType":"DEPARTMENT","roleCode":"OA_APPLICANT"},
-            {"actorType":"APPROVER","orgType":"DEPARTMENT","roleCode":"OA_APPROVER"}
-        ]
+        "participantMapping": "POOL",
+        "poolKey": "incoming-default"
     }$$::jsonb,
     'STUDENT_EXCLUSIVE',
     'ON_ATTEMPT',
-    'ON_ALLOCATE',
+    'NONE',
     '{"expireAfterHours":24}'::jsonb,
-    '{"expectedStatus":"APPROVED","requiredCapabilities":["RESULT_CHECK"]}'::jsonb,
-    'bm-oa-demo-approval',
-    'OA_APPROVAL_PRACTICE_V1',
-    'tdt-oa-demo-approval-practice-v1',
-    'ON_DEMAND',
+    '{"expectedStatus":"REGISTERED","requiredCapabilities":[]}'::jsonb,
+    'bm-oa-incoming',
+    'OA_INCOMING_PENDING_REG_PRACTICE_V1',
+    'tdt-oa-incoming-pending-reg-v1',
+    'ON_PUBLISH',
     '{"minReadyCount":1,"targetReadyCount":30}'::jsonb,
-    '{"requiredCapabilities":["DATA_CREATE","DATA_VALIDATE"],"failOnValidationError":true}'::jsonb,
+    '{"requiredCapabilities":["DATA_CREATE"],"validateAfterCreate":false,"failOnValidationError":false}'::jsonb,
     '{"archiveAfterDays":7,"archiveMode":"SOFT"}'::jsonb,
     1,
     0,
@@ -450,5 +465,20 @@ DO UPDATE SET
     update_by = 'seed',
     update_time = now(),
     status = 'ACTIVE';
+
+-- 旧版 OA_APPROVAL 样例与其策略不再用于批次准备，防止后台同时出现两套互不兼容的 OA 模块。
+UPDATE business_module
+SET status = 'DISABLED', update_by = 'seed', update_time = now()
+WHERE tenant_id = 'demo-tenant'
+  AND connector_system_id = 'origin-oa-demo-system'
+  AND module_code = 'OA_APPROVAL'
+  AND deleted = false;
+
+UPDATE module_data_strategy
+SET status = 'DISABLED', update_by = 'seed', update_time = now()
+WHERE tenant_id = 'demo-tenant'
+  AND connector_system_id = 'origin-oa-demo-system'
+  AND module_code = 'OA_APPROVAL'
+  AND deleted = false;
 
 COMMIT;

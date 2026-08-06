@@ -7,9 +7,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.ConnectorSystem;
+import com.sxpt.module.connector.entity.IdentityBinding;
 import com.sxpt.module.connector.entity.PlatformCapability;
+import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
+import com.sxpt.module.connector.mapper.IdentityBindingMapper;
 import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
+import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,11 +24,16 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * HTTP 原平台数据准备适配器。
@@ -59,25 +68,42 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
 
     private static final String AUTH_TYPE_API_KEY = "API_KEY";
 
+    private static final String STANDARD_BATCH_CREATE_CONTRACT = "TEACHING_DATA_BATCH_CREATE_V1";
+
+    private static final String HEADER_TRACE_ID = "X-Trace-Id";
+
+    private static final String HEADER_IDEMPOTENCY_KEY = "X-Idempotency-Key";
+
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
 
     private final ConnectorSystemMapper connectorSystemMapper;
 
     private final PlatformCapabilityMapper platformCapabilityMapper;
 
+    private final TeachingDataTemplateMapper teachingDataTemplateMapper;
+
+    private final IdentityBindingMapper identityBindingMapper;
+
     private final RestTemplate restTemplate;
 
     @Autowired
     public HttpOriginDataPrepareAdapter(ConnectorSystemMapper connectorSystemMapper,
-                                        PlatformCapabilityMapper platformCapabilityMapper) {
-        this(connectorSystemMapper, platformCapabilityMapper, new RestTemplate());
+                                        PlatformCapabilityMapper platformCapabilityMapper,
+                                        TeachingDataTemplateMapper teachingDataTemplateMapper,
+                                        IdentityBindingMapper identityBindingMapper) {
+        this(connectorSystemMapper, platformCapabilityMapper, teachingDataTemplateMapper,
+                identityBindingMapper, new RestTemplate());
     }
 
     public HttpOriginDataPrepareAdapter(ConnectorSystemMapper connectorSystemMapper,
                                         PlatformCapabilityMapper platformCapabilityMapper,
+                                        TeachingDataTemplateMapper teachingDataTemplateMapper,
+                                        IdentityBindingMapper identityBindingMapper,
                                         RestTemplate restTemplate) {
         this.connectorSystemMapper = connectorSystemMapper;
         this.platformCapabilityMapper = platformCapabilityMapper;
+        this.teachingDataTemplateMapper = teachingDataTemplateMapper;
+        this.identityBindingMapper = identityBindingMapper;
         this.restTemplate = restTemplate;
     }
 
@@ -89,12 +115,13 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      */
     @Override
     public BatchCreateResponse createTeachingData(BatchCreateRequest request) {
-        System.out.println("66666666666666666666666666666666666666666");
-        System.out.println("request: " + request.getRequestBatchId() + request.getTenantId() + request.getConnectorSystemId() + ", items: " + request.getItems().size());
         OriginCallContext context = buildCallContext(
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_CREATE);
+        if (usesStandardBatchCreateContract(context.getCapability())) {
+            return createTeachingDataWithStandardContract(context, request);
+        }
         return exchange(context, request, BatchCreateResponse.class);
     }
 
@@ -210,11 +237,28 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @return 解析后的标准响应对象。
      */
     private <T> T exchange(OriginCallContext context, Object request, Class<T> responseType) {
-        HttpEntity<Object> entity = new HttpEntity<>(request, buildHeaders(context.getConnectorSystem()));
+        String responseBody = exchangeForBody(context, request);
+        return parseResponse(responseBody, responseType);
+    }
+
+    /**
+     * 发起一次原平台 HTTP 调用并保留业务错误响应体。
+     *
+     * 标准造数接口使用 HTTP 422 表达部分成功；该响应仍包含成功数据，不能被 RestTemplate
+     * 默认错误处理直接丢弃。
+     */
+    private String exchangeForBody(OriginCallContext context, Object request) {
+        HttpEntity<Object> entity = new HttpEntity<>(request, buildHeaders(context, request));
         try {
             ResponseEntity<String> response = restTemplate.exchange(
                     context.getUrl(), context.getHttpMethod(), entity, String.class);
-            return parseResponse(response.getBody(), responseType);
+            return response.getBody();
+        } catch (HttpStatusCodeException ex) {
+            if (ex.getRawStatusCode() == 422 && StringUtils.hasText(ex.getResponseBodyAsString())) {
+                return ex.getResponseBodyAsString();
+            }
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(),
+                    "调用原平台接口失败（HTTP " + ex.getRawStatusCode() + "）：" + ex.getStatusText());
         } catch (RestClientException ex) {
             throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(),
                     "调用原平台接口失败：" + ex.getMessage());
@@ -227,14 +271,15 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param connectorSystem 原平台系统配置。
      * @return HTTP 请求头。
      */
-    private HttpHeaders buildHeaders(ConnectorSystem connectorSystem) {
+    private HttpHeaders buildHeaders(OriginCallContext context, Object request) {
+        ConnectorSystem connectorSystem = context.getConnectorSystem();
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.setAccept(Collections.singletonList(MediaType.APPLICATION_JSON));
         String authType = normalize(connectorSystem.getAuthType());
         JsonNode config = parseConfigJson(connectorSystem.getConfigJson());
         if (AUTH_TYPE_BEARER.equals(authType)) {
-            String token = textValue(config, "token");
+            String token = resolveConfiguredSecret(config, "tokenEnv", "token");
             if (!StringUtils.hasText(token)) {
                 throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
                         "原平台 BEARER 认证缺少 token");
@@ -242,15 +287,23 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
             headers.setBearerAuth(token);
         } else if (AUTH_TYPE_API_KEY.equals(authType)) {
             String headerName = firstText(textValue(config, "headerName"), "X-API-Key");
-            String apiKey = textValue(config, "apiKey");
+            String apiKey = resolveConfiguredSecret(config, "apiKeyEnv", "apiKey");
             if (!StringUtils.hasText(apiKey)) {
                 throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
                         "原平台 API_KEY 认证缺少 apiKey");
             }
             headers.set(headerName, apiKey);
         }
-        System.out.println("888888");
-        System.out.println("原平台请求头: " + headers.toSingleValueMap());
+        BatchCreateRequest batchRequest = request instanceof BatchCreateRequest
+                ? (BatchCreateRequest) request
+                : request instanceof StandardBatchCreateHttpRequest
+                    ? ((StandardBatchCreateHttpRequest) request).getSource()
+                    : null;
+        if (batchRequest != null && usesStandardBatchCreateContract(context.getCapability())) {
+            headers.set(HEADER_TRACE_ID, firstText(batchRequest.getTraceId(), batchRequest.getRequestBatchId()));
+            headers.set(HEADER_IDEMPOTENCY_KEY,
+                    firstText(batchRequest.getIdempotencyKey(), batchRequest.getRequestBatchId()));
+        }
         return headers;
     }
 
@@ -268,8 +321,6 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         }
         try {
             JsonNode root = JSON_MAPPER.readTree(responseBody);
-            System.out.println("************************");
-            System.out.println("原平台响应 JSON: " + root.toString());
             JsonNode payload = root.has("result") ? root.get("result") : root;
             return JSON_MAPPER.treeToValue(payload, responseType);
         } catch (JsonProcessingException ex) {
@@ -348,6 +399,20 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
     }
 
     /**
+     * 优先从配置指定的环境变量读取密钥，未设置时使用开发配置中的回退值。
+     */
+    private String resolveConfiguredSecret(JsonNode config, String envField, String fallbackField) {
+        String envName = textValue(config, envField);
+        if (StringUtils.hasText(envName)) {
+            String environmentValue = System.getenv(envName);
+            if (StringUtils.hasText(environmentValue)) {
+                return environmentValue;
+            }
+        }
+        return textValue(config, fallbackField);
+    }
+
+    /**
      * 校验文本非空。
      *
      * @param value 待校验文本。
@@ -377,6 +442,223 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      */
     private String firstText(String first, String second) {
         return StringUtils.hasText(first) ? first : second;
+    }
+
+    /**
+     * 按能力配置判断 DATA_CREATE 是否使用教学平台标准造数契约。
+     */
+    private boolean usesStandardBatchCreateContract(PlatformCapability capability) {
+        JsonNode schema = parseConfigJson(capability.getRequestSchemaJson());
+        return STANDARD_BATCH_CREATE_CONTRACT.equalsIgnoreCase(textValue(schema, "contract"))
+                || "/openapi/teaching-data/batch-create".equals(capability.getEndpointUrl());
+    }
+
+    /**
+     * 将教学平台内部批次请求转换为第三方标准请求，并映射标准响应。
+     */
+    private BatchCreateResponse createTeachingDataWithStandardContract(OriginCallContext context,
+                                                                        BatchCreateRequest request) {
+        if (request == null || request.getItems() == null || request.getItems().isEmpty()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        TeachingDataTemplate template = getActiveTemplate(request);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("businessModuleCode", request.getModuleCode());
+        payload.put("templateCode", template.getTemplateCode());
+        payload.put("initState", firstText(request.getInitState(), template.getInitState()));
+        payload.put("sceneType", request.getSceneType());
+        payload.put("participants", buildStandardParticipants(context, request));
+        payload.put("bizParams", resolveBizParams(request.getRequestJson(), template.getConfigJson()));
+        String responseBody = exchangeForBody(context, payloadWithHeaders(payload, request));
+        return parseStandardBatchCreateResponse(responseBody, request);
+    }
+
+    /**
+     * 使用一个只承载请求头上下文的 Map 包装标准 body。实际交换前会解包，避免污染外部 JSON。
+     */
+    private StandardBatchCreateHttpRequest payloadWithHeaders(Map<String, Object> payload,
+                                                               BatchCreateRequest source) {
+        return new StandardBatchCreateHttpRequest(payload, source);
+    }
+
+    private TeachingDataTemplate getActiveTemplate(BatchCreateRequest request) {
+        requireText(request.getTemplateId());
+        TeachingDataTemplate template = teachingDataTemplateMapper.selectOne(
+                new QueryWrapper<TeachingDataTemplate>()
+                        .eq("tenant_id", request.getTenantId())
+                        .eq("connector_system_id", request.getConnectorSystemId())
+                        .eq("id", request.getTemplateId())
+                        .eq("status", STATUS_ACTIVE)
+                        .eq("deleted", Boolean.FALSE)
+                        .last("limit 1"));
+        if (template == null) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "当前数据准备模板不存在或未启用");
+        }
+        return template;
+    }
+
+    private List<Map<String, Object>> buildStandardParticipants(OriginCallContext context,
+                                                                 BatchCreateRequest request) {
+        JsonNode schema = parseConfigJson(context.getCapability().getRequestSchemaJson());
+        String defaultPoolKey = textValue(schema, "defaultPoolKey");
+        boolean preferPoolKey = schema.path("preferPoolKey").asBoolean(false);
+        List<Map<String, Object>> participants = new ArrayList<>();
+        for (RequestItem item : request.getItems()) {
+            Map<String, Object> participant = new LinkedHashMap<>();
+            participant.put("participantId", item.getRequestItemId());
+            if (StringUtils.hasText(item.getStudentId())) {
+                participant.put("ownerUserId", item.getStudentId());
+            }
+            IdentityBinding binding = findIdentityBinding(request, item.getStudentId());
+            String externalUserId = binding == null ? null : binding.getExternalUserId();
+            String externalOrgId = firstText(resolveExternalOrgId(binding), item.getRequiredExternalOrgId());
+            if (preferPoolKey && StringUtils.hasText(defaultPoolKey)) {
+                participant.put("poolKey", defaultPoolKey);
+            } else {
+                if (StringUtils.hasText(externalUserId)) {
+                    participant.put("externalUserId", externalUserId);
+                }
+                if (StringUtils.hasText(externalOrgId)) {
+                    participant.put("externalOrgId", externalOrgId);
+                }
+                if (!StringUtils.hasText(externalUserId)
+                        && !StringUtils.hasText(externalOrgId)
+                        && StringUtils.hasText(defaultPoolKey)) {
+                    participant.put("poolKey", defaultPoolKey);
+                }
+            }
+            participants.add(participant);
+        }
+        return participants;
+    }
+
+    private IdentityBinding findIdentityBinding(BatchCreateRequest request, String userId) {
+        if (!StringUtils.hasText(userId)) {
+            return null;
+        }
+        return identityBindingMapper.selectOne(new QueryWrapper<IdentityBinding>()
+                .eq("tenant_id", request.getTenantId())
+                .eq("connector_system_id", request.getConnectorSystemId())
+                .eq("user_id", userId)
+                .eq("status", STATUS_ACTIVE)
+                .eq("deleted", Boolean.FALSE)
+                .last("limit 1"));
+    }
+
+    private String resolveExternalOrgId(IdentityBinding binding) {
+        if (binding == null || !StringUtils.hasText(binding.getExternalOrgJson())) {
+            return null;
+        }
+        JsonNode org = parseConfigJson(binding.getExternalOrgJson());
+        if (org.isArray() && org.size() > 0) {
+            org = org.get(0);
+        }
+        return firstText(textValue(org, "externalOrgId"),
+                firstText(textValue(org, "orgId"), textValue(org, "id")));
+    }
+
+    private Object resolveBizParams(String requestJson, String templateConfigJson) {
+        JsonNode requestNode = parseConfigJson(requestJson);
+        JsonNode bizParams = findBizParams(requestNode);
+        if (bizParams == null) {
+            bizParams = findBizParams(parseConfigJson(templateConfigJson));
+        }
+        if (bizParams == null || !bizParams.isObject()) {
+            return new LinkedHashMap<String, Object>();
+        }
+        return JSON_MAPPER.convertValue(bizParams, Object.class);
+    }
+
+    private JsonNode findBizParams(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.has("bizParams") && node.get("bizParams").isObject()) {
+            return node.get("bizParams");
+        }
+        if (node.has("sourceRequestJson") && node.get("sourceRequestJson").isTextual()) {
+            return findBizParams(parseConfigJson(node.get("sourceRequestJson").asText()));
+        }
+        return null;
+    }
+
+    private BatchCreateResponse parseStandardBatchCreateResponse(String responseBody,
+                                                                  BatchCreateRequest request) {
+        if (!StringUtils.hasText(responseBody)) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(), "原平台接口返回为空");
+        }
+        try {
+            JsonNode root = JSON_MAPPER.readTree(responseBody);
+            JsonNode result = root.has("result") ? root.get("result") : root;
+            BatchCreateResponse response = new BatchCreateResponse();
+            response.setExternalRequestId(textValue(result, "originBatchId"));
+            response.setRequestBatchId(request.getRequestBatchId());
+            response.setAdapterStatus(firstText(textValue(result, "status"),
+                    root.path("success").asBoolean(false) ? "SUCCESS" : "FAILED"));
+            response.setResultJson(root.toString());
+            List<ResponseItem> items = new ArrayList<>();
+            appendStandardSuccessItems(items, result.path("items"));
+            appendStandardFailedItems(items, result.path("failedItems"));
+            response.setItems(items);
+            return response;
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(),
+                    "原平台接口响应格式不符合标准造数契约");
+        }
+    }
+
+    private void appendStandardSuccessItems(List<ResponseItem> target, JsonNode source) {
+        if (!source.isArray()) {
+            return;
+        }
+        for (JsonNode item : source) {
+            ResponseItem mapped = new ResponseItem();
+            mapped.setRequestItemId(textValue(item, "participantId"));
+            mapped.setExternalBusinessId(textValue(item, "externalDataId"));
+            mapped.setExternalBusinessNo(textValue(item, "externalBizNo"));
+            mapped.setExternalStatus(textValue(item, "externalStatus"));
+            mapped.setTargetUrl(textValue(item, "entryUrl"));
+            mapped.setCurrentOrgId(textValue(item, "externalOrgId"));
+            JsonNode rawData = item.path("rawData");
+            mapped.setExternalBusinessName(firstText(textValue(rawData, "title"), mapped.getExternalBusinessNo()));
+            mapped.setItemStatus("SUCCESS");
+            target.add(mapped);
+        }
+    }
+
+    private void appendStandardFailedItems(List<ResponseItem> target, JsonNode source) {
+        if (!source.isArray()) {
+            return;
+        }
+        for (JsonNode item : source) {
+            ResponseItem mapped = new ResponseItem();
+            mapped.setRequestItemId(textValue(item, "participantId"));
+            mapped.setItemStatus("FAILED");
+            String errorCode = textValue(item, "errorCode");
+            String errorMessage = textValue(item, "errorMessage");
+            mapped.setErrorMessage(StringUtils.hasText(errorCode)
+                    ? errorCode + "：" + firstText(errorMessage, "原平台造数失败")
+                    : firstText(errorMessage, "原平台造数失败"));
+            target.add(mapped);
+        }
+    }
+
+    /**
+     * 标准请求 body 与内部请求头上下文的组合；RestTemplate 实际发送时只发送 payload。
+     */
+    private static class StandardBatchCreateHttpRequest extends LinkedHashMap<String, Object> {
+
+        private final BatchCreateRequest source;
+
+        StandardBatchCreateHttpRequest(Map<String, Object> payload, BatchCreateRequest source) {
+            super(payload);
+            this.source = source;
+        }
+
+        BatchCreateRequest getSource() {
+            return source;
+        }
     }
 
     /**

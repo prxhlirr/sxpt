@@ -119,15 +119,13 @@ describe('登录后的平台入口与身份导航', () => {
     expect(shell).not.toContain('switchRole');
   });
 
-  it('教案管理操作中集中提供完整业务配置入口', () => {
+  it('教案管理操作直接提供发布中心入口和删除操作', () => {
     const list = source('src/views/admin/LessonListView.vue');
 
-    expect(list).toContain('业务配置');
-    expect(list).toContain("name: 'lesson-editor'");
-    expect(list).toContain("name: 'exam-setup'");
-    expect(list).toContain("name: 'group-setup'");
-    expect(list).toContain("name: 'exam-data'");
+    expect(list).toContain('发布中心');
     expect(list).toContain("name: 'publish-center'");
+    expect(list).toContain('deleteLessonRemote');
+    expect(list).not.toContain('业务配置');
   });
 
   it('业务模块详情提供原平台字典维护入口并服务参与方下拉', () => {

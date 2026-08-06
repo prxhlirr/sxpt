@@ -37,9 +37,16 @@ const props = withDefaults(
     src: string;
     title: string;
     fitMode?: 'fill' | 'contain';
+    studentMode?: 'LEARNING' | 'PRACTICE';
+    monitorActions?: boolean;
+    showResolution?: boolean;
+    allowedOrigins?: string[];
   }>(),
   {
-    fitMode: 'fill'
+    fitMode: 'fill',
+    monitorActions: false,
+    showResolution: true,
+    allowedOrigins: () => []
   }
 );
 
@@ -60,13 +67,28 @@ const ready = ref(false);
 const recordingEnabled = ref(false);
 const elementPickRequested = ref(false);
 const containerSize = ref({ width: 0, height: 0 });
+const activeFrameOrigin = ref('');
 let resizeObserver: ResizeObserver | undefined;
+let lastActionSignature = '';
+let lastActionAt = 0;
 const frameOrigin = computed(() => {
   try {
     return new URL(frameSrc.value, window.location.href).origin;
   } catch {
     return '';
   }
+});
+const trustedFrameOrigins = computed(() => {
+  const origins = new Set<string>();
+  if (frameOrigin.value) origins.add(frameOrigin.value);
+  for (const candidate of props.allowedOrigins) {
+    try {
+      origins.add(new URL(candidate, window.location.href).origin);
+    } catch {
+      // Ignore malformed optional origins; the iframe source remains trusted.
+    }
+  }
+  return origins;
 });
 const frameViewportStyle = computed(() => {
   if (props.fitMode === 'fill') {
@@ -103,7 +125,15 @@ watch(
   (src) => {
     if (src === frameSrc.value) return;
     ready.value = false;
+    activeFrameOrigin.value = '';
     frameSrc.value = src;
+  }
+);
+
+watch(
+  () => [props.studentMode, props.monitorActions] as const,
+  () => {
+    if (ready.value) syncFrameControls();
   }
 );
 
@@ -111,9 +141,23 @@ function isMessageFromFrame(event: MessageEvent) {
   return (
     Boolean(frameRef.value?.contentWindow) &&
     event.source === frameRef.value?.contentWindow &&
-    Boolean(frameOrigin.value) &&
-    event.origin === frameOrigin.value
+    trustedFrameOrigins.value.has(event.origin)
   );
+}
+
+function emitBusinessAction(payload: BusinessActionPayload) {
+  if (!payload || !payload.selector || !payload.actionType) return;
+  const signature = [
+    payload.actionType,
+    payload.url,
+    payload.selector,
+    payload.valueMasked ?? ''
+  ].join('|');
+  const at = Date.now();
+  if (signature === lastActionSignature && at - lastActionAt < 450) return;
+  lastActionSignature = signature;
+  lastActionAt = at;
+  emit('business-action', payload);
 }
 
 function handleMessage(event: MessageEvent) {
@@ -127,6 +171,7 @@ function handleMessage(event: MessageEvent) {
     [key: string]: unknown;
   };
   if (message.type === 'SXPT_BUSINESS_READY' || message.type === 'BUSINESS_READY') {
+    activeFrameOrigin.value = event.origin;
     ready.value = true;
     syncFrameControls();
     const payload =
@@ -139,10 +184,13 @@ function handleMessage(event: MessageEvent) {
     emit('business-ready', payload);
     return;
   }
-  if (message.type === 'SXPT_BUSINESS_ACTION' || message.type === 'BUSINESS_ACTION') {
-    emit(
-      'business-action',
-      (message.type === 'SXPT_BUSINESS_ACTION'
+  if (
+    message.type === 'SXPT_BUSINESS_ACTION' ||
+    message.type === 'SXPT_BUSINESS_INTERACTION' ||
+    message.type === 'BUSINESS_ACTION'
+  ) {
+    emitBusinessAction(
+      (message.type.startsWith('SXPT_')
         ? message.payload
         : message) as BusinessActionPayload
     );
@@ -177,8 +225,9 @@ function handleMessage(event: MessageEvent) {
 }
 
 function post(message: unknown) {
-  if (!frameOrigin.value) return;
-  frameRef.value?.contentWindow?.postMessage(message, frameOrigin.value);
+  const targetOrigin = activeFrameOrigin.value || frameOrigin.value;
+  if (!targetOrigin) return;
+  frameRef.value?.contentWindow?.postMessage(message, targetOrigin);
 }
 
 function setRecording(enabled: boolean) {
@@ -208,12 +257,19 @@ function cancelElementPick() {
 }
 
 function postRecordingState() {
+  if (props.monitorActions) {
+    post({ type: 'SET_RECORDING_STATE', enabled: true, monitorOnly: true });
+    return;
+  }
   post({ type: 'SXPT_SET_RECORDING', enabled: recordingEnabled.value });
   post({ type: 'SET_RECORDING_STATE', enabled: recordingEnabled.value });
 }
 
 function syncFrameControls() {
   postRecordingState();
+  if (props.studentMode) {
+    post({ type: 'SXPT_SET_STUDENT_MODE', mode: props.studentMode });
+  }
   if (elementPickRequested.value) postElementPickState();
 }
 
@@ -284,7 +340,7 @@ defineExpose({
       :title="title"
       @load="handleLoad"
     />
-    <span class="business-capture-frame__resolution">
+    <span v-if="showResolution" class="business-capture-frame__resolution">
       {{ fitMode === 'fill' ? '自适应全屏' : '等比例视口' }}
       {{ Math.round(containerSize.width) }} × {{ Math.round(containerSize.height) }}
     </span>

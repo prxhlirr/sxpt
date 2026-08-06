@@ -26,15 +26,14 @@ describe('后台教案编排页面', () => {
     expect(list).toContain('状态筛选');
   });
 
-  it('业务配置菜单使用顶层悬浮定位，不撑高或裁切表格', () => {
+  it('教案列表直接进入发布中心并提供删除操作', () => {
     const list = source('src/views/admin/LessonListView.vue');
 
-    expect(list).toContain('<Teleport to="body">');
-    expect(list).toContain('class="lesson-actions-popover"');
-    expect(list).toContain('position: fixed');
-    expect(list).toContain('z-index: 3000');
-    expect(list).toContain('getBoundingClientRect()');
-    expect(list).not.toContain('<details class="lesson-actions-menu">');
+    expect(list).toContain('发布中心');
+    expect(list).toContain("name: 'publish-center'");
+    expect(list).toContain('store.deleteLessonRemote');
+    expect(list).toContain('确认删除教案');
+    expect(list).not.toContain('业务配置');
   });
 
   it('编排阶段来自 stages 动态循环，且支持完整阶段操作和字段配置', () => {
@@ -86,7 +85,7 @@ describe('后台教案编排页面', () => {
     expect(publishCenter).toContain("name: 'lesson-recording'");
     expect(publishCenter).toContain("query: { from: 'publish' }");
     expect(publishCenter).toContain('@click="startLecture"');
-    expect(publishCenter).toContain('点击开始讲解');
+    expect(publishCenter).toContain('开始讲解');
     expect(preview).toContain("route.query.from === 'publish'");
     expect(preview).toContain("'返回发布中心'");
   });
