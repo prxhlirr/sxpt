@@ -25,6 +25,9 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -111,6 +114,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_CREATE);
+        Map<String, String> participantIdCorrelation = buildParticipantIdCorrelation(request);
         OriginBatchCreateRequest originRequest = buildOriginBatchCreateRequest(
                 request, context.getCapability());
         OriginBatchCreateResponse originResponse = exchange(
@@ -118,7 +122,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 originRequest,
                 buildHeaders(context.getConnectorSystem(), request),
                 OriginBatchCreateResponse.class);
-        return toBatchCreateResponse(originResponse, request);
+        return toBatchCreateResponse(originResponse, request, participantIdCorrelation);
     }
 
     /**
@@ -471,7 +475,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
             }
             requireText(item.getRequestItemId());
             OriginParticipant participant = new OriginParticipant();
-            participant.setParticipantId(item.getRequestItemId());
+            participant.setParticipantId(toExternalParticipantId(item.getRequestItemId()));
             participant.setOwnerUserId(item.getStudentId());
             if (preferPoolKey && StringUtils.hasText(item.getQuestionId())) {
                 participant.setPoolKey(firstText(defaultPoolKey, item.getQuestionId()));
@@ -487,6 +491,44 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         return participants;
     }
 
+    private Map<String, String> buildParticipantIdCorrelation(BatchCreateRequest request) {
+        validateBatchCreateRequest(request);
+        Map<String, String> correlation = new LinkedHashMap<>();
+        for (RequestItem item : request.getItems()) {
+            if (item == null) {
+                continue;
+            }
+            requireText(item.getRequestItemId());
+            String externalId = toExternalParticipantId(item.getRequestItemId());
+            String existingInternalId = correlation.putIfAbsent(externalId, item.getRequestItemId());
+            if (existingInternalId != null && !existingInternalId.equals(item.getRequestItemId())) {
+                throw new BusinessException(
+                        ApiResultCode.SYSTEM_ERROR.getCode(), "外部参与方标识发生冲突");
+            }
+        }
+        return correlation;
+    }
+
+    private String toExternalParticipantId(String internalId) {
+        if (internalId.length() <= 64) {
+            return internalId;
+        }
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(internalId.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte value : digest) {
+                int unsignedValue = value & 0xff;
+                hex.append(Character.forDigit(unsignedValue >>> 4, 16));
+                hex.append(Character.forDigit(unsignedValue & 0x0f, 16));
+            }
+            return "p_" + hex.substring(0, 62);
+        } catch (NoSuchAlgorithmException ex) {
+            throw new BusinessException(
+                    ApiResultCode.SYSTEM_ERROR.getCode(), "运行环境不支持 SHA-256");
+        }
+    }
+
     /**
      * 将第三方造数响应转换回内部适配器响应。
      *
@@ -495,7 +537,8 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @return 内部批量创建响应。
      */
     private BatchCreateResponse toBatchCreateResponse(OriginBatchCreateResponse originResponse,
-                                                      BatchCreateRequest request) {
+                                                      BatchCreateRequest request,
+                                                      Map<String, String> participantIdCorrelation) {
         if (originResponse == null) {
             throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(), "原平台接口返回为空");
         }
@@ -507,12 +550,12 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         List<ResponseItem> items = new ArrayList<>();
         if (originResponse.getItems() != null) {
             for (OriginResponseItem originItem : originResponse.getItems()) {
-                items.add(toSuccessResponseItem(originItem));
+                items.add(toSuccessResponseItem(originItem, participantIdCorrelation));
             }
         }
         if (originResponse.getFailedItems() != null) {
             for (OriginFailedItem failedItem : originResponse.getFailedItems()) {
-                items.add(toFailedResponseItem(failedItem));
+                items.add(toFailedResponseItem(failedItem, participantIdCorrelation));
             }
         }
         response.setItems(items);
@@ -525,14 +568,16 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param originItem 第三方成功明细。
      * @return 内部响应明细。
      */
-    private ResponseItem toSuccessResponseItem(OriginResponseItem originItem) {
+    private ResponseItem toSuccessResponseItem(OriginResponseItem originItem,
+                                               Map<String, String> participantIdCorrelation) {
         ResponseItem item = new ResponseItem();
         if (originItem == null) {
             item.setItemStatus(STATUS_FAILED);
             item.setErrorMessage("原平台返回空明细");
             return item;
         }
-        item.setRequestItemId(originItem.getParticipantId());
+        item.setRequestItemId(resolveInternalParticipantId(
+                originItem.getParticipantId(), participantIdCorrelation));
         item.setExternalBusinessId(originItem.getExternalDataId());
         item.setExternalBusinessNo(originItem.getExternalBizNo());
         item.setExternalStatus(originItem.getExternalStatus());
@@ -549,17 +594,24 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param failedItem 第三方失败明细。
      * @return 内部响应明细。
      */
-    private ResponseItem toFailedResponseItem(OriginFailedItem failedItem) {
+    private ResponseItem toFailedResponseItem(OriginFailedItem failedItem,
+                                              Map<String, String> participantIdCorrelation) {
         ResponseItem item = new ResponseItem();
         if (failedItem == null) {
             item.setItemStatus(STATUS_FAILED);
             item.setErrorMessage("原平台返回空失败明细");
             return item;
         }
-        item.setRequestItemId(failedItem.getParticipantId());
+        item.setRequestItemId(resolveInternalParticipantId(
+                failedItem.getParticipantId(), participantIdCorrelation));
         item.setItemStatus(STATUS_FAILED);
         item.setErrorMessage(firstText(failedItem.getErrorMessage(), failedItem.getErrorCode()));
         return item;
+    }
+
+    private String resolveInternalParticipantId(String externalId,
+                                                Map<String, String> participantIdCorrelation) {
+        return firstText(participantIdCorrelation.get(externalId), externalId);
     }
 
     /**

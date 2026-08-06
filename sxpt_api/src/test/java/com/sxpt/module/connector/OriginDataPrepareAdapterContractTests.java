@@ -23,6 +23,8 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -260,6 +262,56 @@ class OriginDataPrepareAdapterContractTests {
         assertFalse(participant.containsKey("poolKey"));
     }
 
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void httpAdapterShouldCorrelateLongInternalRequestItemIdThroughOaParticipantId() {
+        ConnectorSystemMapper systemMapper = mock(ConnectorSystemMapper.class);
+        PlatformCapabilityMapper capabilityMapper = mock(PlatformCapabilityMapper.class);
+        RestTemplate restTemplate = mock(RestTemplate.class);
+
+        ConnectorSystem system = new ConnectorSystem();
+        system.setId("origin-oa");
+        system.setTenantId("tenant-1");
+        system.setBaseUrl("http://127.0.0.1:9527");
+        system.setAuthType("BEARER");
+        system.setConfigJson("{\"token\":\"oa-token\"}");
+
+        PlatformCapability capability = new PlatformCapability();
+        capability.setEndpointUrl("/openapi/teaching-data/batch-create");
+        capability.setMethod("POST");
+        capability.setRequestSchemaJson(OA_CREATE_CONTRACT);
+
+        when(systemMapper.selectOne(any(QueryWrapper.class))).thenReturn(system);
+        when(capabilityMapper.selectOne(any(QueryWrapper.class))).thenReturn(capability);
+        String[] outboundParticipantId = new String[1];
+        when(restTemplate.exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenAnswer(invocation -> {
+                    HttpEntity entity = invocation.getArgument(2);
+                    Map<String, Object> body = new ObjectMapper().convertValue(entity.getBody(), Map.class);
+                    Map<String, Object> participant =
+                            (Map<String, Object>) ((java.util.List) body.get("participants")).get(0);
+                    outboundParticipantId[0] = (String) participant.get("participantId");
+                    return new ResponseEntity<>(
+                            standardSuccessResponse(outboundParticipantId[0]), HttpStatus.OK);
+                });
+
+        String internalRequestItemId = "authoring_0123456789012345678901234567890123456789"
+                + "01234567890123456789012345678901234567890123456789";
+        OriginDataPrepareAdapter.BatchCreateRequest request = createStandardRequest();
+        request.getItems().get(0).setRequestItemId(internalRequestItemId);
+        HttpOriginDataPrepareAdapter adapter = new HttpOriginDataPrepareAdapter(
+                systemMapper, capabilityMapper, restTemplate);
+
+        OriginDataPrepareAdapter.BatchCreateResponse response = adapter.createTeachingData(request);
+
+        assertNotNull(outboundParticipantId[0]);
+        assertTrue(outboundParticipantId[0].length() <= 64);
+        assertNotEquals(internalRequestItemId, outboundParticipantId[0]);
+        assertEquals(internalRequestItemId, response.getItems().get(0).getRequestItemId());
+    }
+
     private OriginDataPrepareAdapter.BatchCreateRequest createStandardRequest() {
         OriginDataPrepareAdapter.RequestItem item = new OriginDataPrepareAdapter.RequestItem();
         item.setRequestItemId("item-1");
@@ -285,10 +337,14 @@ class OriginDataPrepareAdapterContractTests {
     }
 
     private String standardSuccessResponse() {
+        return standardSuccessResponse("item-1");
+    }
+
+    private String standardSuccessResponse(String participantId) {
         return "{\"success\":true,\"code\":200,\"message\":\"success\",\"result\":{"
                 + "\"originBatchId\":\"oa-batch-1\",\"status\":\"SUCCESS\","
                 + "\"totalCount\":1,\"successCount\":1,\"failedCount\":0,\"items\":[{"
-                + "\"participantId\":\"item-1\",\"ownerUserId\":\"student-1\","
+                + "\"participantId\":\"" + participantId + "\",\"ownerUserId\":\"student-1\","
                 + "\"externalDataId\":\"oa-data-1\",\"externalBizNo\":\"收文〔2026〕1号\","
                 + "\"externalStatus\":\"PENDING_REG\","
                 + "\"entryUrl\":\"/workspace/incoming/detail/oa-data-1\","
