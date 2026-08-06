@@ -20,6 +20,8 @@ public class CreateStudentTaskLaunchRequest {
 
     private String executionId;
 
+    private String sourceAllocationId;
+
     public String getTaskId() {
         return taskId;
     }
@@ -42,5 +44,13 @@ public class CreateStudentTaskLaunchRequest {
 
     public void setExecutionId(String executionId) {
         this.executionId = executionId;
+    }
+
+    public String getSourceAllocationId() {
+        return sourceAllocationId;
+    }
+
+    public void setSourceAllocationId(String sourceAllocationId) {
+        this.sourceAllocationId = sourceAllocationId;
     }
 }

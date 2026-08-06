@@ -524,7 +524,8 @@ async function restartAttempt() {
     const allocation = await dataPrepareApi.restartCurrentStudentTaskData({
       taskId,
       sceneType: task.value.mode,
-      executionId: task.value.remoteExecutionId
+      executionId: task.value.remoteExecutionId,
+      sourceAllocationId: launchAllocation.value?.id
     });
     launchAllocation.value = allocation;
     launchResult.value = null;
@@ -779,7 +780,8 @@ async function restartTrainingTask() {
       const allocation = await dataPrepareApi.restartCurrentStudentTaskData({
         taskId,
         sceneType: task.value.mode,
-        executionId: task.value.remoteExecutionId
+        executionId: task.value.remoteExecutionId,
+        sourceAllocationId: launchAllocation.value?.id
       });
       launchAllocation.value = allocation;
       launchResult.value = null;
