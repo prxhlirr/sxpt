@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import TimedToast from '../../components/ui/TimedToast.vue';
+import { usersApi, type StudentDirectoryItem, type TeachOrg } from '../../api/users';
 import { authApi, dataPrepareApi } from '../../services/trainingApi';
 import type {
   BusinessModule,
@@ -11,10 +12,14 @@ import type {
   DataPreparePreflightResult,
   DataRequirement,
   ModuleDataStrategy,
+  OriginOrg,
+  OriginRole,
   TeachingDataTemplate
 } from '../../services/trainingApi';
 
 type ToastTone = 'success' | 'error' | 'info';
+type PrepareScopeMode = 'single' | 'class';
+type StudentSelectionFilter = 'all' | 'selected' | 'unselected';
 
 const session = authApi.getSession();
 const loading = ref(false);
@@ -24,6 +29,11 @@ let toastId = 0;
 
 const connectorSystems = ref<ConnectorSystem[]>([]);
 const businessModules = ref<BusinessModule[]>([]);
+const originOrgs = ref<OriginOrg[]>([]);
+const originRoles = ref<OriginRole[]>([]);
+const teachOrgs = ref<TeachOrg[]>([]);
+const studentDirectory = ref<StudentDirectoryItem[]>([]);
+const selectedStudentIds = ref<string[]>([]);
 const strategies = ref<ModuleDataStrategy[]>([]);
 const templates = ref<TeachingDataTemplate[]>([]);
 const requirements = ref<DataRequirement[]>([]);
@@ -36,19 +46,23 @@ const form = reactive({
   businessModuleId: '',
   moduleCode: '',
   templateId: '',
+  prepareScopeMode: 'single' as PrepareScopeMode,
   taskId: 'task_001',
-  classId: 'class_001',
+  classId: '',
   sceneType: 'PRACTICE',
   requestBatchId: `batch-${Date.now()}`,
-  studentId: 'student_001',
+  studentId: '',
   questionId: 'question_001',
   questionAttemptId: `attempt-${Date.now()}`,
   actorType: 'student',
   ownerExternalOrgId: 'org_owner',
   requiredExternalOrgId: 'org_required',
   requiredExternalRoleId: 'role_required',
-  requiredActionsJson: '["submit"]',
-  scorePointSnapshotJson: '{"score":10}'
+  requiredActionCode: 'submit',
+  scoreValue: 10,
+  studentKeyword: '',
+  studentSelectionFilter: 'all' as StudentSelectionFilter,
+  pastedStudentIds: ''
 });
 
 const selectedConnector = computed(() =>
@@ -65,6 +79,66 @@ const selectedTemplate = computed(() =>
 );
 const latestRequirement = computed(() => requirements.value[0]);
 const latestJob = computed(() => jobs.value[0]);
+const classOptions = computed(() =>
+  teachOrgs.value.filter((org) => org.orgType === 'CLASS')
+);
+const selectedClass = computed(() =>
+  classOptions.value.find((org) => org.id === form.classId)
+);
+const selectedRequiredOrg = computed(() =>
+  originOrgs.value.find((item) => externalOrgId(item) === form.requiredExternalOrgId)
+);
+const selectedRequiredRole = computed(() =>
+  originRoles.value.find((item) => externalRoleId(item) === form.requiredExternalRoleId)
+);
+const classStudents = computed(() => {
+  const classId = form.classId.trim();
+  if (!classId) return [];
+  return studentDirectory.value.filter((student) => student.unitId === classId);
+});
+const singleStudentOptions = computed(() =>
+  form.classId.trim() ? classStudents.value : studentDirectory.value
+);
+const filteredClassStudents = computed(() => {
+  const keyword = form.studentKeyword.trim().toLowerCase();
+  return classStudents.value.filter((student) => {
+    const checked = isStudentChecked(student.studentId);
+    if (form.studentSelectionFilter === 'selected' && !checked) return false;
+    if (form.studentSelectionFilter === 'unselected' && checked) return false;
+    if (!keyword) return true;
+    return [student.studentName, student.username, student.studentNo, student.studentId]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(keyword));
+  });
+});
+const pastedStudentIds = computed(() => parseStudentIds(form.pastedStudentIds));
+const batchStudentIds = computed(() => {
+  if (form.prepareScopeMode === 'single') {
+    return form.studentId.trim() ? [form.studentId.trim()] : [];
+  }
+  return uniqueStrings(selectedStudentIds.value.length > 0 ? selectedStudentIds.value : pastedStudentIds.value);
+});
+const participantCount = computed(() => batchStudentIds.value.length);
+const generatedRequiredActionsJson = computed(() =>
+  stringifyJson([form.requiredActionCode.trim()].filter(Boolean))
+);
+const generatedScorePointSnapshotJson = computed(() =>
+  stringifyJson({
+    score: Number(form.scoreValue) || 0,
+    action: form.requiredActionCode.trim() || 'submit'
+  })
+);
+const generatedParticipantPreviewJson = computed(() =>
+  stringifyJson({
+    participantCount: participantCount.value,
+    previewItems: buildParticipants().slice(0, 5).map((participant) => ({
+      ...participant,
+      dataScopeJson: JSON.parse(participant.dataScopeJson),
+      requiredActionsJson: JSON.parse(participant.requiredActionsJson),
+      scorePointSnapshotJson: JSON.parse(participant.scorePointSnapshotJson)
+    }))
+  })
+);
 
 const blockingMessage = computed(() => {
   if (!form.connectorSystemId) return '请先选择原平台系统。';
@@ -73,9 +147,14 @@ const blockingMessage = computed(() => {
   if (!selectedTemplate.value) return '当前模块/场景尚未配置可用数据模板。';
   if (!activeStrategy.value) return '当前模块/场景尚未配置启用状态的数据策略。';
   if (!form.taskId.trim()) return '请填写教学任务 ID。';
-  if (!form.classId.trim()) return '请填写班级 ID。';
-  if (!form.studentId.trim()) return '请填写学生 ID。';
+  if (!form.classId.trim()) return '请选择班级。';
+  if (form.prepareScopeMode === 'single' && !form.studentId.trim()) return '请选择学生。';
+  if (form.prepareScopeMode === 'class' && participantCount.value === 0) {
+    return '当前班级未匹配到学生，请确认班级成员，或在高级兜底区粘贴学生列表。';
+  }
   if (!form.questionId.trim()) return '请填写题目 ID。';
+  if (!form.requiredExternalOrgId.trim()) return '请选择目标单位。';
+  if (!form.requiredExternalRoleId.trim()) return '请选择目标角色。';
   return '';
 });
 const preflightBlockingMessage = computed(() => {
@@ -98,7 +177,8 @@ const preflightBlockingChecks = computed(() =>
 async function initializePage() {
   await run(async () => {
     await loadConnectorSystems();
-    await loadBusinessModules();
+    await Promise.all([loadTeachClassOptions(), loadStudentDirectory()]);
+    await Promise.all([loadBusinessModules(), loadOriginAccessOptions()]);
     await Promise.all([loadTemplates(), loadStrategies(), refreshRecent()]);
   }, true);
 }
@@ -132,6 +212,106 @@ async function loadBusinessModules() {
     form.businessModuleId = first?.id || '';
     form.moduleCode = first?.moduleCode || '';
   }
+}
+
+/**
+ * 业务功能：加载教学平台班级列表，供批次准备按班级选择学生范围。
+ * 关键流程：班级是教学平台主数据，页面只展示 CLASS 类型组织，避免运维手工录入 classId 导致学生范围不可追溯。
+ */
+async function loadTeachClassOptions() {
+  teachOrgs.value = await usersApi.listOrgs(form.tenantId);
+  if (!form.classId && classOptions.value.length > 0) {
+    form.classId = classOptions.value[0].id;
+  }
+}
+
+/**
+ * 业务功能：加载教学平台学生目录，支撑按班级一次性生成多名学生的数据。
+ * 关键流程：当前后端学生目录已返回学生所属 unitId，页面先按 classId 做本地过滤；没有匹配时仍允许粘贴学生 ID 作为过渡入口。
+ */
+async function loadStudentDirectory() {
+  studentDirectory.value = await usersApi.listStudents();
+  applyDefaultStudentSelection();
+}
+
+/**
+ * 业务功能：加载原平台可用单位和角色，供批次准备页面下拉选择。
+ * 关键流程：造数请求最终需要 externalOrgId 和 externalRoleId，页面用原平台备案数据自动回填，避免运维手工猜 ID。
+ */
+async function loadOriginAccessOptions() {
+  if (!form.connectorSystemId) {
+    originOrgs.value = [];
+    originRoles.value = [];
+    return;
+  }
+  const [orgResult, roleResult] = await Promise.all([
+    dataPrepareApi.listOriginOrgs({
+      tenantId: form.tenantId,
+      connectorSystemId: form.connectorSystemId,
+      activeOnly: true
+    }),
+    dataPrepareApi.listOriginRoles({
+      tenantId: form.tenantId,
+      connectorSystemId: form.connectorSystemId,
+      activeOnly: true
+    })
+  ]);
+  originOrgs.value = orgResult;
+  originRoles.value = roleResult;
+  applyDefaultOriginAccessOptions();
+}
+
+/**
+ * 业务功能：在运维没有明确选择时自动使用第一组可用单位和角色。
+ * 关键流程：默认值只在当前值无效时覆盖，避免切换刷新时把用户已经选好的业务身份冲掉。
+ */
+function applyDefaultOriginAccessOptions() {
+  if (!originOrgs.value.some((item) => externalOrgId(item) === form.requiredExternalOrgId)) {
+    form.requiredExternalOrgId = externalOrgId(originOrgs.value[0]);
+  }
+  if (!originOrgs.value.some((item) => externalOrgId(item) === form.ownerExternalOrgId)) {
+    form.ownerExternalOrgId = form.requiredExternalOrgId || externalOrgId(originOrgs.value[0]);
+  }
+  if (!originRoles.value.some((item) => externalRoleId(item) === form.requiredExternalRoleId)) {
+    form.requiredExternalRoleId = externalRoleId(originRoles.value[0]);
+  }
+}
+
+/**
+ * 业务功能：根据当前班级自动选择学生范围。
+ * 关键流程：批量模式默认全选班级学生；单学生模式默认选第一个可用学生，主流程不再要求运维复制内部 studentId。
+ */
+function applyDefaultStudentSelection() {
+  const availableStudents = singleStudentOptions.value;
+  if (!availableStudents.some((student) => student.studentId === form.studentId)) {
+    form.studentId = availableStudents[0]?.studentId || '';
+  }
+  selectedStudentIds.value = classStudents.value.map((student) => student.studentId);
+}
+
+function toggleAllClassStudents(checked: boolean) {
+  selectedStudentIds.value = checked ? classStudents.value.map((student) => student.studentId) : [];
+}
+
+function toggleFilteredClassStudents(checked: boolean) {
+  const filteredIds = filteredClassStudents.value.map((student) => student.studentId);
+  if (checked) {
+    selectedStudentIds.value = uniqueStrings([...selectedStudentIds.value, ...filteredIds]);
+    return;
+  }
+  selectedStudentIds.value = selectedStudentIds.value.filter((studentId) => !filteredIds.includes(studentId));
+}
+
+function isStudentChecked(studentId: string) {
+  return selectedStudentIds.value.includes(studentId);
+}
+
+function toggleStudent(studentId: string, checked: boolean) {
+  if (checked) {
+    selectedStudentIds.value = uniqueStrings([...selectedStudentIds.value, studentId]);
+    return;
+  }
+  selectedStudentIds.value = selectedStudentIds.value.filter((item) => item !== studentId);
 }
 
 /**
@@ -225,22 +405,38 @@ async function runPreflight() {
 }
 
 /**
- * 组装单个参与者请求。
- * 当前页面先满足核心造数闭环，后续如需批量学生可在这里扩展为多参与者数组。
+ * 业务功能：组装本次批次准备的全部参与者请求。
+ * 关键流程：单学生模式生成一条参与者；班级模式按班级学生目录或粘贴学生 ID 生成多条参与者，确保后端一次请求即可创建 50 人级别的数据需求。
  */
-function buildParticipant(): DataPrepareParticipant {
+function buildParticipants(): DataPrepareParticipant[] {
+  return batchStudentIds.value.map((studentId) => buildParticipantForStudent(studentId));
+}
+
+/**
+ * 业务功能：为指定学生构造一条原平台数据需求参与者。
+ * 关键流程：每个学生必须有独立 questionAttemptId，避免 50 人批量造数时因作答 ID 相同触发幂等冲突或结果覆盖。
+ */
+function buildParticipantForStudent(studentId: string): DataPrepareParticipant {
+  const trimmedStudentId = studentId.trim();
   return {
-    studentId: form.studentId.trim(),
+    studentId: trimmedStudentId,
     questionId: form.questionId.trim(),
-    questionAttemptId: form.questionAttemptId.trim(),
+    questionAttemptId: buildAttemptId(trimmedStudentId),
     actorType: form.actorType.trim(),
     ownerExternalOrgId: form.ownerExternalOrgId.trim(),
     requiredExternalOrgId: form.requiredExternalOrgId.trim(),
     requiredExternalRoleId: form.requiredExternalRoleId.trim(),
     dataScopeJson: '{}',
-    requiredActionsJson: form.requiredActionsJson.trim() || '[]',
-    scorePointSnapshotJson: form.scorePointSnapshotJson.trim() || '{}'
+    requiredActionsJson: generatedRequiredActionsJson.value,
+    scorePointSnapshotJson: generatedScorePointSnapshotJson.value
   };
+}
+
+function buildAttemptId(studentId: string) {
+  if (form.prepareScopeMode === 'single') {
+    return form.questionAttemptId.trim();
+  }
+  return `attempt-${form.taskId.trim()}-${form.questionId.trim()}-${studentId}-${Date.now()}`;
 }
 
 /**
@@ -266,7 +462,7 @@ async function generateData() {
       triggerType: 'ON_DEMAND',
       requestBatchId,
       idempotencyKey: `task-prepare:${form.taskId.trim()}:${form.sceneType}:${requestBatchId}`,
-      participants: [buildParticipant()],
+      participants: buildParticipants(),
       remark: '管理端页面触发数据生成'
     });
     notifyPrepareResult(result.job);
@@ -299,6 +495,31 @@ async function run(action: () => Promise<void>, silent = false) {
 function onModuleChange() {
   const next = selectedModule.value;
   form.moduleCode = next?.moduleCode || '';
+}
+
+function externalOrgId(org?: OriginOrg) {
+  return org?.externalOrgId || org?.orgCode || '';
+}
+
+function externalRoleId(role?: OriginRole) {
+  return role?.externalRoleId || role?.roleCode || '';
+}
+
+function parseStudentIds(value: string) {
+  return uniqueStrings(
+    value
+      .split(/[\n,，;；\s]+/)
+      .map((item) => item.trim())
+      .filter(Boolean)
+  );
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values));
+}
+
+function stringifyJson(value: unknown) {
+  return JSON.stringify(value, null, 2);
 }
 
 function notify(message: string, tone: ToastTone = 'info') {
@@ -440,7 +661,7 @@ watch(
     form.moduleCode = '';
     form.templateId = '';
     await run(async () => {
-      await loadBusinessModules();
+      await Promise.all([loadBusinessModules(), loadOriginAccessOptions()]);
       await Promise.all([loadTemplates(), loadStrategies(), refreshRecent()]);
     }, true);
   }
@@ -466,6 +687,20 @@ watch(
     await run(async () => {
       await Promise.all([loadTemplates(), loadStrategies(), refreshRecent()]);
     }, true);
+  }
+);
+
+watch(
+  () => form.classId,
+  () => {
+    applyDefaultStudentSelection();
+  }
+);
+
+watch(
+  () => form.prepareScopeMode,
+  () => {
+    applyDefaultStudentSelection();
   }
 );
 
@@ -544,12 +779,31 @@ onMounted(initializePage);
 
           <div class="field-grid">
             <label>
+              <span>生成对象</span>
+              <select v-model="form.prepareScopeMode">
+                <option value="single">单个学生</option>
+                <option value="class">按班级批量</option>
+              </select>
+            </label>
+            <label>
               <span>教学任务 ID</span>
               <input v-model.trim="form.taskId" type="text" />
             </label>
+          </div>
+
+          <div class="field-grid">
             <label>
-              <span>班级 ID</span>
-              <input v-model.trim="form.classId" type="text" />
+              <span>班级</span>
+              <select v-model="form.classId">
+                <option value="">请选择</option>
+                <option v-for="org in classOptions" :key="org.id" :value="org.id">
+                  {{ org.orgName }}（{{ org.orgCode }}）
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>题目 ID</span>
+              <input v-model.trim="form.questionId" type="text" />
             </label>
           </div>
         </section>
@@ -557,32 +811,126 @@ onMounted(initializePage);
         <section class="form-section">
           <div class="section-heading">
             <h2>参与者</h2>
-            <span>单学生批次</span>
+            <span>{{ participantCount }} 名学生</span>
+          </div>
+          <div v-if="form.prepareScopeMode === 'single'" class="field-grid">
+            <label>
+              <span>学生</span>
+              <select v-model="form.studentId">
+                <option value="">请选择</option>
+                <option v-for="student in singleStudentOptions" :key="student.studentId" :value="student.studentId">
+                  {{ student.studentName || student.username }}（{{ student.studentNo || student.username }}）
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>作答 ID</span>
+              <input v-model.trim="form.questionAttemptId" type="text" />
+            </label>
+          </div>
+
+          <div v-else class="batch-students">
+            <div class="batch-summary">
+              <strong>{{ selectedClass?.orgName || '未选择班级' }}：共 {{ classStudents.length }} 人，已选 {{ participantCount }} 人</strong>
+              <span>默认全选当前班级学生；学生目录为空时，可在高级兜底区粘贴学生 ID。</span>
+            </div>
+            <div class="student-filter-bar">
+              <input
+                v-model.trim="form.studentKeyword"
+                type="search"
+                placeholder="搜索姓名、学号或账号"
+              />
+              <select v-model="form.studentSelectionFilter">
+                <option value="all">全部学生</option>
+                <option value="selected">只看已选</option>
+                <option value="unselected">只看未选</option>
+              </select>
+            </div>
+            <div class="student-bulk-actions">
+              <button type="button" class="ghost-button" @click="toggleAllClassStudents(true)">
+                全选全班
+              </button>
+              <button type="button" class="ghost-button" @click="toggleAllClassStudents(false)">
+                清空全班
+              </button>
+              <button type="button" class="ghost-button" @click="toggleFilteredClassStudents(true)">
+                选择当前筛选
+              </button>
+              <button type="button" class="ghost-button" @click="toggleFilteredClassStudents(false)">
+                清空当前筛选
+              </button>
+            </div>
+            <div v-if="classStudents.length" class="student-table-wrap">
+              <table class="student-table">
+                <thead>
+                  <tr>
+                    <th>选择</th>
+                    <th>姓名</th>
+                    <th>学号</th>
+                    <th>账号</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="student in filteredClassStudents" :key="student.studentId">
+                    <td>
+                      <input
+                        type="checkbox"
+                        :checked="isStudentChecked(student.studentId)"
+                        @change="toggleStudent(student.studentId, ($event.target as HTMLInputElement).checked)"
+                      />
+                    </td>
+                    <td>{{ student.studentName || '-' }}</td>
+                    <td>{{ student.studentNo || '-' }}</td>
+                    <td>{{ student.username || '-' }}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p v-if="filteredClassStudents.length === 0" class="empty-text">
+                当前筛选条件下没有学生
+              </p>
+            </div>
+            <p v-else class="empty-text">当前班级暂无学生，请先在系统管理维护班级成员。</p>
+          </div>
+
+          <div class="field-grid">
+            <label>
+              <span>目标单位</span>
+              <select v-model="form.requiredExternalOrgId">
+                <option value="">请选择</option>
+                <option v-for="org in originOrgs" :key="org.id" :value="externalOrgId(org)">
+                  {{ org.orgName }}（{{ externalOrgId(org) }}）
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>目标角色</span>
+              <select v-model="form.requiredExternalRoleId">
+                <option value="">请选择</option>
+                <option v-for="role in originRoles" :key="role.id" :value="externalRoleId(role)">
+                  {{ role.roleName }}（{{ externalRoleId(role) }}）
+                </option>
+              </select>
+            </label>
           </div>
           <div class="field-grid">
             <label>
-              <span>学生 ID</span>
-              <input v-model.trim="form.studentId" type="text" />
+              <span>要求动作</span>
+              <select v-model="form.requiredActionCode">
+                <option value="submit">提交</option>
+                <option value="save">保存</option>
+                <option value="approve">审批</option>
+                <option value="reject">驳回</option>
+              </select>
             </label>
             <label>
-              <span>题目 ID</span>
-              <input v-model.trim="form.questionId" type="text" />
-            </label>
-          </div>
-          <div class="field-grid">
-            <label>
-              <span>目标组织 ID</span>
-              <input v-model.trim="form.requiredExternalOrgId" type="text" />
-            </label>
-            <label>
-              <span>目标角色 ID</span>
-              <input v-model.trim="form.requiredExternalRoleId" type="text" />
+              <span>得分值</span>
+              <input v-model.number="form.scoreValue" type="number" min="0" />
             </label>
           </div>
         </section>
 
         <details class="advanced-section">
-          <summary>高级参数</summary>
+          <summary>高级参数与 JSON 预览</summary>
           <div class="field-grid">
             <label>
               <span>批次 ID</span>
@@ -596,20 +944,42 @@ onMounted(initializePage);
           <div class="field-grid">
             <label>
               <span>参与者类型</span>
-              <input v-model.trim="form.actorType" type="text" />
+              <select v-model="form.actorType">
+                <option value="student">学生</option>
+                <option value="teacher">教师</option>
+                <option value="operator">业务经办人</option>
+                <option value="approver">审批人</option>
+              </select>
             </label>
             <label>
-              <span>归属组织 ID</span>
-              <input v-model.trim="form.ownerExternalOrgId" type="text" />
+              <span>归属单位</span>
+              <select v-model="form.ownerExternalOrgId">
+                <option value="">请选择</option>
+                <option v-for="org in originOrgs" :key="org.id" :value="externalOrgId(org)">
+                  {{ org.orgName }}（{{ externalOrgId(org) }}）
+                </option>
+              </select>
             </label>
           </div>
           <label>
-            <span>要求动作 JSON</span>
-            <textarea v-model.trim="form.requiredActionsJson" rows="3" />
+            <span>要求动作 JSON（系统生成）</span>
+            <textarea :value="generatedRequiredActionsJson" rows="3" readonly />
           </label>
           <label>
-            <span>得分点快照 JSON</span>
-            <textarea v-model.trim="form.scorePointSnapshotJson" rows="3" />
+            <span>得分点快照 JSON（系统生成）</span>
+            <textarea :value="generatedScorePointSnapshotJson" rows="4" readonly />
+          </label>
+          <label>
+            <span>批量学生 ID 兜底</span>
+            <textarea
+              v-model.trim="form.pastedStudentIds"
+              rows="5"
+              placeholder="仅在班级学生目录为空时使用"
+            />
+          </label>
+          <label>
+            <span>参与者请求预览</span>
+            <textarea :value="generatedParticipantPreviewJson" rows="10" readonly />
           </label>
         </details>
 
@@ -659,6 +1029,14 @@ onMounted(initializePage);
           <div>
             <span>模板</span>
             <strong>{{ selectedTemplate?.templateName || '-' }}</strong>
+          </div>
+          <div>
+            <span>单位角色</span>
+            <strong>{{ selectedRequiredOrg?.orgName || '-' }} / {{ selectedRequiredRole?.roleName || '-' }}</strong>
+          </div>
+          <div>
+            <span>生成对象</span>
+            <strong>{{ form.prepareScopeMode === 'class' ? `批量 ${participantCount} 人` : '单个学生' }}</strong>
           </div>
         </section>
 
@@ -890,6 +1268,96 @@ select:disabled {
 
 .advanced-section[open] summary {
   margin-bottom: 14px;
+}
+
+.batch-students {
+  margin-bottom: 14px;
+}
+
+.batch-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.batch-summary strong {
+  color: #1f2937;
+  font-size: 13px;
+}
+
+.batch-summary span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.student-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 150px;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.student-bulk-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+  margin: 0 0 10px;
+}
+
+.student-table-wrap {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.student-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.student-table th,
+.student-table td {
+  padding: 9px 10px;
+  border-bottom: 1px solid #eef2f7;
+  color: #475569;
+  font-size: 12px;
+  text-align: left;
+}
+
+.student-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #f8fafc;
+  color: #334155;
+  font-weight: 720;
+}
+
+.student-table th:first-child,
+.student-table td:first-child {
+  width: 58px;
+  text-align: center;
+}
+
+.student-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.student-table input {
+  width: 16px;
+  min-height: 16px;
+  padding: 0;
 }
 
 .blocking-message {
@@ -1142,7 +1610,8 @@ button:disabled {
   .page-header,
   .field-grid,
   .result-summary,
-  .context-strip {
+  .context-strip,
+  .student-filter-bar {
     grid-template-columns: 1fr;
   }
 

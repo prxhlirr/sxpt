@@ -285,14 +285,6 @@ const pageMeta = computed(() => {
   return meta[props.section];
 });
 
-const stats = computed(() => [
-  { label: '用户', value: users.value.length },
-  { label: '角色', value: roles.value.length },
-  { label: '单位', value: orgs.value.length },
-  { label: '配置', value: menus.value.length + permissions.value.length + dictItems.value.length },
-  { label: '授权', value: rolePermissions.value.length }
-]);
-
 const rows = computed(() => {
   if (props.section === 'users') return users.value;
   if (props.section === 'roles') return roles.value;
@@ -1429,13 +1421,6 @@ function fillDictForm(item: SysDictItem) {
       </button>
     </header>
 
-    <section class="metric-grid" aria-label="基础配置统计">
-      <article v-for="item in stats" :key="item.label">
-        <span>{{ item.label }}</span>
-        <strong>{{ item.value }}</strong>
-      </article>
-    </section>
-
     <section class="list-panel">
       <header class="list-toolbar">
         <div>
@@ -2176,8 +2161,7 @@ function fillDictForm(item: SysDictItem) {
 }
 
 .page-hero,
-.list-panel,
-.metric-grid article {
+.list-panel {
   border: 1px solid #e4eaf3;
   border-radius: 8px;
   background: #ffffff;
@@ -2193,8 +2177,7 @@ function fillDictForm(item: SysDictItem) {
 
 .page-hero span,
 .dialog-header span,
-.list-toolbar span,
-.metric-grid span {
+.list-toolbar span {
   color: #64748b;
   font-size: 13px;
   font-weight: 700;
@@ -2250,23 +2233,6 @@ function fillDictForm(item: SysDictItem) {
 .text-action:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-}
-
-.metric-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.metric-grid article {
-  padding: 18px 20px;
-}
-
-.metric-grid strong {
-  display: block;
-  margin-top: 8px;
-  color: #172033;
-  font-size: 30px;
 }
 
 .list-panel {
@@ -2489,7 +2455,6 @@ th {
     flex-direction: column;
   }
 
-  .metric-grid,
   .config-form {
     grid-template-columns: 1fr;
   }

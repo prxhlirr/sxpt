@@ -111,11 +111,15 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_CREATE);
         OriginBatchCreateRequest originRequest = buildOriginBatchCreateRequest(request);
+        System.out.println("***");
+        System.out.println("提交请求；" + toJson(originRequest) + "\n");
+        System.out.println(context.getUrl());
         OriginBatchCreateResponse originResponse = exchange(
                 context,
                 originRequest,
                 buildHeaders(context.getConnectorSystem(), request),
                 OriginBatchCreateResponse.class);
+        System.out.printf("返回结果；" + toJson(originResponse) + "\n");
         return toBatchCreateResponse(originResponse, request);
     }
 

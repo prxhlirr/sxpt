@@ -417,15 +417,7 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      * 已完成的模块、模板、状态和主体校验，避免要求原平台额外实现非标准校验接口。
      */
     private boolean requiresOriginValidation(DataRequirementItem item) {
-        if (!StringUtils.hasText(item.getValidationPolicyJson())) {
-            return true;
-        }
-        try {
-            JsonNode policy = JSON_MAPPER.readTree(item.getValidationPolicyJson());
-            return !policy.has("validateAfterCreate") || policy.get("validateAfterCreate").asBoolean(true);
-        } catch (JsonProcessingException ex) {
-            return true;
-        }
+        return false;
     }
 
     /**
@@ -971,8 +963,10 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
                                  long failedCount,
                                  long elapsedMillis) {
         LocalDateTime now = LocalDateTime.now();
+        String errorMessage = resolveAdapterResponseErrorMessage(response, successCount, failedCount);
         job.setExternalRequestId(response.getExternalRequestId());
-        job.setResultJson(buildAdapterResponseResultJson(response, successCount, failedCount, elapsedMillis));
+        job.setErrorMessage(errorMessage);
+        job.setResultJson(buildAdapterResponseResultJson(response, successCount, failedCount, elapsedMillis, errorMessage));
         job.setSuccessCount(successCount);
         job.setFailedCount(failedCount);
         job.setJobStatus(resolveJobStatus(successCount, failedCount));
@@ -1000,6 +994,54 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
     }
 
     /**
+     * 汇总原平台批量响应中的失败原因，供任务列表和批次准备页面直接展示。
+     * <p>
+     * 原平台可能以“整批响应成功、部分条目失败”的方式返回结果，任务终态需要把第一条明确失败原因上浮到
+     * job.errorMessage，避免前端只能展示兜底文案。
+     *
+     * @param response 原平台批量创建响应。
+     * @param successCount 成功数量。
+     * @param failedCount 失败数量。
+     * @return 任务级失败原因；无失败时返回 null。
+     */
+    private String resolveAdapterResponseErrorMessage(OriginDataPrepareAdapter.BatchCreateResponse response,
+                                                      long successCount,
+                                                      long failedCount) {
+        if (failedCount <= 0) {
+            return null;
+        }
+        String detail = firstFailedResponseItemMessage(response);
+        if (successCount > 0) {
+            return StringUtils.hasText(detail)
+                    ? "部分数据生成失败：" + detail
+                    : "部分数据生成失败：" + failedCount + " 条失败";
+        }
+        return StringUtils.hasText(detail)
+                ? "数据生成失败：" + detail
+                : "数据生成失败：" + failedCount + " 条失败";
+    }
+
+    /**
+     * 提取第一条失败明细的原始原因。
+     * <p>
+     * 以条目级 errorMessage 为准，是因为它最接近原平台造数失败点，通常包含模板、单位、角色、状态等配置问题。
+     *
+     * @param response 原平台批量创建响应。
+     * @return 第一条失败明细原因；没有明确原因时返回 null。
+     */
+    private String firstFailedResponseItemMessage(OriginDataPrepareAdapter.BatchCreateResponse response) {
+        if (response == null || response.getItems() == null) {
+            return null;
+        }
+        return response.getItems().stream()
+                .filter(item -> item != null && !isSuccessfulResponseItem(item))
+                .map(OriginDataPrepareAdapter.ResponseItem::getErrorMessage)
+                .filter(StringUtils::hasText)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * 构造原平台正常响应摘要。
      * <p>
      * result_json 面向后台排障，不保存完整原平台业务数据，只保存对账 ID、状态、数量、耗时和原平台返回的摘要 JSON。
@@ -1013,7 +1055,8 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
     private String buildAdapterResponseResultJson(OriginDataPrepareAdapter.BatchCreateResponse response,
                                                   long successCount,
                                                   long failedCount,
-                                                  long elapsedMillis) {
+                                                  long elapsedMillis,
+                                                  String errorMessage) {
         Map<String, Object> result = new HashMap<>();
         result.put("adapterStatus", response.getAdapterStatus());
         result.put("externalRequestId", response.getExternalRequestId());
@@ -1021,6 +1064,9 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         result.put("successCount", successCount);
         result.put("failedCount", failedCount);
         result.put("elapsedMillis", elapsedMillis);
+        if (StringUtils.hasText(errorMessage)) {
+            result.put("errorMessage", errorMessage);
+        }
         result.put("adapterResultJson", response.getResultJson());
         return toJson(result);
     }

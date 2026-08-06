@@ -92,7 +92,10 @@ class DataPrepareOrchestrationServiceImplTests {
         assertEquals(0L, result.getFailedCount());
         assertEquals(RequirementItemStatus.READY.getValue(), first.getItemStatus());
         assertEquals("biz_001", first.getExternalBusinessId());
+        assertEquals("PASSED", first.getValidationStatus());
+        assertEquals("PASSED", second.getValidationStatus());
         verify(teachingDataInstanceMapper, times(2)).insert(any(TeachingDataInstance.class));
+        verify(originDataPrepareAdapter, times(0)).validateTeachingData(any());
         verify(dataPrepareJobMapper, times(2)).updateById(job);
     }
 
@@ -124,6 +127,30 @@ class DataPrepareOrchestrationServiceImplTests {
     /**
      * 验证部分失败补偿时只把失败明细提交给原平台，并把新成功数合并到原任务总成功数。
      */
+    /**
+     * 验证原平台返回条目失败原因时，任务级错误信息也必须同步落库。
+     * <p>
+     * 批次准备页面只读取任务级 errorMessage 或 resultJson.errorMessage，因此编排层需要把明细失败原因汇总上浮，
+     * 否则用户只能看到“后端未返回明确失败原因”，无法定位具体配置或原平台造数问题。
+     */
+    @Test
+    void executeCreateJobShouldExposeFailedItemMessageOnJob() {
+        DataPrepareJob job = buildJob();
+        DataRequirementItem item = buildItem("item_001", "student_001");
+        when(dataPrepareJobMapper.selectById("job_001")).thenReturn(job);
+        when(dataRequirementItemMapper.selectList(any())).thenReturn(Collections.singletonList(item));
+        when(originDataPrepareAdapter.createTeachingData(any())).thenReturn(buildResponse(
+                buildFailedResponseItem("item_001", "单位角色不满足造数策略")));
+
+        DataPrepareJob result = service.executeCreateJob("job_001");
+
+        assertEquals(PrepareJobStatus.FAILED.getValue(), result.getJobStatus());
+        assertEquals("数据生成失败：单位角色不满足造数策略", result.getErrorMessage());
+        assertTrue(result.getResultJson().contains("\"errorMessage\""));
+        assertTrue(result.getResultJson().contains("单位角色不满足造数策略"));
+        verify(teachingDataInstanceMapper, times(0)).insert(any(TeachingDataInstance.class));
+    }
+
     @Test
     void retryFailedItemsJobShouldOnlySubmitFailedItemsAndMergeCounts() {
         DataPrepareJob job = buildJob();
