@@ -1,6 +1,7 @@
 package com.sxpt.module.connector.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -110,16 +111,13 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                 request == null ? null : request.getTenantId(),
                 request == null ? null : request.getConnectorSystemId(),
                 CAPABILITY_DATA_CREATE);
-        OriginBatchCreateRequest originRequest = buildOriginBatchCreateRequest(request);
-        System.out.println("***");
-        System.out.println("提交请求；" + toJson(originRequest) + "\n");
-        System.out.println(context.getUrl());
+        OriginBatchCreateRequest originRequest = buildOriginBatchCreateRequest(
+                request, context.getCapability());
         OriginBatchCreateResponse originResponse = exchange(
                 context,
                 originRequest,
                 buildHeaders(context.getConnectorSystem(), request),
                 OriginBatchCreateResponse.class);
-        System.out.printf("返回结果；" + toJson(originResponse) + "\n");
         return toBatchCreateResponse(originResponse, request);
     }
 
@@ -417,16 +415,22 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param request 内部批量创建请求。
      * @return 第三方造数请求。
      */
-    private OriginBatchCreateRequest buildOriginBatchCreateRequest(BatchCreateRequest request) {
+    private OriginBatchCreateRequest buildOriginBatchCreateRequest(BatchCreateRequest request,
+                                                                    PlatformCapability capability) {
         validateBatchCreateRequest(request);
         JsonNode requestSnapshot = parseOptionalJson(request.getRequestJson());
+        JsonNode capabilityContract = parseOptionalJson(
+                capability == null ? null : capability.getRequestSchemaJson());
         OriginBatchCreateRequest originRequest = new OriginBatchCreateRequest();
-        originRequest.setBusinessModuleCode(request.getModuleCode());
-        originRequest.setTemplateCode(resolveTemplateCode(requestSnapshot));
-        originRequest.setInitState(resolveInitState(requestSnapshot));
+        originRequest.setBusinessModuleCode(firstText(
+                textValue(capabilityContract, "businessModuleCode"), request.getModuleCode()));
+        originRequest.setTemplateCode(firstText(
+                textValue(capabilityContract, "templateCode"), resolveTemplateCode(requestSnapshot)));
+        originRequest.setInitState(firstText(
+                textValue(capabilityContract, "initState"), resolveInitState(requestSnapshot)));
         originRequest.setSceneType(request.getSceneType());
-        originRequest.setParticipants(buildOriginParticipants(request));
-        originRequest.setBizParams(resolveBizParams(requestSnapshot));
+        originRequest.setParticipants(buildOriginParticipants(request, capabilityContract));
+        originRequest.setBizParams(resolveBizParams(requestSnapshot, capabilityContract));
         return originRequest;
     }
 
@@ -456,7 +460,10 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param request 内部批量创建请求。
      * @return 第三方造数参与方列表。
      */
-    private List<OriginParticipant> buildOriginParticipants(BatchCreateRequest request) {
+    private List<OriginParticipant> buildOriginParticipants(BatchCreateRequest request,
+                                                            JsonNode capabilityContract) {
+        boolean preferPoolKey = booleanValue(capabilityContract, "preferPoolKey", false);
+        String defaultPoolKey = textValue(capabilityContract, "defaultPoolKey");
         List<OriginParticipant> participants = new ArrayList<>();
         for (RequestItem item : request.getItems()) {
             if (item == null) {
@@ -466,8 +473,12 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
             OriginParticipant participant = new OriginParticipant();
             participant.setParticipantId(item.getRequestItemId());
             participant.setOwnerUserId(item.getStudentId());
-            participant.setExternalOrgId(item.getRequiredExternalOrgId());
-            participant.setPoolKey(item.getQuestionId());
+            if (preferPoolKey && StringUtils.hasText(item.getQuestionId())) {
+                participant.setPoolKey(firstText(defaultPoolKey, item.getQuestionId()));
+            } else {
+                participant.setExternalOrgId(item.getRequiredExternalOrgId());
+                participant.setPoolKey(item.getQuestionId());
+            }
             participants.add(participant);
         }
         if (participants.isEmpty()) {
@@ -592,12 +603,31 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      * @param requestSnapshot 数据准备请求快照。
      * @return 业务扩展参数。
      */
-    private Map<String, Object> resolveBizParams(JsonNode requestSnapshot) {
+    private Map<String, Object> resolveBizParams(JsonNode requestSnapshot,
+                                                 JsonNode capabilityContract) {
+        if (!booleanValue(capabilityContract, "forwardBizParams", true)) {
+            return new LinkedHashMap<>();
+        }
         JsonNode bizParams = requestSnapshot == null ? null : requestSnapshot.get("bizParams");
         if (bizParams == null || bizParams.isNull() || !bizParams.isObject()) {
             return new LinkedHashMap<>();
         }
         return JSON_MAPPER.convertValue(bizParams, MAP_TYPE);
+    }
+
+    /**
+     * 读取能力契约中的布尔配置，缺失或类型不正确时保持兼容默认值。
+     *
+     * @param node 能力请求契约。
+     * @param fieldName 配置字段名。
+     * @param defaultValue 兼容默认值。
+     * @return 解析后的布尔值。
+     */
+    private boolean booleanValue(JsonNode node, String fieldName, boolean defaultValue) {
+        if (node == null || !node.has(fieldName) || !node.get(fieldName).isBoolean()) {
+            return defaultValue;
+        }
+        return node.get(fieldName).asBoolean();
     }
 
     /**
@@ -778,6 +808,7 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      *
      * 业务功能：只传稳定主体标识，不传姓名、角色名等展示字段。
      */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private static class OriginParticipant {
 
         private String participantId;

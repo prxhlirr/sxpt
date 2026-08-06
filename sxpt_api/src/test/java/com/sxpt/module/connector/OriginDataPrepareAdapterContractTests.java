@@ -42,6 +42,14 @@ import static org.mockito.Mockito.when;
  */
 class OriginDataPrepareAdapterContractTests {
 
+    private static final String OA_CREATE_CONTRACT =
+            "{\"contract\":\"TEACHING_DATA_BATCH_CREATE_V1\","
+                    + "\"businessModuleCode\":\"doc_incoming\","
+                    + "\"templateCode\":\"incoming_pending_reg_v1\","
+                    + "\"initState\":\"PENDING_REG\","
+                    + "\"defaultPoolKey\":\"incoming-default\","
+                    + "\"preferPoolKey\":true,\"forwardBizParams\":false}";
+
     /**
      * 校验 Adapter 暴露五个核心动作。
      *
@@ -165,9 +173,7 @@ class OriginDataPrepareAdapterContractTests {
         PlatformCapability capability = new PlatformCapability();
         capability.setEndpointUrl("/openapi/teaching-data/batch-create");
         capability.setMethod("POST");
-        capability.setRequestSchemaJson(
-                "{\"contract\":\"TEACHING_DATA_BATCH_CREATE_V1\","
-                        + "\"defaultPoolKey\":\"incoming-default\",\"preferPoolKey\":true}");
+        capability.setRequestSchemaJson(OA_CREATE_CONTRACT);
 
         when(systemMapper.selectOne(any(QueryWrapper.class))).thenReturn(system);
         when(capabilityMapper.selectOne(any(QueryWrapper.class))).thenReturn(capability);
@@ -197,8 +203,10 @@ class OriginDataPrepareAdapterContractTests {
         assertEquals("item-1", participant.get("participantId"));
         assertEquals("student-1", participant.get("ownerUserId"));
         assertEquals("incoming-default", participant.get("poolKey"));
+        assertFalse(participant.containsKey("externalOrgId"));
         assertFalse(participant.containsKey("studentName"));
         assertFalse(body.containsKey("tenantId"));
+        assertEquals(Collections.emptyMap(), body.get("bizParams"));
         assertEquals("Bearer oa-token", entity.getHeaders().getFirst("Authorization"));
         assertEquals("trace-1", entity.getHeaders().getFirst("X-Trace-Id"));
         assertEquals("idem-1", entity.getHeaders().getFirst("X-Idempotency-Key"));
@@ -208,25 +216,70 @@ class OriginDataPrepareAdapterContractTests {
         assertEquals("/workspace/incoming/detail/oa-data-1", response.getItems().get(0).getTargetUrl());
     }
 
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void httpAdapterShouldKeepAuthoringOrganizationWhenQuestionPoolIsAbsent() {
+        ConnectorSystemMapper systemMapper = mock(ConnectorSystemMapper.class);
+        PlatformCapabilityMapper capabilityMapper = mock(PlatformCapabilityMapper.class);
+        RestTemplate restTemplate = mock(RestTemplate.class);
+
+        ConnectorSystem system = new ConnectorSystem();
+        system.setId("origin-oa");
+        system.setTenantId("tenant-1");
+        system.setBaseUrl("http://127.0.0.1:9527");
+        system.setAuthType("BEARER");
+        system.setConfigJson("{\"token\":\"oa-token\"}");
+
+        PlatformCapability capability = new PlatformCapability();
+        capability.setEndpointUrl("/openapi/teaching-data/batch-create");
+        capability.setMethod("POST");
+        capability.setRequestSchemaJson(OA_CREATE_CONTRACT);
+
+        when(systemMapper.selectOne(any(QueryWrapper.class))).thenReturn(system);
+        when(capabilityMapper.selectOne(any(QueryWrapper.class))).thenReturn(capability);
+        when(restTemplate.exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>(standardSuccessResponse(), HttpStatus.OK));
+
+        OriginDataPrepareAdapter.BatchCreateRequest request = createStandardRequest();
+        request.getItems().get(0).setQuestionId(null);
+        HttpOriginDataPrepareAdapter adapter = new HttpOriginDataPrepareAdapter(
+                systemMapper, capabilityMapper, restTemplate);
+        adapter.createTeachingData(request);
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), entityCaptor.capture(), eq(String.class));
+        Map<String, Object> body = new ObjectMapper().convertValue(
+                entityCaptor.getValue().getBody(), Map.class);
+        Map<String, Object> participant =
+                (Map<String, Object>) ((java.util.List) body.get("participants")).get(0);
+        assertEquals("teaching-org-1", participant.get("externalOrgId"));
+        assertFalse(participant.containsKey("poolKey"));
+    }
+
     private OriginDataPrepareAdapter.BatchCreateRequest createStandardRequest() {
         OriginDataPrepareAdapter.RequestItem item = new OriginDataPrepareAdapter.RequestItem();
         item.setRequestItemId("item-1");
         item.setStudentId("student-1");
         item.setRequiredExternalOrgId("teaching-org-1");
-        item.setQuestionId("incoming-default");
+        item.setQuestionId("internal-question-17");
 
         OriginDataPrepareAdapter.BatchCreateRequest request = new OriginDataPrepareAdapter.BatchCreateRequest();
         request.setTenantId("tenant-1");
         request.setConnectorSystemId("origin-oa");
-        request.setModuleCode("doc_incoming");
+        request.setModuleCode("internal-record-module");
         request.setTemplateId("template-1");
-        request.setInitState("PENDING_REG");
+        request.setInitState("DRAFT");
         request.setSceneType("PRACTICE");
         request.setRequestBatchId("batch-1");
         request.setTraceId("trace-1");
         request.setIdempotencyKey("idem-1");
-        request.setRequestJson("{\"templateCode\":\"incoming_pending_reg_v1\","
-                + "\"initState\":\"PENDING_REG\",\"traceId\":\"trace-1\",\"bizParams\":{}}");
+        request.setRequestJson("{\"templateCode\":\"internal-record-template\","
+                + "\"initState\":\"DRAFT\",\"traceId\":\"trace-1\","
+                + "\"bizParams\":{\"restartAttemptId\":\"restart-1\"}}");
         request.setItems(Collections.singletonList(item));
         return request;
     }
