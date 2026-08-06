@@ -299,6 +299,20 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(runner).toContain(
       ':clear-form-values="task.mode === \'PRACTICE\'"'
     );
+    expect(runner).toContain(
+      "const isPractice = computed(() => task.value?.mode === 'PRACTICE');"
+    );
+    expect(runner).toContain(
+      '.filter(({ step }) => !isPractice.value || !isGuideStep(step))'
+    );
+    expect(runner).toContain('isPractice || showStageIntroduction');
+    expect(runner).toContain(
+      '!isPractice && showStageIntroduction && currentLearningStep'
+    );
+    expect(runner).toContain('!isPractice &&');
+    expect(runner).not.toContain(
+      'errorMessage.value = `当前应完成“${currentLearningStep.value.step.actionLabel}”'
+    );
     expect(snapshotFrame).toContain('SXPT_SET_STUDENT_MODE');
     expect(snapshotFrame).toContain('snapshotFrameKey');
     expect(snapshotFrame).toContain("'is-interactive': interactive && frameReady");
@@ -316,7 +330,7 @@ describe('业务平台维护、教案绑定与录制加载', () => {
   it('考试界面仅保留可隐藏的任务说明浮栏', () => {
     const runner = source('src/views/student/StudentTaskRunnerView.vue');
 
-    expect(runner).toContain('v-if="!isExam && showRunnerMenu" class="stage-sidebar"');
+    expect(runner).toContain('!isExam && !isPractice && showRunnerMenu');
     expect(runner).toContain("task.mode === 'PRACTICE'");
     expect(runner).toContain('v-if="isExam && showHelp" class="exam-task-panel"');
     expect(runner).toContain('显示考试说明');

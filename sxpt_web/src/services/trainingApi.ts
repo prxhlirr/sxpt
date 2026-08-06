@@ -3,7 +3,11 @@ import {
   createMockTrainingState
 } from '../data/mockSeed';
 import { clearApiToken, setApiToken } from '../api/http';
-import type { PortalRole, StorageLike, TrainingState } from '../domain/models';
+import type {
+  PortalRole,
+  StorageLike,
+  TrainingState
+} from '../domain/models';
 
 export const TRAINING_STORAGE_KEY = 'sxpt_web.training.demo.v1';
 export const AUTH_SESSION_STORAGE_KEY = 'sxpt_web.auth.session.v1';

@@ -1,5 +1,6 @@
 # Java / Maven
 /sxpt_api/target/
+/sxpt_api/data/
 /sxpt_api/src/test/
 target/
 *.class

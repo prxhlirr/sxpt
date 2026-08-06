@@ -63,6 +63,7 @@ export interface TrainingAttachment {
   mimeType: string;
   size: number;
   dataUrl: string;
+  downloadUrl?: string;
   uploadedAt: string;
 }
 

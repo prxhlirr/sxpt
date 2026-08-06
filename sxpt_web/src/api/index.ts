@@ -1,4 +1,5 @@
 export * from './auth';
+export * from './attachments';
 export * from './capture';
 export * from './connector';
 export * from './contracts';

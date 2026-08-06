@@ -897,6 +897,7 @@ async function uploadTeachingPointAttachments(event: Event) {
     return;
   }
   try {
+    showFeedback('正在上传教学点附件，请稍候…');
     const additions = await createTrainingAttachments(input.files);
     const attachments = [
       ...(selectedStage.value.attachments ?? []),
@@ -934,6 +935,7 @@ async function uploadStepAttachments(event: Event) {
     return;
   }
   try {
+    showFeedback('正在上传节点附件，请稍候…');
     const additions = await createTrainingAttachments(input.files);
     updateRecordedStep(selectedStep.value.id, {
       attachments: [...(selectedStep.value.attachments ?? []), ...additions]
@@ -1623,7 +1625,7 @@ function numberValue(event: Event) {
               ＋ 上传附件
             </label>
           </div>
-          <small>支持图片、PDF、文档等文件；单个文件不超过 5 MB。</small>
+          <small>支持图片、PDF、文档等文件；讲解/学习时可弹窗预览并最小化到右侧栏；单个文件不超过 5 MB。</small>
           <div v-if="stageForm.attachments?.length" class="attachment-editor__list">
             <article v-for="attachment in stageForm.attachments" :key="attachment.id">
               <span>附件</span>
@@ -1784,7 +1786,7 @@ function numberValue(event: Event) {
                 ＋ 上传附件
               </label>
             </div>
-            <small>附件将在教师讲解与学生学习该节点时显示，可随时收起。</small>
+            <small>附件将在教师讲解与学生学习该节点时显示，可弹窗预览并最小化到右侧栏。</small>
             <div v-if="selectedStep.attachments?.length" class="attachment-editor__list">
               <article v-for="attachment in selectedStep.attachments" :key="attachment.id">
                 <span>附件</span>
