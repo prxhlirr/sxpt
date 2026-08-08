@@ -33,6 +33,11 @@ import {
 } from '../services/backendTrainingApi';
 import { getApiConfig } from '../config/api';
 import { createDefaultBusinessPlatforms } from '../data/mockSeed';
+import { usersApi, type StudentDirectoryItem } from '../api/users';
+import {
+  isPracticeMonitorableStep,
+  practiceRecordedActionType
+} from '../utils/practiceStep';
 
 export interface TrainingStoreOptions {
   api?: TrainingApi;
@@ -41,6 +46,14 @@ export interface TrainingStoreOptions {
   storage?: StorageLike;
   now?: () => string;
   idFactory?: (prefix: string) => string;
+  listStudents?: () => Promise<StudentDirectoryItem[]>;
+}
+
+interface TrainingAudienceMember {
+  studentId: string;
+  studentName: string;
+  unitId: string;
+  unitName: string;
 }
 
 export interface RemoteSyncState {
@@ -72,6 +85,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   const workspaceApi = options.workspaceApi ?? trainingWorkspaceApi;
   const now = options.now ?? (() => new Date().toISOString());
   const idFactory = options.idFactory ?? defaultIdFactory;
+  const listStudents = options.listStudents ?? (() => usersApi.listStudents());
   const state = reactive(api.loadState()) as TrainingState;
   const remote = reactive<RemoteSyncState>({
     enabled: backend.isEnabled(),
@@ -1316,15 +1330,52 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return publishedLesson;
   }
 
+  async function resolveTrainingAudience(
+    lessonId: string
+  ): Promise<TrainingAudienceMember[]> {
+    const configuredMembers = state.groupPlans[lessonId]?.members ?? [];
+    if (configuredMembers.length) {
+      return configuredMembers.map((member) => ({
+        studentId: member.studentId,
+        studentName: member.studentName,
+        unitId: member.unitId,
+        unitName: member.unitName
+      }));
+    }
+
+    const config = getApiConfig();
+    if (!backend.isEnabled()) {
+      return [
+        {
+          studentId: config.simulatedStudentId,
+          studentName: config.simulatedStudentName,
+          unitId: config.simulatedOrgId,
+          unitName: '模拟班级'
+        }
+      ];
+    }
+
+    const students = await runRemote('读取真实学生目录', listStudents);
+    if (!students.length) {
+      throw new Error('当前租户没有可发布任务的启用学生账号');
+    }
+    return students.map((student) => ({
+      studentId: student.studentId,
+      studentName: student.studentName,
+      unitId: student.unitId || config.simulatedOrgId,
+      unitName: student.unitName || '未分班'
+    }));
+  }
+
   function ensureSimulatedModeTask(
     lessonId: string,
-    mode: 'LEARNING' | 'PRACTICE'
+    mode: 'LEARNING' | 'PRACTICE',
+    audience: TrainingAudienceMember[]
   ): PublishedTask {
     const existing = state.publishedTasks.find(
       (task) => task.lessonId === lessonId && task.mode === mode
     );
     const lesson = requireLesson(lessonId);
-    const config = getApiConfig();
     const startAt = new Date(Date.parse(now()) - 60_000).toISOString();
     const endAt = new Date(
       Date.parse(startAt) + 30 * 24 * 60 * 60 * 1000
@@ -1359,17 +1410,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         unitName: string;
       }
     >();
-    (state.groupPlans[lessonId]?.members ?? []).forEach((member) =>
+    audience.forEach((member) =>
       membersByStudent.set(member.studentId, member)
     );
-    if (!membersByStudent.size && !backend.isEnabled()) {
-      membersByStudent.set(config.simulatedStudentId, {
-        studentId: config.simulatedStudentId,
-        studentName: config.simulatedStudentName,
-        unitId: config.simulatedOrgId,
-        unitName: '模拟班级'
-      });
-    }
     const allGroupKeys = [
       ...new Set(lesson.stages.map((stage) => stage.groupKey).filter(Boolean))
     ];
@@ -1444,6 +1487,16 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       published.remoteTaskId &&
       published.syncStatus === 'SYNCED'
     ) {
+      state.studentTasks
+        .filter(
+          (task) =>
+            task.publishedTaskId === published.id && task.mode === mode
+        )
+        .forEach((task) => {
+          task.syncStatus = 'SYNCED';
+          delete task.syncError;
+        });
+      persist();
       return published;
     }
     const platform = requireBusinessPlatform(lesson.businessPlatformId);
@@ -1551,8 +1604,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       persist();
       lesson = requireLesson(lessonId);
     }
-    const learning = ensureSimulatedModeTask(lessonId, 'LEARNING');
-    const practice = ensureSimulatedModeTask(lessonId, 'PRACTICE');
+    const audience = await resolveTrainingAudience(lessonId);
+    const learning = ensureSimulatedModeTask(lessonId, 'LEARNING', audience);
+    const practice = ensureSimulatedModeTask(lessonId, 'PRACTICE', audience);
     await publishModeTaskRemote(lessonId, 'LEARNING', learning);
     await publishModeTaskRemote(lessonId, 'PRACTICE', practice);
     await saveAuthenticatedWorkspace();
@@ -2092,15 +2146,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const practiceStages = lesson.stages.filter(
       (stage) =>
         stage.visibility.PRACTICE &&
-        stage.recordedSteps.some(
-          (step) => step.kind !== 'guide' && step.actionType !== 'guide'
-        )
+        stage.recordedSteps.some(isPracticeMonitorableStep)
     );
 
     for (const stage of practiceStages) {
-      const monitoredSteps = stage.recordedSteps.filter(
-        (step) => step.kind !== 'guide' && step.actionType !== 'guide'
-      );
+      const monitoredSteps = stage.recordedSteps.filter(isPracticeMonitorableStep);
       if (
         task.completedStageIds.includes(stage.id) ||
         !monitoredSteps.every((step) => completedStepIds.has(step.id))
@@ -2140,7 +2190,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const lesson = requireLesson(task.lessonId);
     const stage = requireStage(lesson, stageId);
     const step = stage.recordedSteps.find((candidate) => candidate.id === stepId);
-    if (!step || step.kind === 'guide' || step.actionType === 'guide') {
+    if (!step || !isPracticeMonitorableStep(step)) {
       throw new Error('未找到可评分的练习操作点');
     }
     const published = state.publishedTasks.find(
@@ -2173,7 +2223,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       if (task.completedPracticeStepIds?.includes(stepId)) return task;
 
       const recordedActionType: PracticeStepResult['recordedActionType'] =
-        step.actionType ?? 'click';
+        practiceRecordedActionType(step);
       task.completedPracticeStepIds ??= [];
       task.practiceStepResults ??= [];
       task.completedPracticeStepIds.push(stepId);
@@ -2216,9 +2266,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         ? lesson.stages.filter(
             (stage) =>
               stage.visibility.PRACTICE &&
-              stage.recordedSteps.some(
-                (step) => step.kind !== 'guide' && step.actionType !== 'guide'
-              )
+              stage.recordedSteps.some(isPracticeMonitorableStep)
           )
         : lesson.stages.filter(
             (stage) =>

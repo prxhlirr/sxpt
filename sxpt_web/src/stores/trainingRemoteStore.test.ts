@@ -328,4 +328,74 @@ describe('训练 Store 后端同步', () => {
       syncStatus: 'SYNCED'
     });
   });
+
+  it('未配置分组时按真实学生目录生成学习和练习任务', async () => {
+    const seed = createMockTrainingState();
+    const lesson = seed.lessons.find(
+      (candidate) => candidate.id === 'lesson-purchase-v3'
+    )!;
+    seed.groupPlans = {};
+    lesson.lectureCompletedAt = '2026-08-07T08:00:00.000Z';
+    lesson.teachingPointId = 'teaching-point-existing';
+    lesson.status = 'PUBLISHED';
+    const backend: BackendTrainingApi = {
+      isEnabled: () => true,
+      listBusinessPlatforms: vi.fn(),
+      createBusinessPlatform: vi.fn(),
+      updateBusinessPlatform: vi.fn(),
+      setBusinessPlatformStatus: vi.fn(),
+      startCaptureSession: vi.fn(),
+      reportRecordedStep: vi.fn(),
+      publishLesson: vi.fn(),
+      publishTeachingTask: vi.fn(async (_lesson, _platform, mode) => ({
+        courseId: 'course-existing',
+        taskId: `task-${String(mode).toLowerCase()}`,
+        teachingPointId: 'teaching-point-existing',
+        evaluationRuleId: `rule-${String(mode).toLowerCase()}`,
+        taskStepIdsByStepId: {}
+      })),
+      prepareInitialDataForPublishedTask: vi.fn(async () => 2),
+      startStudentTaskExecution: vi.fn(),
+      reportStudentStageCompletion: vi.fn(),
+      reportStudentPracticeStep: vi.fn(),
+      submitStudentTaskExecution: vi.fn()
+    };
+    const listStudents = vi.fn(async () => [
+      {
+        studentId: 'student-real-1',
+        studentName: '学生一',
+        username: 'student01',
+        unitId: 'class-a',
+        unitName: '一班'
+      },
+      {
+        studentId: 'student-real-2',
+        studentName: '学生二',
+        username: 'student02',
+        unitId: 'class-a',
+        unitName: '一班'
+      }
+    ]);
+    const store = createTrainingStore({
+      backend,
+      listStudents,
+      storage: createMemoryStorage({
+        [TRAINING_STORAGE_KEY]: JSON.stringify(seed)
+      }),
+      now: () => '2026-08-07T08:00:00.000Z'
+    });
+
+    const published = await store.publishLearningAndPracticeRemote(lesson.id);
+
+    expect(listStudents).toHaveBeenCalledOnce();
+    expect(published.map((task) => task.assignedCount)).toEqual([2, 2]);
+    const publishedIds = new Set(published.map((task) => task.id));
+    const generatedTasks = store.state.studentTasks.filter((task) =>
+      publishedIds.has(task.publishedTaskId)
+    );
+    expect(generatedTasks).toHaveLength(4);
+    expect(new Set(generatedTasks.map((task) => task.studentId))).toEqual(
+      new Set(['student-real-1', 'student-real-2'])
+    );
+  });
 });

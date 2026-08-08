@@ -89,6 +89,26 @@ class DataRequirementGenerationServiceImplTests {
     }
 
     /**
+     * 发布任务使用较长批次号时，请求明细编码仍须满足数据库 varchar(64) 约束。
+     */
+    @Test
+    void generateRequirementItemsShouldLimitRequestItemIdToDatabaseLength() {
+        DataRequirement requirement = buildRequirement();
+        when(dataRequirementMapper.selectById("requirement_001")).thenReturn(requirement);
+        when(dataRequirementItemMapper.selectList(any())).thenReturn(Collections.emptyList());
+        when(moduleDataStrategyService.getModuleDataStrategyById("strategy_001")).thenReturn(buildStrategy());
+        DataRequirementGenerationService.GenerateRequest request = buildGenerateRequest(
+                buildParticipant("student_001", "question_001"));
+        request.setRequestBatchId("publish-bc373c54f439447bb67094bf1c346965-1786070000000");
+
+        service.generateRequirementItems(request);
+
+        ArgumentCaptor<DataRequirementItem> captor = ArgumentCaptor.forClass(DataRequirementItem.class);
+        verify(dataRequirementItemMapper).insert(captor.capture());
+        assertTrue(captor.getValue().getRequestItemId().length() <= 64);
+    }
+
+    /**
      * 验证同一 requestBatchId 已经生成过明细时直接返回既有明细，避免同一次 attempt 重试重复造数。
      */
     @Test

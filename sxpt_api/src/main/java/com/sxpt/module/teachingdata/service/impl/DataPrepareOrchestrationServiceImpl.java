@@ -32,6 +32,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
 import java.util.Collections;
 import java.util.HashMap;
@@ -741,7 +742,10 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      * @return 数据池幂等键。
      */
     private String buildPoolIdempotencyKey(DataRequirementItem item, String key) {
-        return "pool:" + item.getRequirementId() + ":" + item.getRequestBatchId() + ":" + key;
+        String source = item.getRequirementId() + ":" + item.getRequestBatchId() + ":" + key;
+        return "pool:" + UUID.nameUUIDFromBytes(source.getBytes(StandardCharsets.UTF_8))
+                .toString()
+                .replace("-", "");
     }
 
     /**

@@ -7,6 +7,7 @@ import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataRequirementItem;
+import com.sxpt.module.teachingdata.entity.TeachingDataPool;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.PrepareJobStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RequirementItemStatus;
@@ -97,6 +98,27 @@ class DataPrepareOrchestrationServiceImplTests {
         verify(teachingDataInstanceMapper, times(2)).insert(any(TeachingDataInstance.class));
         verify(originDataPrepareAdapter, times(0)).validateTeachingData(any());
         verify(dataPrepareJobMapper, times(2)).updateById(job);
+    }
+
+    @Test
+    void executeCreateJobShouldBoundPoolIdempotencyKeyForLongBusinessIdentifiers() {
+        DataPrepareJob job = buildJob();
+        DataRequirementItem item = buildItem("item_001", "student_001");
+        item.setRequirementId("requirement_123456789012345678901");
+        item.setRequestBatchId("publish-practice-123456789012345678901234567890123456");
+        item.setQuestionId("question-1234567890123456789012345678901234567890123456789012345");
+        when(dataPrepareJobMapper.selectById("job_001")).thenReturn(job);
+        when(dataRequirementItemMapper.selectList(any())).thenReturn(Collections.singletonList(item));
+        mockInsertedInstanceValidation(item, true, null);
+        when(originDataPrepareAdapter.createTeachingData(any())).thenReturn(buildResponse(
+                buildSuccessResponseItem("item_001", "biz_001")));
+
+        service.executeCreateJob("job_001");
+
+        ArgumentCaptor<TeachingDataPool> poolCaptor = ArgumentCaptor.forClass(TeachingDataPool.class);
+        verify(teachingDataPoolMapper).insert(poolCaptor.capture());
+        assertTrue(poolCaptor.getValue().getIdempotencyKey().length() <= 128);
+        assertEquals(37, poolCaptor.getValue().getIdempotencyKey().length());
     }
 
     /**

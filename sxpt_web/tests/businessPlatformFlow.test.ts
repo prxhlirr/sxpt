@@ -274,6 +274,10 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(editor).toContain("kind: 'guide'");
     expect(editor).toContain('selectorCandidates: payload.selectorCandidates');
     expect(editor).toContain('⌖ 重新选择元素');
+    expect(editor).toContain('authoringLaunchContextKey');
+    expect(editor).toContain('watch(\n  authoringLaunchContextKey');
+    expect(editor).toContain('@frame-load="handleBusinessFrameLoad"');
+    expect(editor).toContain('元素连续选取仍保持开启');
     expect(captureFrame).toContain("post({ type: 'SXPT_START_ELEMENT_PICK' })");
     expect(captureFrame).toContain("post({ type: 'START_ELEMENT_PICK' })");
     expect(captureFrame).toContain("message.type === 'ELEMENT_PICKED'");
@@ -302,6 +306,16 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(runner).toContain('pendingPracticeStepIds');
     expect(runner).toContain('recordStudentPracticeStepRemote');
     expect(runner).toContain('finishPracticeWhenEvidenceComplete');
+    expect(runner).toContain('class="practice-edge-toolbar"');
+    expect(runner).toContain('to="/student/tasks"');
+    expect(runner).toContain("{{ showPracticeGuide ? '收起提示' : '教案提示' }}");
+    expect(runner).toContain('class="practice-hint-drawer"');
+    expect(runner).toContain('<PlaybackNavigationTree');
+    expect(runner).toContain('@select-step="selectPracticeHintStep"');
+    expect(runner).toContain('practiceFrameRef.value?.previewStep(');
+    expect(runner).toContain('practiceFrameRef.value?.clearStepPreview()');
+    expect(captureFrame).toContain('clearStepPreview');
+    expect(captureFrame).toContain('createBusinessStepPreviewClearMessages');
     expect(runner).toContain("task.value?.mode === 'PRACTICE'");
     expect(runner).toContain(
       'return new Set(playbackStages.value.map((stage) => stage.id))'
@@ -310,7 +324,7 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(captureFrame).toContain('monitorActions?: boolean');
     expect(captureFrame).toContain("type: 'SET_RECORDING_STATE', enabled: true, monitorOnly: true");
     expect(backend).toContain('reportStudentPracticeStep(');
-    expect(backend).toContain('traceType: mapStepActionType(step)');
+    expect(backend).toContain('traceType: mapPracticeStepActionType(step)');
     expect(store).toContain('completedPracticeStepIds');
     expect(store).toContain('syncPracticeStagesFromEvidence');
     expect(store).toContain("task.mode === 'PRACTICE'");

@@ -30,6 +30,10 @@ import {
   type TeachingDataTemplate,
   type TeachingDataPool
 } from './trainingApi';
+import {
+  isPracticeMonitorableStep,
+  practiceRecordedActionType
+} from '../utils/practiceStep';
 
 export interface ReportedStepBinding {
   eventId: string;
@@ -506,30 +510,34 @@ export const backendTrainingApi: BackendTrainingApi = {
       moduleCode: module.moduleCode,
       sceneType: publishedTask.mode
     });
-    const template = templates.find(
-      (candidate) => candidate.id === strategy.templateId
-    );
+    // 管理端重新创建模板时会停用旧模板，已有启用策略可能仍保留旧模板 ID。
+    // 发布时优先使用策略当前绑定；绑定已失效时回退到同模块、同场景的启用模板，
+    // 避免数据配置已具备但任务仍无法发布。
+    const template =
+      templates.find((candidate) => candidate.id === strategy.templateId) ??
+      templates[0];
     if (!template) {
       throw new Error('当前数据准备策略引用的初始数据模板不存在或已停用');
     }
+    const publishAttemptId = Date.now();
     const requirement = await dataPrepareApi.createRequirement({
       tenantId: config.tenantId,
       requirementCode: safeCode(
-        `REQ-${publishedTask.remoteTaskId}-${publishedTask.mode}`,
+        `REQ-${publishedTask.remoteTaskId}-${publishedTask.mode}-${publishAttemptId}`,
         64
       ),
       connectorSystemId: platform.id,
       businessModuleId: module.id,
       moduleCode: module.moduleCode,
       strategyId: strategy.id,
-      templateId: strategy.templateId,
+      templateId: template.id,
       taskId: publishedTask.remoteTaskId,
       classId: config.simulatedOrgId,
       sceneType: publishedTask.mode,
       createBy: config.currentUserId,
       updateBy: config.currentUserId
     });
-    const requestBatchId = `publish-${publishedTask.remoteTaskId}-${Date.now()}`;
+    const requestBatchId = `publish-${publishedTask.remoteTaskId}-${publishAttemptId}`;
     await dataPrepareApi.prepareAndExecute({
       triggerType: 'PUBLISH',
       idempotencyKey: `publish:${requirement.id}:${requestBatchId}`,
@@ -563,14 +571,15 @@ export const backendTrainingApi: BackendTrainingApi = {
     let allocatedCount = 0;
     for (const studentTask of studentTasks) {
       const pool = resolvePoolForStudentTask(pools, studentTask);
+      const questionId = publishedDataQuestionId(studentTask);
       await dataPrepareApi.acquireDataInstance({
         tenantId: config.tenantId,
         poolId: pool.id,
         ownerUserId: studentTask.studentId,
         taskId: publishedTask.remoteTaskId,
         allocationScene: publishedTask.mode,
-        attemptId: requestBatchId,
-        questionAttemptId: `${studentTask.dataItemId}-${requestBatchId}`,
+        attemptId: safeCode(requestBatchId, 64),
+        questionAttemptId: safeCode(`${questionId}-${requestBatchId}`, 64),
         createBy: config.currentUserId,
         updateBy: config.currentUserId
       });
@@ -689,7 +698,7 @@ export const backendTrainingApi: BackendTrainingApi = {
       taskStepId,
       teachingPointId: publishedTask.remoteTeachingPointId,
       resourceId: step.remoteResourceId,
-      traceType: mapStepActionType(step),
+      traceType: mapPracticeStepActionType(step),
       traceTime: toLocalDateTime(new Date(evidence.completedAt)),
       sequenceNo,
       retryCount: 0,
@@ -698,7 +707,7 @@ export const backendTrainingApi: BackendTrainingApi = {
         stageId: stage.id,
         localStepId: step.id,
         mode: publishedTask.mode,
-        recordedActionType: step.actionType ?? 'click',
+        recordedActionType: practiceRecordedActionType(step),
         observedActionType: evidence.actionType
       }),
       evidenceJson: JSON.stringify({
@@ -857,6 +866,13 @@ export function mapStepActionType(step: RecordedStep): string {
   }
 }
 
+export function mapPracticeStepActionType(step: RecordedStep): string {
+  const actionType = practiceRecordedActionType(step);
+  if (actionType === 'input') return 'INPUT';
+  if (actionType === 'select') return 'SELECT';
+  return 'CLICK';
+}
+
 export function toLocalDateTime(date: Date): string {
   return date.toISOString().slice(0, 19);
 }
@@ -1005,7 +1021,7 @@ async function ensureTaskSteps(
     for (const step of stage.recordedSteps) {
       if (
         mode === 'PRACTICE' &&
-        (step.kind === 'guide' || step.actionType === 'guide')
+        !isPracticeMonitorableStep(step)
       ) {
         continue;
       }
@@ -1085,7 +1101,7 @@ async function ensureEvaluation(
           .filter(
             (step) =>
               mode !== 'PRACTICE' ||
-              (step.kind !== 'guide' && step.actionType !== 'guide')
+              isPracticeMonitorableStep(step)
           )
           .map((step) => ({ stage, step }))
       : []
@@ -1280,6 +1296,7 @@ function buildPublishDataParticipant(
   requestBatchId: string
 ) {
   const actorType = studentTask.groupKeys[0] || studentTask.groupKey || 'student';
+  const questionId = publishedDataQuestionId(studentTask);
   const visibleStages = lesson.stages.filter(
     (stage) =>
       stage.visibility[publishedTask.mode] &&
@@ -1289,9 +1306,9 @@ function buildPublishDataParticipant(
   );
   return {
     studentId: studentTask.studentId,
-    questionId: studentTask.dataItemId || studentTask.id,
-    examAttemptId: requestBatchId,
-    questionAttemptId: `${studentTask.dataItemId || studentTask.id}-${requestBatchId}`,
+    questionId,
+    examAttemptId: safeCode(requestBatchId, 64),
+    questionAttemptId: safeCode(`${questionId}-${requestBatchId}`, 64),
     actorType,
     ownerExternalOrgId: studentTask.unitId,
     ownerExternalOrgName: studentTask.unitName,
@@ -1312,13 +1329,13 @@ function buildPublishDataParticipant(
           .filter(
             (step) =>
               publishedTask.mode !== 'PRACTICE' ||
-              (step.kind !== 'guide' && step.actionType !== 'guide')
+              isPracticeMonitorableStep(step)
           )
           .map((step) => ({
             stageId: stage.id,
             stageName: stage.name,
             stepId: step.id,
-            actionType: step.actionType,
+            actionType: practiceRecordedActionType(step),
             title: step.title
           }))
       )
@@ -1342,7 +1359,7 @@ function resolvePoolForStudentTask(
   const pool =
     pools.find(
       (candidate) =>
-        candidate.questionId === studentTask.dataItemId &&
+        candidate.questionId === publishedDataQuestionId(studentTask) &&
         candidate.poolStatus === 'READY' &&
         Number(candidate.readyCount || 0) > 0
     ) ||
@@ -1361,6 +1378,10 @@ function resolvePoolForStudentTask(
     throw new Error('原平台初始数据已生成但没有可领取的数据池');
   }
   return pool;
+}
+
+function publishedDataQuestionId(studentTask: StudentTask): string {
+  return safeCode(studentTask.dataItemId || studentTask.id, 64);
 }
 
 export function distributedScore(

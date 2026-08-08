@@ -586,12 +586,30 @@ export interface CreateStudentTaskLaunchRequest {
 }
 
 export interface StudentDataLaunchResult {
+  tenantId: string;
   launchContextId: string;
   launchToken: string;
+  dataInstanceId: string;
   launchUrl: string;
   targetUrl: string;
   expireTime?: string;
   allocation: DataInstanceAllocation;
+}
+
+export interface CreateAuthoringLaunchRequest {
+  lessonId: string;
+  connectorSystemId: string;
+  businessModuleId: string;
+}
+
+export interface AuthoringLaunchResult {
+  tenantId: string;
+  launchContextId: string;
+  launchToken: string;
+  dataInstanceId: string;
+  redirectUrl: string;
+  launchUrl: string;
+  expireTime?: string;
 }
 
 export interface DataPrepareParticipant {
@@ -1601,6 +1619,18 @@ export const dataPrepareApi = {
   ): Promise<StudentDataLaunchResult> {
     return requestApi<StudentDataLaunchResult>(
       'api/v1/teaching-data/student-launches/create',
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
+    );
+  },
+
+  async createAuthoringLaunch(
+    request: CreateAuthoringLaunchRequest
+  ): Promise<AuthoringLaunchResult> {
+    return requestApi<AuthoringLaunchResult>(
+      'api/v1/teaching-data/authoring-launches/create',
       {
         method: 'POST',
         body: JSON.stringify(request)

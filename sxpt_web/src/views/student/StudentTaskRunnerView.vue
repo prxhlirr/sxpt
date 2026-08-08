@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue';
+import { computed, nextTick, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import AttachmentPanel from '../../components/lesson/AttachmentPanel.vue';
 import BusinessCaptureFrame from '../../components/lesson/BusinessCaptureFrame.vue';
 import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import LessonPlaybackPlayer from '../../components/lesson/LessonPlaybackPlayer.vue';
+import PlaybackNavigationTree from '../../components/lesson/PlaybackNavigationTree.vue';
 import type { RecordedStep } from '../../domain/models';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import {
@@ -14,6 +15,8 @@ import {
 } from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { authApi } from '../../services/trainingApi';
+import { resolveLaunchedBusinessFrameUrl } from '../../utils/businessLaunch';
+import { isPracticeMonitorableStep } from '../../utils/practiceStep';
 
 interface BusinessActionPayload {
   actionType: 'click' | 'input' | 'select' | 'submit';
@@ -51,6 +54,12 @@ const syncing = ref(false);
 const practiceRuntimeLoading = ref(false);
 const practiceRuntimeReady = ref(false);
 const practiceSubmitting = ref(false);
+const practiceFrameRef = ref<InstanceType<typeof BusinessCaptureFrame> | null>(
+  null
+);
+const showPracticeGuide = ref(false);
+const practiceHintStageId = ref('');
+const practiceHintStepIndex = ref(-1);
 const learningStepIndex = ref(0);
 const showStageIntroduction = ref(false);
 const checks = reactive({
@@ -114,7 +123,7 @@ const practiceBusinessBaseUrl = computed(() => {
   }
 });
 const practiceBusinessUrl = computed(
-  () => launchResult.value?.launchUrl || practiceBusinessBaseUrl.value
+  () => resolveLaunchedBusinessFrameUrl(launchResult.value)
 );
 const practiceAllowedOrigins = computed(() =>
   [
@@ -124,10 +133,6 @@ const practiceAllowedOrigins = computed(() =>
     launchResult.value?.launchUrl
   ].filter((url): url is string => Boolean(url))
 );
-
-function isGuideStep(step: RecordedStep) {
-  return step.kind === 'guide' || step.actionType === 'guide';
-}
 
 const visibleStages = computed(() => {
   if (!lesson.value || !task.value) return [];
@@ -153,7 +158,7 @@ const assignedStageIds = computed(() => {
 const playbackStages = computed(() =>
   visibleStages.value.filter((stage) =>
     stage.recordedSteps.some(
-      (step) => !isPractice.value || !isGuideStep(step)
+      (step) => !isPractice.value || isPracticeMonitorableStep(step)
     )
   )
 );
@@ -176,9 +181,13 @@ const navigationTeachingPoints = computed(() =>
 const learningSteps = computed(() =>
   navigationTeachingPoints.value
     .flatMap((stage) =>
-      stage.recordedSteps.map((step) => ({ stage, step }))
+      stage.recordedSteps.map((step, stepIndex) => ({
+        stage,
+        step,
+        stepIndex
+      }))
     )
-    .filter(({ step }) => !isPractice.value || !isGuideStep(step))
+    .filter(({ step }) => !isPractice.value || isPracticeMonitorableStep(step))
 );
 const currentLearningStep = computed(
   () => learningSteps.value[learningStepIndex.value]
@@ -188,6 +197,18 @@ const displayedLearningStep = computed(
     currentLearningStep.value ??
     learningSteps.value[Math.max(0, learningSteps.value.length - 1)]
 );
+const selectedPracticeHint = computed(() => {
+  const selected = learningSteps.value[practiceHintStepIndex.value];
+  return selected?.stage.id === practiceHintStageId.value
+    ? selected
+    : undefined;
+});
+const practiceHintInstruction = computed(() => {
+  const step = selectedPracticeHint.value?.step;
+  return step
+    ? step.practiceHint || step.teachingText || step.note || '请在高亮位置完成对应业务操作。'
+    : '';
+});
 const currentStepIsGuide = computed(
   () =>
     currentLearningStep.value?.step.kind === 'guide' ||
@@ -398,6 +419,7 @@ async function prepareOriginPlatformLaunch(openInNewWindow: boolean) {
   launchLoading.value = true;
   launchMessage.value = '';
   launchErrorMessage.value = '';
+  launchResult.value = null;
   try {
     const result = await dataPrepareApi.createCurrentStudentTaskLaunch({
       taskId,
@@ -457,6 +479,62 @@ function formatPlaybackDuration(seconds: number) {
   return `${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`;
 }
 
+function previewSelectedPracticeHint() {
+  if (!showPracticeGuide.value || !selectedPracticeHint.value) return;
+  const step = selectedPracticeHint.value.step;
+  const selector = step.selector || step.selectorCandidates?.[0];
+  if (!selector) return;
+  practiceFrameRef.value?.previewStep(
+    selector,
+    step.url || step.pageSnapshot?.pageUrl,
+    step.selectorCandidates,
+    step.rect,
+    step.recordedViewport
+  );
+}
+
+function clearPracticeHintPreview() {
+  practiceFrameRef.value?.clearStepPreview();
+}
+
+function closePracticeGuide() {
+  showPracticeGuide.value = false;
+  clearPracticeHintPreview();
+}
+
+function togglePracticeGuide() {
+  if (showPracticeGuide.value) {
+    closePracticeGuide();
+    return;
+  }
+  showPracticeGuide.value = true;
+  if (!practiceHintStageId.value) {
+    practiceHintStageId.value = navigationTeachingPoints.value[0]?.id ?? '';
+  }
+  void nextTick(previewSelectedPracticeHint);
+}
+
+function selectPracticeHintTeachingPoint(stageId: string) {
+  if (task.value?.mode !== 'PRACTICE' || task.value.status !== 'DOING') return;
+  practiceHintStageId.value = stageId;
+  practiceHintStepIndex.value = -1;
+  clearPracticeHintPreview();
+}
+
+function selectPracticeHintStep(index: number) {
+  if (
+    task.value?.mode !== 'PRACTICE' ||
+    task.value.status !== 'DOING' ||
+    index < 0 ||
+    index >= learningSteps.value.length
+  ) {
+    return;
+  }
+  practiceHintStepIndex.value = index;
+  practiceHintStageId.value = learningSteps.value[index].stage.id;
+  void nextTick(previewSelectedPracticeHint);
+}
+
 function syncSubmissionValues() {
   Object.keys(submissionValues).forEach((key) => {
     delete submissionValues[key];
@@ -490,9 +568,13 @@ watch(
         practiceRuntimeKey = nextRuntimeKey;
         launchResult.value = null;
         practiceRuntimeReady.value = false;
+        closePracticeGuide();
+        practiceHintStageId.value = navigationTeachingPoints.value[0]?.id ?? '';
+        practiceHintStepIndex.value = -1;
       }
       showRunnerMenu.value = false;
       void ensurePracticeRuntime();
+      if (task.value.status !== 'DOING') closePracticeGuide();
     }
   },
   { immediate: true }
@@ -1071,6 +1153,90 @@ async function restartTrainingTask() {
       @select-stage="selectLearningTeachingPoint"
     />
 
+    <nav
+      v-if="isPractice"
+      class="practice-edge-toolbar"
+      aria-label="练习页面操作"
+    >
+      <RouterLink
+        to="/student/tasks"
+        title="返回任务中心"
+        aria-label="返回任务中心"
+      >
+        ← 返回
+      </RouterLink>
+      <button
+        type="button"
+        :class="{ active: showPracticeGuide }"
+        :disabled="task.status !== 'DOING' || !learningSteps.length"
+        :aria-expanded="showPracticeGuide"
+        @click="togglePracticeGuide"
+      >
+        {{ showPracticeGuide ? '收起提示' : '教案提示' }}
+      </button>
+    </nav>
+
+    <aside
+      v-if="isPractice && showPracticeGuide"
+      class="practice-hint-drawer"
+      aria-label="练习教案提示目录"
+    >
+      <header>
+        <div>
+          <small>按需查看，不影响练习进度</small>
+          <strong>{{ lesson.title }}</strong>
+        </div>
+        <button type="button" aria-label="关闭教案提示" @click="closePracticeGuide">
+          ×
+        </button>
+      </header>
+      <div class="practice-hint-metrics">
+        <span><small>教学点</small><strong>{{ navigationTeachingPoints.length }}</strong></span>
+        <span><small>可提示节点</small><strong>{{ learningSteps.length }}</strong></span>
+      </div>
+      <PlaybackNavigationTree
+        :teaching-points="navigationTeachingPoints"
+        :steps="learningSteps"
+        :current-stage-id="practiceHintStageId"
+        :current-index="practiceHintStepIndex"
+        :show-stage-introduction="false"
+        :disabled="task.status !== 'DOING'"
+        @select-stage="selectPracticeHintTeachingPoint"
+        @select-step="selectPracticeHintStep"
+      />
+      <section v-if="selectedPracticeHint" class="practice-hint-detail">
+        <small>{{ selectedPracticeHint.stage.name }} · 当前提示节点</small>
+        <strong>{{ selectedPracticeHint.step.title }}</strong>
+        <p>{{ practiceHintInstruction }}</p>
+        <dl>
+          <div>
+            <dt>操作位置</dt>
+            <dd>{{ selectedPracticeHint.step.actionLabel || selectedPracticeHint.step.pageTitle }}</dd>
+          </div>
+          <div>
+            <dt>操作类型</dt>
+            <dd>{{ selectedPracticeHint.step.actionType === 'guide' ? '点击' : selectedPracticeHint.step.actionType || '点击' }}</dd>
+          </div>
+        </dl>
+        <AttachmentPanel
+          :attachments="selectedPracticeHint.step.attachments"
+          title="节点附件"
+        />
+        <span>业务界面中的绑定元素已高亮；可收起提示后继续练习。</span>
+      </section>
+      <section v-else class="practice-hint-empty">
+        <strong>请选择需要查看的节点</strong>
+        <p>先展开教学点，再点击具体节点，业务界面会高亮录制时绑定的元素。</p>
+      </section>
+      <button
+        class="practice-hint-continue primary"
+        type="button"
+        @click="closePracticeGuide"
+      >
+        收起提示，继续练习
+      </button>
+    </aside>
+
     <div
       v-if="task && lesson && isLearning && legacyLearningPlaybackEnabled"
       class="learning-lecture-view"
@@ -1505,6 +1671,7 @@ async function restartTrainingTask() {
               practiceBusinessUrl &&
               learningSteps.length
             "
+            ref="practiceFrameRef"
             class="practice-live-business-view"
             :src="practiceBusinessUrl"
             :title="`${lesson.title}原业务系统练习界面`"
@@ -1513,6 +1680,7 @@ async function restartTrainingTask() {
             monitor-actions
             :show-resolution="false"
             :allowed-origins="practiceAllowedOrigins"
+            @business-ready="previewSelectedPracticeHint"
             @business-action="handleRecordedBusinessAction"
           />
           <BusinessSnapshotFrame
@@ -3695,6 +3863,217 @@ async function restartTrainingTask() {
   display: none;
 }
 
+.practice-edge-toolbar {
+  position: absolute;
+  z-index: 65;
+  top: 14px;
+  right: 14px;
+  display: flex;
+  gap: 6px;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 999px;
+  padding: 5px;
+  background: rgb(25 32 49 / 82%);
+  box-shadow: 0 10px 28px rgb(15 20 40 / 24%);
+  backdrop-filter: blur(12px);
+}
+
+.practice-edge-toolbar a,
+.practice-edge-toolbar button {
+  display: grid;
+  min-width: 64px;
+  min-height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 11px;
+  color: #fff;
+  background: transparent;
+  font-size: 11px;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.practice-edge-toolbar a:hover,
+.practice-edge-toolbar button:hover,
+.practice-edge-toolbar button.active {
+  background: rgb(255 255 255 / 16%);
+}
+
+.practice-edge-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.practice-hint-drawer {
+  position: absolute;
+  z-index: 60;
+  top: 58px;
+  right: 14px;
+  bottom: 14px;
+  display: flex;
+  width: min(360px, calc(100vw - 28px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(218 223 234 / 90%);
+  border-radius: 16px;
+  color: #39455a;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 20px 54px rgb(23 29 55 / 24%);
+  backdrop-filter: blur(16px);
+}
+
+.practice-hint-drawer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e9edf4;
+  padding: 14px 16px;
+}
+
+.practice-hint-drawer > header div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.practice-hint-drawer > header small {
+  color: #6b5dd3;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.practice-hint-drawer > header strong {
+  overflow: hidden;
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-hint-drawer > header button {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 0;
+  border-radius: 50%;
+  color: #526077;
+  background: #eef1f6;
+  cursor: pointer;
+}
+
+.practice-hint-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  border-bottom: 1px solid #edf0f5;
+}
+
+.practice-hint-metrics > span {
+  display: grid;
+  gap: 3px;
+  padding: 10px 14px;
+}
+
+.practice-hint-metrics > span + span {
+  border-left: 1px solid #edf0f5;
+}
+
+.practice-hint-metrics small {
+  color: #929bab;
+  font-size: 8px;
+}
+
+.practice-hint-metrics strong {
+  color: #4b5870;
+  font-size: 14px;
+}
+
+.practice-hint-drawer :deep(.playback-navigation-tree) {
+  min-height: 120px;
+  flex: 1 1 auto;
+}
+
+.practice-hint-detail,
+.practice-hint-empty {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 7px;
+  max-height: 42%;
+  overflow-y: auto;
+  border-top: 1px solid #e9edf4;
+  padding: 13px 15px;
+  background: #fafbff;
+}
+
+.practice-hint-detail > small {
+  color: #6b5dd3;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.practice-hint-detail > strong,
+.practice-hint-empty > strong {
+  font-size: 13px;
+}
+
+.practice-hint-detail > p,
+.practice-hint-empty > p {
+  margin: 0;
+  color: #68758a;
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.practice-hint-detail dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #e4e7f0;
+  border-radius: 9px;
+  background: #fff;
+}
+
+.practice-hint-detail dl > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px 9px;
+}
+
+.practice-hint-detail dl > div + div {
+  border-left: 1px solid #e9ebf2;
+}
+
+.practice-hint-detail dt {
+  color: #929bab;
+  font-size: 8px;
+}
+
+.practice-hint-detail dd {
+  overflow: hidden;
+  margin: 0;
+  font-size: 9px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-hint-detail > span {
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #5b4dc1;
+  background: #efedff;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.practice-hint-continue {
+  flex: 0 0 auto;
+  margin: 0 14px 14px;
+}
+
 .runner-layout.exam-mode {
   display: block;
 }
@@ -3853,6 +4232,22 @@ async function restartTrainingTask() {
 }
 
 @media (max-width: 620px) {
+  .practice-edge-toolbar {
+    top: 8px;
+    right: 8px;
+  }
+
+  .practice-hint-drawer {
+    top: 52px;
+    right: 8px;
+    bottom: 8px;
+    width: calc(100vw - 16px);
+  }
+
+  .practice-hint-detail {
+    max-height: 36%;
+  }
+
   .runner-header {
     align-items: stretch;
     padding: 9px;

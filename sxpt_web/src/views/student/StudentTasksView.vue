@@ -478,6 +478,7 @@ async function restartTrainingTask(taskId: string) {
   width: 100%;
   align-items: center;
   justify-content: center;
+  flex: 1;
 }
 
 @media (max-width: 1180px) {

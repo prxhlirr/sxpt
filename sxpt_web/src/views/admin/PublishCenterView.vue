@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import type { PublishedTask } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { summarizeLessonRelease } from '../../utils/publishCenterPresentation';
 
 const route = useRoute();
 const router = useRouter();
@@ -30,9 +31,15 @@ const taskReady = (task?: PublishedTask) =>
 const trainingTasksReady = computed(
   () => taskReady(learningTask.value) && taskReady(practiceTask.value)
 );
-const assignedCount = computed(
-  () => Math.max(learningTask.value?.assignedCount ?? 0, practiceTask.value?.assignedCount ?? 0)
+const releaseSummary = computed(() =>
+  summarizeLessonRelease({
+    stages: lesson.value?.stages ?? [],
+    lectureCompleted: lectureCompleted.value,
+    learningTask: learningTask.value,
+    practiceTask: practiceTask.value
+  })
 );
+const assignedCount = computed(() => releaseSummary.value.assignedCount);
 
 function startLecture() {
   void router.push({
@@ -89,12 +96,49 @@ async function publishTrainingTasks() {
     </section>
 
     <template v-else>
+      <section class="release-overview">
+        <div class="release-overview__copy">
+          <span class="eyebrow">LESSON RELEASE</span>
+          <h1>{{ lesson.title }}</h1>
+          <p>
+            {{ lesson.moduleName || '未指定业务模块' }} ·
+            {{ releaseSummary.stageCount }} 个教学点
+          </p>
+        </div>
+        <strong class="release-overview__status">
+          {{ lesson.status === 'PUBLISHED' ? '教案已发布' : lesson.status }}
+        </strong>
+      </section>
+
+      <section class="release-metrics" aria-label="教案发布概览">
+        <article>
+          <span>教学点</span>
+          <strong>{{ releaseSummary.stageCount }}</strong>
+        </article>
+        <article>
+          <span>录制节点</span>
+          <strong>{{ releaseSummary.recordedStepCount }}</strong>
+        </article>
+        <article>
+          <span>教师讲解状态</span>
+          <strong>{{ releaseSummary.lectureCompleted ? '已完成' : '待完成' }}</strong>
+        </article>
+        <article>
+          <span>任务覆盖学生</span>
+          <strong>{{ releaseSummary.assignedCount }}</strong>
+        </article>
+        <article>
+          <span>练习数据</span>
+          <strong>{{ releaseSummary.preparedDataCount }}</strong>
+        </article>
+      </section>
+
       <div v-if="feedback" class="notice" :class="feedbackSuccess ? 'success' : 'danger'">
         {{ feedback }}
       </div>
 
-      <section class="release-flow">
-        <article class="card release-step" :class="{ completed: lectureCompleted }">
+      <section class="release-rail">
+        <article class="release-step" :class="{ completed: lectureCompleted }">
           <span class="release-step__number">01</span>
           <div class="release-step__body">
             <span class="eyebrow">TEACHER LECTURE</span>
@@ -107,7 +151,9 @@ async function publishTrainingTasks() {
           </button>
         </article>
 
-        <article class="card release-step" :class="{ completed: trainingTasksReady }">
+        <span class="release-rail__connector" aria-hidden="true">→</span>
+
+        <article class="release-step" :class="{ completed: trainingTasksReady }">
           <span class="release-step__number">02</span>
           <div class="release-step__body">
             <span class="eyebrow">STUDENT LEARNING &amp; PRACTICE</span>
@@ -171,22 +217,130 @@ async function publishTrainingTasks() {
   gap: 18px;
 }
 
-.release-flow {
+.release-overview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 22px;
+  padding: 26px 30px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 84% 18%, rgb(119 226 201 / 34%), transparent 27%),
+    linear-gradient(132deg, #34305f 0%, #5d4fc1 54%, #398b88 118%);
+  box-shadow: 0 20px 48px rgb(45 40 105 / 18%);
+}
+
+.release-overview__copy {
   display: grid;
-  gap: 14px;
+  gap: 7px;
+  min-width: 0;
+}
+
+.release-overview .eyebrow {
+  color: #d9d3ff;
+}
+
+.release-overview h1,
+.release-overview p {
+  margin: 0;
+}
+
+.release-overview h1 {
+  overflow: hidden;
+  font-size: clamp(24px, 3vw, 36px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-overview p {
+  color: rgb(255 255 255 / 74%);
+}
+
+.release-overview__status {
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 26%);
+  border-radius: 999px;
+  padding: 9px 14px;
+  color: #fff;
+  background: rgb(255 255 255 / 13%);
+  backdrop-filter: blur(10px);
+}
+
+.release-metrics {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.release-metrics article {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #e5e7ef;
+  border-radius: 14px;
+  padding: 15px 16px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(41 47 75 / 6%);
+}
+
+.release-metrics span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.release-metrics strong {
+  overflow: hidden;
+  color: #343957;
+  font-size: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.release-rail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1.25fr);
+  align-items: stretch;
+  gap: 0;
 }
 
 .release-step {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 18px;
-  border-color: #e1e5ee;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  gap: 16px;
+  border: 1px solid #e1e5ee;
+  border-radius: 18px;
+  padding: 20px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgb(39 45 76 / 7%);
 }
 
 .release-step.completed {
   border-color: #b9dfcc;
   background: linear-gradient(135deg, #fff, #f5fcf8);
+}
+
+.release-step > button {
+  grid-column: 1 / -1;
+  align-self: end;
+  justify-self: end;
+  margin-top: auto;
+}
+
+.release-rail__connector {
+  display: grid;
+  align-self: center;
+  width: 30px;
+  height: 30px;
+  margin: 2px;
+  place-items: center;
+  border-radius: 50%;
+  color: #6255c8;
+  background: #ebe8ff;
+  font-weight: 900;
 }
 
 .release-step__number {
@@ -259,17 +413,57 @@ async function publishTrainingTasks() {
   margin: 4px 0 0;
 }
 
-@media (max-width: 760px) {
-  .release-step {
-    grid-template-columns: auto minmax(0, 1fr);
+@media (max-width: 1000px) {
+  .release-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .release-rail {
+    grid-template-columns: 1fr;
+    gap: 10px;
   }
 
-  .release-step > button {
-    grid-column: 1 / -1;
+  .release-rail__connector {
+    justify-self: center;
+    transform: rotate(90deg);
+  }
+}
+
+@media (max-width: 640px) {
+  .release-overview {
+    align-items: flex-start;
+    padding: 18px;
+  }
+
+  .release-overview__status {
+    font-size: 12px;
+  }
+
+  .release-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .release-step {
+    grid-template-columns: 1fr;
+  }
+
+  .release-step__number {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
   }
 
   .release-modes {
     grid-template-columns: 1fr;
+  }
+
+  .lecture-gate,
+  .release-result,
+  .publish-empty {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

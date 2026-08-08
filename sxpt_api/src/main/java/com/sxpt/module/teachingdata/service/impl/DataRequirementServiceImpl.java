@@ -5,8 +5,10 @@ import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.entity.ModuleDataStrategy;
+import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
 import com.sxpt.module.connector.service.ModuleDataStrategyService;
+import com.sxpt.module.connector.service.TeachingDataTemplateService;
 import com.sxpt.module.teachingdata.entity.DataRequirement;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RequirementStatus;
@@ -42,12 +44,16 @@ public class DataRequirementServiceImpl implements DataRequirementService {
 
     private final ModuleDataStrategyService moduleDataStrategyService;
 
+    private final TeachingDataTemplateService teachingDataTemplateService;
+
     public DataRequirementServiceImpl(DataRequirementMapper dataRequirementMapper,
                                       BusinessModuleMapper businessModuleMapper,
-                                      ModuleDataStrategyService moduleDataStrategyService) {
+                                      ModuleDataStrategyService moduleDataStrategyService,
+                                      TeachingDataTemplateService teachingDataTemplateService) {
         this.dataRequirementMapper = dataRequirementMapper;
         this.businessModuleMapper = businessModuleMapper;
         this.moduleDataStrategyService = moduleDataStrategyService;
+        this.teachingDataTemplateService = teachingDataTemplateService;
     }
 
     /**
@@ -158,9 +164,20 @@ public class DataRequirementServiceImpl implements DataRequirementService {
         if (!businessModule.getId().equals(strategy.getBusinessModuleId())) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
+        List<TeachingDataTemplate> activeTemplates = teachingDataTemplateService
+                .listActiveTemplatesByModuleAndScene(
+                        requirement.getTenantId(),
+                        requirement.getConnectorSystemId(),
+                        businessModule.getModuleCode(),
+                        requirement.getSceneType());
+        TeachingDataTemplate effectiveTemplate = activeTemplates.stream()
+                .filter(template -> template.getId().equals(strategy.getTemplateId()))
+                .findFirst()
+                .orElseGet(() -> activeTemplates.stream().findFirst()
+                        .orElseThrow(() -> new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE)));
         requirement.setModuleCode(businessModule.getModuleCode());
         requirement.setStrategyId(strategy.getId());
-        requirement.setTemplateId(strategy.getTemplateId());
+        requirement.setTemplateId(effectiveTemplate.getId());
         requirement.setRequirementPolicyJson(strategy.getValidationPolicyJson());
     }
 

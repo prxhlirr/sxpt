@@ -5,6 +5,7 @@ import type {
   CaptureRect
 } from '../../domain/models';
 import { createBusinessSnapshotDocument } from '../../utils/businessSnapshot';
+import { createBusinessStepPreviewMessages } from '../../utils/businessStepPreview';
 import {
   calculateContainedViewport,
   mapRectToFilledViewport,
@@ -48,9 +49,13 @@ const containerRef = ref<HTMLElement | null>(null);
 const frameRef = ref<HTMLIFrameElement | null>(null);
 const frameReady = ref(false);
 const lastImmediateAction = ref<{ selector: string; at: number }>();
+const fallbackResolvedRect = ref<CaptureRect>();
+const fallbackResolvedViewport = ref<{ width: number; height: number }>();
 const containerSize = ref({ width: 0, height: 0 });
 let frameReadyTimer: number | undefined;
 let resizeObserver: ResizeObserver | undefined;
+let fallbackPreviewRequestId = '';
+let fallbackPreviewSequence = 0;
 const selectors = computed(() =>
   [props.selector, ...(props.selectorCandidates ?? [])].filter(
     (selector): selector is string => Boolean(selector)
@@ -67,7 +72,7 @@ const snapshotHasVisualStyles = computed(() => {
 });
 const snapshotHasTarget = computed(() => {
   if (!props.snapshot || !snapshotHasVisualStyles.value) return false;
-  if (!props.interactive || !selectors.value.length) {
+  if (!selectors.value.length) {
     return true;
   }
   const body = new DOMParser().parseFromString(
@@ -132,10 +137,14 @@ const frameViewportStyle = computed(() => {
   };
 });
 const recordedRectStyle = computed(() => {
-  if (!snapshotDocument.value) return undefined;
-  const viewport = resolutionViewport.value;
+  const rect = snapshotDocument.value
+    ? props.rect
+    : fallbackResolvedRect.value;
+  const viewport = snapshotDocument.value
+    ? resolutionViewport.value
+    : normalizeViewport(fallbackResolvedViewport.value, containerSize.value);
   if (
-    !props.rect ||
+    !rect ||
     !viewport ||
     containerSize.value.width <= 0 ||
     containerSize.value.height <= 0
@@ -144,8 +153,8 @@ const recordedRectStyle = computed(() => {
   }
   const mapped =
     props.fitMode === 'fill'
-      ? mapRectToFilledViewport(props.rect, viewport, containerSize.value)
-      : mapRectToContainedViewport(props.rect, viewport, containerSize.value);
+      ? mapRectToFilledViewport(rect, viewport, containerSize.value)
+      : mapRectToContainedViewport(rect, viewport, containerSize.value);
   return {
     left: `${mapped.left}px`,
     top: `${mapped.top}px`,
@@ -197,14 +206,18 @@ function previewFallbackPage() {
     },
     targetOrigin
   );
-  frameRef.value.contentWindow.postMessage(
+  fallbackPreviewSequence += 1;
+  fallbackPreviewRequestId = `fallback-preview-${Date.now()}-${fallbackPreviewSequence}`;
+  for (const message of createBusinessStepPreviewMessages(
+    fallbackPreviewRequestId,
     {
-      type: 'SXPT_PREVIEW_STEP',
       selector: props.selector ?? '',
+      selectorCandidates: props.selectorCandidates,
       url: props.fallbackUrl
-    },
-    targetOrigin
-  );
+    }
+  )) {
+    frameRef.value.contentWindow.postMessage(message, targetOrigin);
+  }
 }
 
 function markFrameReady() {
@@ -232,8 +245,34 @@ function handleMessage(event: MessageEvent) {
   ) {
     return;
   }
-  const message = event.data as { type?: string; payload?: unknown };
+  const message = event.data as {
+    type?: string;
+    payload?: unknown;
+    requestId?: unknown;
+    success?: unknown;
+    rect?: unknown;
+    viewport?: unknown;
+  };
   if (message.type === 'SXPT_TARGET_RECT') {
+    const payload = message.payload as {
+      rect?: CaptureRect;
+      viewport?: { width: number; height: number };
+    };
+    fallbackResolvedRect.value = payload?.rect;
+    fallbackResolvedViewport.value = payload?.viewport;
+    markFrameReady();
+    return;
+  }
+  if (
+    message.type === 'TARGET_RESOLUTION_RESULT' &&
+    message.requestId === fallbackPreviewRequestId
+  ) {
+    if (message.success && message.rect) {
+      fallbackResolvedRect.value = message.rect as CaptureRect;
+      fallbackResolvedViewport.value = message.viewport as
+        | { width: number; height: number }
+        | undefined;
+    }
     markFrameReady();
     return;
   }
@@ -281,6 +320,9 @@ watch(
     }
     frameReady.value = false;
     lastImmediateAction.value = undefined;
+    fallbackResolvedRect.value = undefined;
+    fallbackResolvedViewport.value = undefined;
+    fallbackPreviewRequestId = '';
   }
 );
 

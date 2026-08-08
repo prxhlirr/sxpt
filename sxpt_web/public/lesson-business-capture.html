@@ -1447,20 +1447,38 @@
           : currentPage;
       }
 
-      function resolveTarget(selector, requestedUrl, preview) {
+      function resolveTarget(selector, selectorCandidates, requestedUrl, preview) {
         const expectedPage = targetPageFor(selector, requestedUrl);
         if (expectedPage !== currentPage) render(expectedPage, false);
 
         window.setTimeout(() => {
           if (highlightedElement) highlightedElement.classList.remove("runtime-target");
-          const element = document.querySelector(selector);
+          const candidates = [selector]
+            .concat(Array.isArray(selectorCandidates) ? selectorCandidates : [])
+            .filter(
+              (candidate, index, values) =>
+                candidate && values.indexOf(candidate) === index
+            );
+          let element = null;
+          let resolvedSelector = selector;
+          for (const candidate of candidates) {
+            try {
+              element = document.querySelector(candidate);
+            } catch {
+              element = null;
+            }
+            if (element) {
+              resolvedSelector = candidate;
+              break;
+            }
+          }
           if (element && preview) {
             highlightedElement = element;
             element.classList.add("runtime-target");
           }
           if (!element) {
             post("SXPT_TARGET_RECT", {
-              selector,
+              selector: resolvedSelector,
               url: currentMeta().path,
               pageTitle: currentMeta().title
             });
@@ -1469,7 +1487,7 @@
           }
           const rect = element.getBoundingClientRect();
           post("SXPT_TARGET_RECT", {
-            selector,
+            selector: resolvedSelector,
             url: currentMeta().path,
             pageTitle: currentMeta().title,
             rect: {
@@ -1507,11 +1525,31 @@
           return;
         }
         if (message.type === "SXPT_RESOLVE_TARGET") {
-          resolveTarget(message.selector, message.url, false);
+          resolveTarget(
+            message.selector,
+            message.selectorCandidates,
+            message.url,
+            false
+          );
           return;
         }
         if (message.type === "SXPT_PREVIEW_STEP") {
-          resolveTarget(message.selector, message.url, true);
+          resolveTarget(
+            message.selector,
+            message.selectorCandidates,
+            message.url,
+            true
+          );
+          return;
+        }
+        if (
+          message.type === "SXPT_CLEAR_PREVIEW_STEP" ||
+          message.type === "CLEAR_RECORDED_TARGET_PREVIEW"
+        ) {
+          if (highlightedElement) {
+            highlightedElement.classList.remove("runtime-target");
+            highlightedElement = null;
+          }
           return;
         }
         if (message.type === "SXPT_REQUEST_READY") postReady();

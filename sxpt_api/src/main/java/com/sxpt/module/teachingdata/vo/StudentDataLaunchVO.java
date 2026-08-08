@@ -17,7 +17,11 @@ import java.time.LocalDateTime;
  */
 public class StudentDataLaunchVO {
 
+    private String tenantId;
+
     private String launchContextId;
+
+    private String dataInstanceId;
 
     private String launchToken;
 
@@ -29,12 +33,28 @@ public class StudentDataLaunchVO {
 
     private DataInstanceAllocation allocation;
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
     public String getLaunchContextId() {
         return launchContextId;
     }
 
     public void setLaunchContextId(String launchContextId) {
         this.launchContextId = launchContextId;
+    }
+
+    public String getDataInstanceId() {
+        return dataInstanceId;
+    }
+
+    public void setDataInstanceId(String dataInstanceId) {
+        this.dataInstanceId = dataInstanceId;
     }
 
     public String getLaunchToken() {

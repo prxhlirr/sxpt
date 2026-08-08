@@ -1,0 +1,102 @@
+<style>
+  .design-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:18px; }
+  .design-card { border:2px solid #e5e7eb; border-radius:18px; overflow:hidden; background:#fff; cursor:pointer; transition:.18s ease; }
+  .design-card:hover { border-color:#8b7ee8; transform:translateY(-2px); box-shadow:0 14px 35px rgba(55,48,110,.12); }
+  .design-card.selected { border-color:#6654d9; box-shadow:0 0 0 3px rgba(102,84,217,.13); }
+  .choice-head { display:flex; align-items:center; gap:10px; padding:13px 15px; background:#f8f7ff; border-bottom:1px solid #eceaf8; }
+  .choice-head b { display:grid; place-items:center; width:28px; height:28px; border-radius:9px; color:white; background:#6555d5; }
+  .choice-head small { color:#756ca5; margin-left:auto; font-weight:700; }
+  .screen { padding:14px; background:#f4f6fa; min-height:315px; }
+  .hero { display:flex; justify-content:space-between; gap:12px; padding:14px; border-radius:13px; color:white; background:linear-gradient(125deg,#302a67,#6e5bd6 62%,#3e8aa1); }
+  .hero h4,.hero p { margin:0; }
+  .hero p { margin-top:5px; color:#ddd9ff; font-size:10px; }
+  .hero .status { align-self:flex-start; padding:5px 8px; border-radius:999px; color:#d8ffe9; background:rgba(14,115,73,.55); font-size:9px; }
+  .metric-row { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; margin:9px 0; }
+  .metric { padding:9px; border-radius:10px; background:white; box-shadow:0 3px 12px rgba(39,49,75,.05); }
+  .metric span { display:block; color:#8991a2; font-size:8px; }
+  .metric strong { color:#2e3850; font-size:13px; }
+  .rail { display:grid; grid-template-columns:1fr 24px 1.25fr; align-items:stretch; }
+  .rail-arrow { display:grid; place-items:center; color:#8f97a8; }
+  .step { padding:11px; border:1px solid #e1e5ed; border-radius:11px; background:#fff; }
+  .step.done { border-color:#b9e2cf; background:#f4fbf7; }
+  .step .top { display:flex; align-items:center; gap:7px; }
+  .num { display:grid; place-items:center; width:23px; height:23px; border-radius:7px; color:#6355ca; background:#ece9ff; font-size:9px; font-weight:900; }
+  .step p { margin:6px 0; color:#7d8698; font-size:9px; line-height:1.45; }
+  .mini-modes { display:grid; grid-template-columns:1fr 1fr; gap:5px; }
+  .mini-modes span { padding:6px; border-radius:7px; color:#586176; background:#f3f5f8; font-size:8px; }
+  .action { display:block; width:100%; margin-top:7px; border:0; border-radius:8px; padding:8px; color:white; background:#6655d5; font-size:9px; font-weight:800; }
+  .board { display:grid; grid-template-columns:.9fr 1.35fr; gap:9px; }
+  .lesson-card,.operation-card { border-radius:12px; padding:12px; background:#fff; }
+  .lesson-card h4,.operation-card h4 { margin:0 0 8px; color:#303b52; }
+  .lesson-meta { display:grid; gap:6px; }
+  .lesson-meta span { display:flex; justify-content:space-between; padding-bottom:6px; border-bottom:1px solid #edf0f4; color:#7c8495; font-size:8px; }
+  .timeline { display:grid; gap:10px; margin-top:11px; }
+  .timeline div { display:grid; grid-template-columns:18px 1fr; gap:7px; color:#4d5870; font-size:9px; }
+  .timeline i { display:grid; place-items:center; width:18px; height:18px; border-radius:50%; color:white; background:#42a878; font-style:normal; font-size:8px; }
+  .operation-card { display:grid; align-content:start; }
+  .publish-tile { margin-top:8px; padding:10px; border:1px solid #e4e6ee; border-radius:9px; }
+  .publish-tile strong { font-size:9px; }
+  .publish-tile small { display:block; margin-top:3px; color:#8991a1; font-size:8px; }
+  .shared-mock { position:relative; min-height:310px; overflow:hidden; border-radius:16px; color:#29344a; background:linear-gradient(150deg,#edf1f5,#dfe6ed); box-shadow:inset 0 0 0 1px #d9dfe7; }
+  .business-bar { height:35px; padding:9px 13px; color:#eef3fa; background:#233047; font-size:9px; box-sizing:border-box; }
+  .business-body { display:grid; grid-template-columns:150px 1fr; min-height:275px; }
+  .business-menu { padding:13px; color:#8994a6; background:#f7f9fb; font-size:8px; }
+  .business-menu div { margin-bottom:8px; }
+  .business-content { padding:18px; }
+  .business-content .line { height:9px; margin-bottom:9px; border-radius:5px; background:#cfd7e0; }
+  .business-content .line:nth-child(2) { width:72%; }
+  .business-content .line:nth-child(3) { width:43%; }
+  .directory { position:absolute; top:45px; right:10px; bottom:12px; width:225px; padding:10px; border:1px solid rgba(210,216,226,.9); border-radius:12px; background:rgba(255,255,255,.96); box-shadow:0 15px 38px rgba(31,41,61,.2); }
+  .directory header { display:flex; justify-content:space-between; font-size:9px; font-weight:800; }
+  .point { margin-top:7px; border:1px solid #e5e8ee; border-radius:8px; padding:7px; background:#fff; font-size:8px; }
+  .point.active { border-color:#7b6bd6; background:#f5f2ff; }
+  .point-title { display:flex; justify-content:space-between; font-weight:800; }
+  .nodes { display:grid; gap:4px; margin-top:6px; padding-top:6px; border-top:1px solid #e4e0f7; }
+  .nodes span { padding:5px; border-radius:6px; background:white; color:#6258a9; }
+  .attachment-dock { position:absolute; z-index:3; left:176px; bottom:20px; display:grid; grid-template-columns:29px 1fr 20px; align-items:center; width:185px; border-radius:10px; padding:7px; color:#fff; background:#172033; box-shadow:0 12px 28px rgba(15,23,42,.32); font-size:8px; }
+  .attachment-dock b { display:grid; place-items:center; height:29px; border-radius:7px; color:#5c4bd2; background:#ede9fe; font-size:7px; }
+  .attachment-dock span { padding-left:7px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .attachment-dock i { color:#aab4c6; font-style:normal; text-align:center; }
+  .drag-hint { position:absolute; left:182px; bottom:62px; padding:4px 7px; border-radius:6px; color:#555f72; background:rgba(255,255,255,.9); font-size:7px; }
+  @media(max-width:900px){ .design-grid{grid-template-columns:1fr}.business-body{grid-template-columns:100px 1fr}.directory{width:205px}.attachment-dock{left:115px} }
+</style>
+
+<h2>发布中心采用哪种展示方向？</h2>
+<p class="subtitle">两种方案都保留现有业务规则；差别只在信息层级和操作聚焦。点击选择一项。</p>
+
+<div class="design-grid">
+  <div class="design-card" data-choice="a-dashboard-rail" onclick="toggleSelect(this)">
+    <div class="choice-head"><b>A</b><strong>状态总览 + 横向发布流程</strong><small>推荐</small></div>
+    <div class="screen">
+      <div class="hero"><div><h4>测试教案 002</h4><p>业务流程实训 · 2 个教学点 · 8 个录制节点</p></div><span class="status">教案已发布</span></div>
+      <div class="metric-row"><div class="metric"><span>教师讲解</span><strong>已完成</strong></div><div class="metric"><span>覆盖学生</span><strong>36 人</strong></div><div class="metric"><span>练习数据</span><strong>36 条</strong></div></div>
+      <div class="rail">
+        <div class="step done"><div class="top"><span class="num">01</span><strong>教师讲解</strong></div><p>完成一次完整流程讲解后即可发布。</p><button class="action" style="background:#e9f5ef;color:#16835d">重新讲解</button></div>
+        <div class="rail-arrow">→</div>
+        <div class="step"><div class="top"><span class="num">02</span><strong>学生任务</strong></div><p>一次发布学习与练习，状态分别展示。</p><div class="mini-modes"><span>学习 · 待发布</span><span>练习 · 待发布</span></div><button class="action">发布学习与练习</button></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="design-card" data-choice="b-two-column-board" onclick="toggleSelect(this)">
+    <div class="choice-head"><b>B</b><strong>教案摘要 + 双栏操作面板</strong><small>信息更细</small></div>
+    <div class="screen">
+      <div class="board">
+        <div class="lesson-card"><h4>测试教案 002</h4><div class="lesson-meta"><span>业务平台 <b>OA 系统</b></span><span>教学点 <b>2 个</b></span><span>录制节点 <b>8 个</b></span></div><div class="timeline"><div><i>✓</i><span><b>教师讲解</b><br>已完成，可重新进入</span></div><div><i style="background:#796bd3">2</i><span><b>任务发布</b><br>等待操作</span></div></div></div>
+        <div class="operation-card"><h4>发布学生任务</h4><div class="publish-tile"><strong>学生学习</strong><small>共享教师讲解的只读播放界面</small></div><div class="publish-tile"><strong>学生练习</strong><small>打开原业务系统并准备独立数据</small></div><button class="action">确认并发布 36 名学生</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top:28px">
+  <h3>两种方案共用的讲解 / 学习交互</h3>
+  <p class="subtitle">目录按教学点折叠；只展开当前选择教学点的节点。教学点附件进入时直接以可拖动的最小化框停靠在业务界面侧边。</p>
+  <div class="shared-mock">
+    <div class="business-bar">OA 业务系统　/　收文办理</div>
+    <div class="business-body"><div class="business-menu"><div>工作台</div><div>收文管理</div><div>待办事项</div></div><div class="business-content"><div class="line"></div><div class="line"></div><div class="line"></div></div></div>
+    <aside class="directory"><header><span>教学点目录</span><span>×</span></header><div class="point"><div class="point-title"><span>1　收文登记</span><span>3 节点　›</span></div></div><div class="point active"><div class="point-title"><span>2　拟办与流转</span><span>3 节点　⌄</span></div><div class="nodes"><span>1. 打开待办收文</span><span>2. 填写拟办意见</span><span>3. 提交流转</span></div></div><div class="point"><div class="point-title"><span>3　归档</span><span>2 节点　›</span></div></div></aside>
+    <div class="drag-hint">↔ 可拖到任意侧边位置</div>
+    <div class="attachment-dock"><b>附件</b><span>拟办操作说明.pptx</span><i>×</i></div>
+  </div>
+</div>

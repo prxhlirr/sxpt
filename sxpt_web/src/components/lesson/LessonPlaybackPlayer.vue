@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch
+} from 'vue';
 import type { RouteLocationRaw } from 'vue-router';
 import type {
   LessonPlan,
@@ -11,6 +18,14 @@ import { useTrainingStore } from '../../stores/trainingStore';
 import AttachmentPanel from './AttachmentPanel.vue';
 import AttachmentPreviewLayer from './AttachmentPreviewLayer.vue';
 import BusinessSnapshotFrame from './BusinessSnapshotFrame.vue';
+import PlaybackNavigationTree from './PlaybackNavigationTree.vue';
+import {
+  beginOverlayDrag,
+  clampOverlayPosition,
+  updateOverlayDrag,
+  type OverlayDragSession,
+  type OverlayPosition
+} from '../../utils/draggableOverlay';
 
 interface PlaybackStep {
   stage: LessonStage;
@@ -60,6 +75,11 @@ const emit = defineEmits<{
 const navigationOpen = ref(false);
 const promptCollapsed = ref(false);
 const promptPosition = ref<'left' | 'right' | 'bottom'>('left');
+const playerElement = ref<HTMLElement | null>(null);
+const promptElement = ref<HTMLElement | null>(null);
+const manualPromptPosition = ref<OverlayPosition | null>(null);
+const promptDragging = ref(false);
+const dragState = ref<OverlayDragSession | null>(null);
 const previewAttachment = ref<TrainingAttachment | null>(null);
 const attachmentPreviewMinimized = ref(false);
 
@@ -118,6 +138,17 @@ const progress = computed(() =>
     ? Math.round(((Math.min(props.currentIndex, steps.value.length - 1) + 1) / steps.value.length) * 100)
     : 0
 );
+const promptStyle = computed(() =>
+  manualPromptPosition.value
+    ? {
+        left: `${manualPromptPosition.value.x}px`,
+        top: `${manualPromptPosition.value.y}px`,
+        right: 'auto',
+        bottom: 'auto',
+        transform: 'none'
+      }
+    : undefined
+);
 
 function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -133,6 +164,7 @@ function toggleNavigation() {
 }
 
 function cyclePromptPosition() {
+  manualPromptPosition.value = null;
   promptPosition.value =
     promptPosition.value === 'left'
       ? 'right'
@@ -140,6 +172,112 @@ function cyclePromptPosition() {
         ? 'bottom'
         : 'left';
 }
+
+function constrainManualPromptPosition() {
+  if (
+    !manualPromptPosition.value ||
+    !playerElement.value ||
+    !promptElement.value
+  ) {
+    return;
+  }
+  const playerRect = playerElement.value.getBoundingClientRect();
+  const promptRect = promptElement.value.getBoundingClientRect();
+  manualPromptPosition.value = clampOverlayPosition(
+    manualPromptPosition.value,
+    { width: promptRect.width, height: promptRect.height },
+    { width: playerRect.width, height: playerRect.height }
+  );
+}
+
+function schedulePromptConstraint() {
+  void nextTick(constrainManualPromptPosition);
+}
+
+function startPromptDrag(event: PointerEvent) {
+  if (
+    !event.isPrimary ||
+    (event.pointerType === 'mouse' && event.button !== 0) ||
+    (event.target as HTMLElement | null)?.closest(
+      'button, a, input, select, textarea'
+    ) ||
+    !playerElement.value ||
+    !promptElement.value
+  ) {
+    return;
+  }
+
+  const playerRect = playerElement.value.getBoundingClientRect();
+  const promptRect = promptElement.value.getBoundingClientRect();
+  dragState.value = beginOverlayDrag(
+    event.pointerId,
+    { x: event.clientX, y: event.clientY },
+    {
+      x: promptRect.left - playerRect.left,
+      y: promptRect.top - playerRect.top
+    }
+  );
+  promptDragging.value = true;
+  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
+  event.preventDefault();
+}
+
+function movePromptDrag(event: PointerEvent) {
+  if (
+    !dragState.value ||
+    !playerElement.value ||
+    !promptElement.value
+  ) {
+    return;
+  }
+  const playerRect = playerElement.value.getBoundingClientRect();
+  const promptRect = promptElement.value.getBoundingClientRect();
+  const update = updateOverlayDrag(
+    dragState.value,
+    event.pointerId,
+    { x: event.clientX, y: event.clientY },
+    { width: promptRect.width, height: promptRect.height },
+    { width: playerRect.width, height: playerRect.height }
+  );
+  dragState.value = update.session;
+  if (!update.position) return;
+  manualPromptPosition.value = update.position;
+  event.preventDefault();
+}
+
+function finishPromptDrag(event: PointerEvent) {
+  if (!dragState.value || dragState.value.pointerId !== event.pointerId) return;
+  const handle = event.currentTarget as HTMLElement;
+  if (handle.hasPointerCapture(event.pointerId)) {
+    handle.releasePointerCapture(event.pointerId);
+  }
+  dragState.value = null;
+  promptDragging.value = false;
+}
+
+watch(
+  [
+    promptCollapsed,
+    () => props.showStageIntroduction,
+    () => props.currentIndex,
+    () => props.playerState
+  ],
+  schedulePromptConstraint
+);
+
+watch(
+  () => current.value?.stage.id,
+  (stageId, previousStageId) => {
+    if (previousStageId && stageId !== previousStageId) {
+      closeAttachmentPreview();
+    }
+  }
+);
+
+onMounted(() => window.addEventListener('resize', schedulePromptConstraint));
+onBeforeUnmount(() =>
+  window.removeEventListener('resize', schedulePromptConstraint)
+);
 
 function openAttachmentPreview(attachment: TrainingAttachment) {
   previewAttachment.value = attachment;
@@ -161,7 +299,7 @@ function restoreAttachmentPreview() {
 </script>
 
 <template>
-  <section class="lesson-playback-player">
+  <section ref="playerElement" class="lesson-playback-player">
     <BusinessSnapshotFrame
       v-if="currentStep"
       class="playback-business-view"
@@ -222,52 +360,39 @@ function restoreAttachmentPreview() {
         <span><small>进度</small><strong>{{ progress }}%</strong></span>
       </div>
       <div class="playback-drawer-progress"><i :style="{ width: `${progress}%` }"></i></div>
-      <section>
-        <h2>教学点</h2>
-        <button
-          v-for="(stage, index) in teachingPoints"
-          :key="stage.id"
-          type="button"
-          :disabled="playerState !== 'PLAYING'"
-          :class="{
-            active: stage.id === current?.stage.id && showStageIntroduction
-          }"
-          @click="emit('selectStage', stage.id)"
-        >
-          <span>{{ index + 1 }}</span>
-          <strong>{{ stage.name }}</strong>
-          <small>{{ stage.recordedSteps.length }} 个节点</small>
-        </button>
-      </section>
-      <section>
-        <h2>操作节点</h2>
-        <button
-          v-for="(item, index) in steps"
-          :key="item.step.id"
-          type="button"
-          :disabled="playerState !== 'PLAYING'"
-          :class="{ active: index === currentIndex && !showStageIntroduction }"
-          @click="emit('selectStep', index)"
-        >
-          <span>{{ index + 1 }}</span>
-          <strong>{{ item.step.title }}</strong>
-          <small>{{ item.stage.name }}</small>
-        </button>
-      </section>
+      <PlaybackNavigationTree
+        :teaching-points="teachingPoints"
+        :steps="steps"
+        :current-stage-id="current?.stage.id"
+        :current-index="currentIndex"
+        :show-stage-introduction="showStageIntroduction"
+        :disabled="playerState !== 'PLAYING'"
+        @select-stage="emit('selectStage', $event)"
+        @select-step="emit('selectStep', $event)"
+      />
     </aside>
 
     <aside
+      ref="promptElement"
       class="playback-prompt"
+      :style="promptStyle"
       :class="[
         `prompt-${promptPosition}`,
         {
           collapsed: promptCollapsed,
+          dragging: promptDragging,
           'stage-prompt': showStageIntroduction,
           'node-prompt': !showStageIntroduction
         }
       ]"
     >
-      <header class="playback-prompt-toolbar">
+      <header
+        class="playback-prompt-toolbar"
+        @pointerdown="startPromptDrag"
+        @pointermove="movePromptDrag"
+        @pointerup="finishPromptDrag"
+        @pointercancel="finishPromptDrag"
+      >
         <strong>
           {{
             playerState === 'READY'
@@ -440,9 +565,13 @@ function restoreAttachmentPreview() {
 
     <AttachmentPreviewLayer
       :attachment="previewAttachment"
+      :attachments="current?.stage.attachments ?? []"
+      :context-key="current?.stage.id ?? ''"
       :minimized="attachmentPreviewMinimized"
+      :avoid-right="navigationOpen"
       @close="closeAttachmentPreview"
       @minimize="minimizeAttachmentPreview"
+      @preview="openAttachmentPreview"
       @restore="restoreAttachmentPreview"
     />
   </section>
@@ -614,6 +743,8 @@ function restoreAttachmentPreview() {
 .playback-navigation-drawer > section {
   display: grid;
   gap: 6px;
+  min-height: 0;
+  flex: 1;
   overflow-y: auto;
   padding: 12px;
 }
@@ -732,6 +863,13 @@ function restoreAttachmentPreview() {
   padding: 6px 7px 6px 14px;
   color: #fff;
   background: linear-gradient(135deg, rgb(48 56 77 / 96%), rgb(73 62 145 / 94%));
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.playback-prompt.dragging .playback-prompt-toolbar {
+  cursor: grabbing;
 }
 
 .playback-prompt-toolbar strong {
@@ -751,6 +889,8 @@ function restoreAttachmentPreview() {
   min-height: 28px;
   padding: 0 7px;
   font-size: 9px;
+  cursor: pointer;
+  touch-action: manipulation;
 }
 
 .playback-prompt-content {

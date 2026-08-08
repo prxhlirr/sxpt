@@ -4,8 +4,13 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.common.security.CurrentUserContext;
+import com.sxpt.module.connector.entity.BusinessModule;
+import com.sxpt.module.connector.entity.ConnectorSystem;
 import com.sxpt.module.connector.entity.PlatformLaunchContext;
+import com.sxpt.module.connector.service.BusinessModuleService;
+import com.sxpt.module.connector.service.ConnectorSystemService;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
+import com.sxpt.module.connector.support.BusinessSsoLaunchUrlBuilder;
 import com.sxpt.module.teachingdata.dto.CreateStudentDataLaunchRequest;
 import com.sxpt.module.teachingdata.dto.CreateStudentTaskLaunchRequest;
 import com.sxpt.module.teachingdata.entity.DataInstanceAllocation;
@@ -31,9 +36,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.io.UnsupportedEncodingException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -73,6 +75,12 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
 
     private final PracticeRestartOrchestrationService practiceRestartOrchestrationService;
 
+    private final ConnectorSystemService connectorSystemService;
+
+    private final BusinessModuleService businessModuleService;
+
+    private final BusinessSsoLaunchUrlBuilder businessSsoLaunchUrlBuilder;
+
     @Autowired
     public StudentDataLaunchServiceImpl(DataInstanceAllocationMapper dataInstanceAllocationMapper,
                                         TeachUserMapper teachUserMapper,
@@ -81,7 +89,10 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
                                         DataPrepareFacadeService dataPrepareFacadeService,
                                         DataInstanceAllocationService dataInstanceAllocationService,
                                         PlatformLaunchContextService platformLaunchContextService,
-                                        PracticeRestartOrchestrationService practiceRestartOrchestrationService) {
+                                        PracticeRestartOrchestrationService practiceRestartOrchestrationService,
+                                        ConnectorSystemService connectorSystemService,
+                                        BusinessModuleService businessModuleService,
+                                        BusinessSsoLaunchUrlBuilder businessSsoLaunchUrlBuilder) {
         this.dataInstanceAllocationMapper = dataInstanceAllocationMapper;
         this.teachUserMapper = teachUserMapper;
         this.dataRequirementItemMapper = dataRequirementItemMapper;
@@ -90,11 +101,24 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         this.dataInstanceAllocationService = dataInstanceAllocationService;
         this.platformLaunchContextService = platformLaunchContextService;
         this.practiceRestartOrchestrationService = practiceRestartOrchestrationService;
+        this.connectorSystemService = connectorSystemService;
+        this.businessModuleService = businessModuleService;
+        this.businessSsoLaunchUrlBuilder = businessSsoLaunchUrlBuilder;
     }
 
     public StudentDataLaunchServiceImpl(DataInstanceAllocationMapper dataInstanceAllocationMapper,
                                         PlatformLaunchContextService platformLaunchContextService) {
-        this(dataInstanceAllocationMapper, null, null, null, null, null, platformLaunchContextService, null);
+        this(dataInstanceAllocationMapper, null, null, null, null, null, platformLaunchContextService, null,
+                null, null, null);
+    }
+
+    public StudentDataLaunchServiceImpl(DataInstanceAllocationMapper dataInstanceAllocationMapper,
+                                        PlatformLaunchContextService platformLaunchContextService,
+                                        ConnectorSystemService connectorSystemService,
+                                        BusinessModuleService businessModuleService,
+                                        BusinessSsoLaunchUrlBuilder businessSsoLaunchUrlBuilder) {
+        this(dataInstanceAllocationMapper, null, null, null, null, null, platformLaunchContextService, null,
+                connectorSystemService, businessModuleService, businessSsoLaunchUrlBuilder);
     }
 
     /**
@@ -111,10 +135,12 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         requireText(currentUser.getTenantId());
         DataInstanceAllocation allocation = getStudentAllocation(request, currentUser);
         validateAllocation(allocation, currentUser);
-        PlatformLaunchContext launchContext = buildLaunchContext(request, allocation, currentUser);
+        LaunchConfiguration launchConfiguration = resolveLaunchConfiguration(allocation, currentUser);
+        PlatformLaunchContext launchContext = buildLaunchContext(
+                request, allocation, currentUser, launchConfiguration.businessModule);
         PlatformLaunchContextService.CreatedLaunchContext created =
                 platformLaunchContextService.createLaunchContext(launchContext);
-        return buildResult(created, allocation);
+        return buildResult(created, allocation, launchConfiguration);
     }
 
     /**
@@ -128,7 +154,7 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         validateTaskLaunchRequest(request);
         CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TeachUser teachUser = resolveTeachUser(currentUser);
-        String tenantId = resolveTenantId(teachUser);
+        String tenantId = resolveTenantId(currentUser, teachUser);
         return queryCurrentStudentTaskAllocations(request, currentUser, teachUser, tenantId);
     }
 
@@ -148,7 +174,7 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         validateTaskLaunchRequest(request);
         CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TeachUser teachUser = resolveTeachUser(currentUser);
-        String tenantId = resolveTenantId(teachUser);
+        String tenantId = resolveTenantId(currentUser, teachUser);
         DataInstanceAllocation sourceAllocation =
                 getCurrentStudentTaskAllocation(request, currentUser, teachUser, tenantId);
         DataRequirementItem sourceItem = getSourceRequirementItem(sourceAllocation);
@@ -398,7 +424,7 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         validateTaskLaunchRequest(request);
         CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TeachUser teachUser = resolveTeachUser(currentUser);
-        String tenantId = resolveTenantId(teachUser);
+        String tenantId = resolveTenantId(currentUser, teachUser);
         DataInstanceAllocation allocation = getCurrentStudentTaskAllocation(request, currentUser, teachUser, tenantId);
         CreateStudentDataLaunchRequest launchRequest = new CreateStudentDataLaunchRequest();
         launchRequest.setTenantId(tenantId);
@@ -407,10 +433,12 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         launchRequest.setExecutionId(firstText(request.getExecutionId(),
                 firstText(allocation.getExecutionId(), allocation.getAttemptId())));
         validateAllocation(allocation, currentUser);
-        PlatformLaunchContext launchContext = buildLaunchContext(launchRequest, allocation, currentUser);
+        LaunchConfiguration launchConfiguration = resolveLaunchConfiguration(allocation, currentUser);
+        PlatformLaunchContext launchContext = buildLaunchContext(
+                launchRequest, allocation, currentUser, launchConfiguration.businessModule);
         PlatformLaunchContextService.CreatedLaunchContext created =
                 platformLaunchContextService.createLaunchContext(launchContext);
-        return buildResult(created, allocation);
+        return buildResult(created, allocation, launchConfiguration);
     }
 
     /**
@@ -454,7 +482,15 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @param teachUser 教学平台用户。
      * @return 租户 ID。
      */
-    private String resolveTenantId(TeachUser teachUser) {
+    private String resolveTenantId(CurrentUserContext.CurrentUser currentUser, TeachUser teachUser) {
+        if (StringUtils.hasText(currentUser.getTenantId())) {
+            if (teachUser != null
+                    && StringUtils.hasText(teachUser.getTenantId())
+                    && !currentUser.getTenantId().equals(teachUser.getTenantId())) {
+                throw new BusinessException(ApiResultCode.FORBIDDEN);
+            }
+            return currentUser.getTenantId();
+        }
         if (teachUser != null && StringUtils.hasText(teachUser.getTenantId())) {
             return teachUser.getTenantId();
         }
@@ -581,6 +617,9 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @param request 学生启动请求。
      */
     private void validateAllocation(DataInstanceAllocation allocation, CurrentUserContext.CurrentUser currentUser) {
+        if (!currentUser.getTenantId().equals(allocation.getTenantId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
         if (!currentUser.getUserId().equals(allocation.getOwnerUserId())) {
             throw new BusinessException(ApiResultCode.FORBIDDEN);
         }
@@ -588,10 +627,10 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
         requireText(allocation.getConnectorSystemId());
+        requireText(allocation.getBusinessModuleId());
         requireText(allocation.getDataInstanceId());
         requireText(allocation.getTaskId());
         requireText(allocation.getAllocationScene());
-        requireText(allocation.getTargetUrl());
         requireText(firstText(allocation.getOriginOrgId(), allocation.getRequiredExternalOrgId()));
         requireText(firstText(allocation.getOriginRoleId(), allocation.getRequiredExternalRoleId()));
     }
@@ -605,7 +644,8 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      */
     private PlatformLaunchContext buildLaunchContext(CreateStudentDataLaunchRequest request,
                                                      DataInstanceAllocation allocation,
-                                                     CurrentUserContext.CurrentUser currentUser) {
+                                                     CurrentUserContext.CurrentUser currentUser,
+                                                     BusinessModule businessModule) {
         PlatformLaunchContext launchContext = new PlatformLaunchContext();
         launchContext.setId(generateId());
         launchContext.setTenantId(currentUser.getTenantId());
@@ -617,7 +657,7 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
         launchContext.setDataInstanceId(allocation.getDataInstanceId());
         launchContext.setSceneType(allocation.getAllocationScene());
         launchContext.setSdkMode(SDK_MODE_STUDENT);
-        launchContext.setTargetUrl(allocation.getTargetUrl());
+        launchContext.setTargetUrl(businessModule.getEntryUrl());
         launchContext.setSegmentNo(resolveSegmentNo(allocation));
         launchContext.setActorType(allocation.getActorType());
         launchContext.setRequiredExternalOrgId(firstText(allocation.getOriginOrgId(),
@@ -679,14 +719,20 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @return 学生端启动结果。
      */
     private StudentDataLaunchVO buildResult(PlatformLaunchContextService.CreatedLaunchContext created,
-                                            DataInstanceAllocation allocation) {
+                                            DataInstanceAllocation allocation,
+                                            LaunchConfiguration launchConfiguration) {
         PlatformLaunchContext launchContext = created.getLaunchContext();
         StudentDataLaunchVO result = new StudentDataLaunchVO();
+        result.setTenantId(launchContext.getTenantId());
         result.setLaunchContextId(launchContext.getId());
         result.setLaunchToken(created.getLaunchToken());
-        result.setTargetUrl(launchContext.getTargetUrl());
-        result.setLaunchUrl(appendLaunchQuery(launchContext.getTargetUrl(),
-                launchContext.getTenantId(), launchContext.getId(), created.getLaunchToken()));
+        result.setDataInstanceId(launchContext.getDataInstanceId());
+        result.setTargetUrl(launchConfiguration.businessModule.getEntryUrl());
+        result.setLaunchUrl(businessSsoLaunchUrlBuilder.build(
+                launchConfiguration.connectorSystem.getBaseUrl(),
+                launchContext.getTenantId(),
+                created.getLaunchToken(),
+                launchConfiguration.businessModule.getEntryUrl()));
         result.setExpireTime(launchContext.getExpireTime());
         result.setAllocation(allocation);
         return result;
@@ -701,12 +747,33 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @param launchToken 一次性明文 token。
      * @return 可直接跳转的原平台地址。
      */
-    private String appendLaunchQuery(String targetUrl, String tenantId, String launchContextId, String launchToken) {
-        String separator = targetUrl.contains("?") ? "&" : "?";
-        return targetUrl + separator
-                + "tenantId=" + encode(tenantId)
-                + "&launchContextId=" + encode(launchContextId)
-                + "&launchToken=" + encode(launchToken);
+    private LaunchConfiguration resolveLaunchConfiguration(
+            DataInstanceAllocation allocation,
+            CurrentUserContext.CurrentUser currentUser) {
+        if (connectorSystemService == null
+                || businessModuleService == null
+                || businessSsoLaunchUrlBuilder == null) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
+        }
+        ConnectorSystem system = connectorSystemService.getConnectorSystemById(allocation.getConnectorSystemId());
+        if (system == null || Boolean.TRUE.equals(system.getDeleted())) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        BusinessModule module = businessModuleService.getBusinessModuleById(allocation.getBusinessModuleId());
+        if (module == null || Boolean.TRUE.equals(module.getDeleted())) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        if (!currentUser.getTenantId().equals(system.getTenantId())
+                || !currentUser.getTenantId().equals(module.getTenantId())
+                || !system.getId().equals(module.getConnectorSystemId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
+        if (!"ACTIVE".equals(system.getStatus()) || !"ACTIVE".equals(module.getStatus())) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        requireText(system.getBaseUrl());
+        requireText(module.getEntryUrl());
+        return new LaunchConfiguration(system, module);
     }
 
     /**
@@ -715,11 +782,14 @@ public class StudentDataLaunchServiceImpl implements StudentDataLaunchService {
      * @param value 原始参数值。
      * @return 编码后的参数值。
      */
-    private String encode(String value) {
-        try {
-            return URLEncoder.encode(value, StandardCharsets.UTF_8.name());
-        } catch (UnsupportedEncodingException ex) {
-            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
+    private static final class LaunchConfiguration {
+
+        private final ConnectorSystem connectorSystem;
+        private final BusinessModule businessModule;
+
+        private LaunchConfiguration(ConnectorSystem connectorSystem, BusinessModule businessModule) {
+            this.connectorSystem = connectorSystem;
+            this.businessModule = businessModule;
         }
     }
 

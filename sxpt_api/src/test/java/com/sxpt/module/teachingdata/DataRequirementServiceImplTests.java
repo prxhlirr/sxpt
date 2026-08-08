@@ -3,8 +3,10 @@ package com.sxpt.module.teachingdata;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.entity.ModuleDataStrategy;
+import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.BusinessModuleMapper;
 import com.sxpt.module.connector.service.ModuleDataStrategyService;
+import com.sxpt.module.connector.service.TeachingDataTemplateService;
 import com.sxpt.module.teachingdata.entity.DataRequirement;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RequirementStatus;
@@ -45,8 +47,10 @@ class DataRequirementServiceImplTests {
 
     private final ModuleDataStrategyService moduleDataStrategyService = mock(ModuleDataStrategyService.class);
 
+    private final TeachingDataTemplateService teachingDataTemplateService = mock(TeachingDataTemplateService.class);
+
     private final DataRequirementService service = new DataRequirementServiceImpl(
-            mapper, businessModuleMapper, moduleDataStrategyService);
+            mapper, businessModuleMapper, moduleDataStrategyService, teachingDataTemplateService);
 
     /**
      * 校验创建数据需求批次时写入 Mapper 并补齐默认值。
@@ -58,6 +62,9 @@ class DataRequirementServiceImplTests {
         when(moduleDataStrategyService.getActiveStrategyByModuleCodeAndScene(
                 "tenant_001", "connector_001", "BUSINESS_APPLY", "PRACTICE"))
                 .thenReturn(buildStrategy());
+        when(teachingDataTemplateService.listActiveTemplatesByModuleAndScene(
+                "tenant_001", "connector_001", "BUSINESS_APPLY", "PRACTICE"))
+                .thenReturn(Collections.singletonList(buildTemplate("template_001")));
 
         DataRequirement saved = service.createDataRequirement(requirement);
 
@@ -72,6 +79,25 @@ class DataRequirementServiceImplTests {
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
         verify(mapper).insert(saved);
+    }
+
+    /**
+     * 策略仍引用已停用旧模板时，批次应自动绑定同模块场景下的当前启用模板。
+     */
+    @Test
+    void createDataRequirementShouldReplaceDisabledStrategyTemplate() {
+        DataRequirement requirement = buildValidRequirement();
+        when(businessModuleMapper.selectOne(org.mockito.ArgumentMatchers.any())).thenReturn(buildBusinessModule());
+        when(moduleDataStrategyService.getActiveStrategyByModuleCodeAndScene(
+                "tenant_001", "connector_001", "BUSINESS_APPLY", "PRACTICE"))
+                .thenReturn(buildStrategy());
+        when(teachingDataTemplateService.listActiveTemplatesByModuleAndScene(
+                "tenant_001", "connector_001", "BUSINESS_APPLY", "PRACTICE"))
+                .thenReturn(Collections.singletonList(buildTemplate("template_active_002")));
+
+        DataRequirement saved = service.createDataRequirement(requirement);
+
+        assertEquals("template_active_002", saved.getTemplateId());
     }
 
     /**
@@ -176,5 +202,11 @@ class DataRequirementServiceImplTests {
         strategy.setTemplateId("template_001");
         strategy.setValidationPolicyJson("{\"required\":true}");
         return strategy;
+    }
+
+    private TeachingDataTemplate buildTemplate(String id) {
+        TeachingDataTemplate template = new TeachingDataTemplate();
+        template.setId(id);
+        return template;
     }
 }

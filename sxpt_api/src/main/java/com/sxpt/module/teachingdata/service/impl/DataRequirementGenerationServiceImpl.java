@@ -39,6 +39,10 @@ import java.util.UUID;
 @Profile("!test")
 public class DataRequirementGenerationServiceImpl implements DataRequirementGenerationService {
 
+    private static final int REQUEST_ITEM_ID_MAX_LENGTH = 64;
+
+    private static final int GENERATED_ID_LENGTH = 32;
+
     private final DataRequirementMapper dataRequirementMapper;
 
     private final DataRequirementItemMapper dataRequirementItemMapper;
@@ -227,7 +231,12 @@ public class DataRequirementGenerationServiceImpl implements DataRequirementGene
      * @return 明细请求 ID。
      */
     private String buildRequestItemId(String requestBatchId) {
-        return requestBatchId + "_" + generateId();
+        String generatedId = generateId();
+        int maxBatchLength = REQUEST_ITEM_ID_MAX_LENGTH - GENERATED_ID_LENGTH - 1;
+        String batchPrefix = requestBatchId.length() > maxBatchLength
+                ? requestBatchId.substring(0, maxBatchLength)
+                : requestBatchId;
+        return batchPrefix + "_" + generatedId;
     }
 
     /**

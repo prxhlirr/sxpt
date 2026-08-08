@@ -27,7 +27,7 @@ describe('讲解与学习附件预览', () => {
     expect(playback).toContain(
       'const attachmentPreviewMinimized = ref(false)'
     );
-    expect(playback.match(/@preview="openAttachmentPreview"/g)).toHaveLength(2);
+    expect(playback.match(/@preview="openAttachmentPreview"/g)).toHaveLength(3);
     expect(playback).toContain(':attachment="previewAttachment"');
     expect(playback).toContain('@minimize="minimizeAttachmentPreview"');
     expect(playback).toContain('@restore="restoreAttachmentPreview"');
@@ -49,7 +49,8 @@ describe('讲解与学习附件预览', () => {
     expect(preview).toContain('fileName: attachment.name');
     expect(preview).toContain('mimeType: attachment.mimeType');
     expect(preview).toContain('viewer?.destroy()');
-    expect(preview).toContain('class="attachment-preview-dock"');
+    expect(preview).toContain('class="attachment-preview-stack"');
+    expect(preview).toContain('attachment-preview-dock-card');
     expect(preview).toContain('最小化到右侧栏');
     expect(preview).toContain('继续查看');
     expect(preview).toContain(':download="attachment.name"');

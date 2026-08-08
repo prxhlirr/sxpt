@@ -18,6 +18,7 @@ import type {
   RunMode
 } from '../../domain/models';
 import BusinessCaptureFrame from '../../components/lesson/BusinessCaptureFrame.vue';
+import { useAuthoringBusinessLaunch } from '../../composables/useAuthoringBusinessLaunch';
 import { useTrainingStore } from '../../stores/trainingStore';
 import {
   captureBusinessPageSnapshot,
@@ -31,6 +32,7 @@ import {
   buildStableElementSelector,
   describePickedElement
 } from '../../utils/elementSelector';
+import { sanitizeRecordedBusinessUrl } from '../../utils/businessLaunch';
 
 type PanelTab = 'stage' | 'step' | 'lesson' | 'publish';
 type PickerToolbarPosition = 'top-right' | 'bottom-right' | 'bottom-left' | 'top-left';
@@ -89,6 +91,11 @@ interface BusinessCaptureFrameApi {
   setRecording: (enabled: boolean) => void;
   startElementPick: () => void;
   cancelElementPick: () => void;
+  previewStep: (
+    selector: string,
+    url?: string,
+    selectorCandidates?: string[]
+  ) => void;
 }
 
 const route = useRoute();
@@ -116,11 +123,11 @@ function resolveRecordedBusinessUrl(value?: string) {
   if (!platformUrl || platformUrl.startsWith('internal://')) {
     return value || platformUrl;
   }
-  try {
-    return new URL(value || platformUrl, platformUrl).href;
-  } catch {
-    return platformUrl;
-  }
+  return sanitizeRecordedBusinessUrl(
+    value || platformUrl,
+    authoringLaunch.result.value?.launchUrl ?? '',
+    platformUrl
+  );
 }
 
 const useEmbeddedBusinessSimulation = computed(
@@ -128,6 +135,34 @@ const useEmbeddedBusinessSimulation = computed(
     !effectiveBusinessPlatformUrl.value ||
     effectiveBusinessPlatformUrl.value.startsWith('internal://')
 );
+const authoringLaunch = useAuthoringBusinessLaunch();
+const businessFrameUrl = computed(() =>
+  useEmbeddedBusinessSimulation.value
+    ? effectiveBusinessPlatformUrl.value
+    : authoringLaunch.frameUrl.value
+);
+const authoringAllowedOrigins = computed(() =>
+  [
+    businessPlatform.value?.baseUrl,
+    effectiveBusinessPlatformUrl.value,
+    authoringLaunch.result.value?.redirectUrl,
+    authoringLaunch.result.value?.launchUrl
+  ].filter((url): url is string => Boolean(url))
+);
+const authoringLaunchContextKey = computed(() => {
+  const currentLessonId = lesson.value?.id ?? '';
+  const platformId = businessPlatform.value?.id ?? '';
+  const moduleId = businessPlatformModule.value?.id ?? '';
+  if (
+    !currentLessonId ||
+    !platformId ||
+    !moduleId ||
+    useEmbeddedBusinessSimulation.value
+  ) {
+    return '';
+  }
+  return `${currentLessonId}\u0000${platformId}\u0000${moduleId}`;
+});
 const selectedStageId = ref('');
 const selectedStepId = ref('');
 const recording = ref(false);
@@ -148,6 +183,7 @@ const elementPicking = ref(false);
 const pickTargetStepId = ref('');
 const pickedElementLabel = ref('');
 const elementPickerStyle = ref<Record<string, string>>({});
+const selectedStepPreviewStyle = ref<Record<string, string>>({});
 let continuousPickResumeToken = 0;
 
 const configurationLocked = computed(() =>
@@ -377,6 +413,25 @@ const statusSummary = computed(() => {
   return `${state} · 第 ${activeStageIndex.value + 1} 教学点 · ${selectedStage.value.recordedSteps.length} 个节点`;
 });
 
+async function initializeAuthoringLaunch() {
+  const currentLesson = lesson.value;
+  const platform = businessPlatform.value;
+  const businessModule = businessPlatformModule.value;
+  if (
+    !currentLesson ||
+    !platform ||
+    !businessModule ||
+    useEmbeddedBusinessSimulation.value
+  ) {
+    return;
+  }
+  await authoringLaunch.start({
+    lessonId: currentLesson.id,
+    connectorSystemId: platform.id,
+    businessModuleId: businessModule.id
+  });
+}
+
 watch(
   lesson,
   (current) => {
@@ -423,6 +478,16 @@ watch(selectedStageId, () => {
   loadStageDraft();
   selectedStepId.value = selectedStage.value?.recordedSteps[0]?.id ?? '';
 });
+
+watch(
+  authoringLaunchContextKey,
+  (contextKey) => {
+    if (contextKey) {
+      void initializeAuthoringLaunch();
+    }
+  },
+  { immediate: true }
+);
 
 onMounted(async () => {
   window.addEventListener('message', handleBusinessPlatformMessage);
@@ -623,11 +688,17 @@ function handleElementPicked(payload: PickedElementPayload) {
   const label = payload.text?.trim() || '页面元素';
   const pageUrl = resolveRecordedBusinessUrl(payload.url);
   const pageTitle = payload.pageTitle || businessScenario.value.pageTitle;
-  const pageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
+  const normalizedPageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
     pageUrl,
     pageTitle,
     viewport: payload.recordedViewport
   });
+  const pageSnapshot = normalizedPageSnapshot
+    ? {
+        ...normalizedPageSnapshot,
+        pageUrl: resolveRecordedBusinessUrl(normalizedPageSnapshot.pageUrl)
+      }
+    : undefined;
   const targetStepId = pickTargetStepId.value;
 
   if (targetStepId) {
@@ -737,11 +808,17 @@ function handleBusinessPlatformMessage(event: MessageEvent) {
           )
         }
       : undefined;
-  const pageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
+  const normalizedPageSnapshot = normalizeBusinessPageSnapshot(payload.pageSnapshot, {
     pageUrl,
     pageTitle,
     viewport: recordedViewport
   });
+  const pageSnapshot = normalizedPageSnapshot
+    ? {
+        ...normalizedPageSnapshot,
+        pageUrl: resolveRecordedBusinessUrl(normalizedPageSnapshot.pageUrl)
+      }
+    : undefined;
   const step: RecordedStep = {
     id: `record-${selectedStage.value.id}-${Date.now()}`,
     title,
@@ -773,6 +850,57 @@ function showFeedback(message: string, tone: 'success' | 'danger' = 'success') {
   feedback.value = message;
   feedbackTone.value = tone;
   activityText.value = message;
+}
+
+function handleBusinessFrameLoad() {
+  activityText.value = `业务模块“${
+    businessPlatformModule.value?.name ?? businessPlatform.value?.name ?? ''
+  }”已加载，可开始录制。`;
+  if (!recording.value || !elementPicking.value) return;
+  captureFrameRef.value?.setRecording(true);
+  captureFrameRef.value?.startElementPick();
+  activityText.value = '业务页面已恢复，元素连续选取仍保持开启。';
+}
+
+async function selectRecordedStep(step: RecordedStep) {
+  selectedStepId.value = step.id;
+  selectedStepPreviewStyle.value = {};
+  if (!step.selector) return;
+  if (!useEmbeddedBusinessSimulation.value) {
+    captureFrameRef.value?.previewStep(
+      step.selector,
+      step.url,
+      step.selectorCandidates
+    );
+    return;
+  }
+
+  await nextTick();
+  const workspace = workspaceRef.value;
+  const businessLayer = businessLayerRef.value;
+  if (!workspace || !businessLayer) return;
+  const selectors = [step.selector, ...(step.selectorCandidates ?? [])].filter(
+    (selector, index, candidates) =>
+      Boolean(selector) && candidates.indexOf(selector) === index
+  );
+  let target: Element | null = null;
+  for (const selector of selectors) {
+    try {
+      target = businessLayer.querySelector(selector);
+    } catch {
+      target = null;
+    }
+    if (target) break;
+  }
+  if (!target) return;
+  const targetRect = target.getBoundingClientRect();
+  const workspaceRect = workspace.getBoundingClientRect();
+  selectedStepPreviewStyle.value = {
+    left: `${targetRect.left - workspaceRect.left}px`,
+    top: `${targetRect.top - workspaceRect.top}px`,
+    width: `${targetRect.width}px`,
+    height: `${targetRect.height}px`
+  };
 }
 
 function openPanel(tab: PanelTab) {
@@ -995,6 +1123,16 @@ async function startRecording() {
     return;
   }
   if (configurationLocked.value) return;
+  if (!useEmbeddedBusinessSimulation.value && !businessFrameUrl.value) {
+    showFeedback(
+      authoringLaunch.error.value ||
+        (authoringLaunch.loading.value
+          ? '正在生成新的编排业务数据，请稍候。'
+          : '业务系统单点启动尚未就绪，请重试。'),
+      'danger'
+    );
+    return;
+  }
   try {
     if (!lesson.value) return;
     continuousPickResumeToken += 1;
@@ -1213,17 +1351,40 @@ function numberValue(event: Event) {
       @pointermove.capture="handleInternalPickMove"
       @click.capture="handleInternalPickClick"
     >
-      <BusinessCaptureFrame
-        v-if="!useEmbeddedBusinessSimulation && businessPlatform"
-        ref="captureFrameRef"
-        class="configured-business-frame"
-        fit-mode="fill"
-        :src="effectiveBusinessPlatformUrl"
-        :title="`${businessPlatform.name}${businessPlatformModule ? ` / ${businessPlatformModule.name}` : ''}业务界面`"
-        @frame-load="activityText = `业务模块“${businessPlatformModule?.name ?? businessPlatform.name}”已加载，可开始录制。`"
-        @element-picked="handleElementPicked"
-        @element-pick-cancelled="handleElementPickCancelled"
-      />
+      <template v-if="!useEmbeddedBusinessSimulation && businessPlatform">
+        <BusinessCaptureFrame
+          v-if="businessFrameUrl"
+          ref="captureFrameRef"
+          class="configured-business-frame"
+          fit-mode="fill"
+          :src="businessFrameUrl"
+          :allowed-origins="authoringAllowedOrigins"
+          :title="`${businessPlatform.name}${businessPlatformModule ? ` / ${businessPlatformModule.name}` : ''}业务界面`"
+          @frame-load="handleBusinessFrameLoad"
+          @element-picked="handleElementPicked"
+          @element-pick-cancelled="handleElementPickCancelled"
+        />
+        <div v-else class="authoring-launch-state">
+          <span>{{ authoringLaunch.loading.value ? '…' : '!' }}</span>
+          <h2>
+            {{ authoringLaunch.loading.value ? '正在创建编排业务数据' : '业务系统启动失败' }}
+          </h2>
+          <p>
+            {{
+              authoringLaunch.loading.value
+                ? '正在生成新的 RECORD 数据实例并建立单点登录上下文，请稍候。'
+                : authoringLaunch.error.value || '请检查业务平台、业务模块和 RECORD 数据策略配置。'
+            }}
+          </p>
+          <button
+            v-if="!authoringLaunch.loading.value"
+            type="button"
+            @click="initializeAuthoringLaunch"
+          >
+            重新生成并打开
+          </button>
+        </div>
+      </template>
       <template v-else>
       <header class="business-header">
         <div class="business-brand">
@@ -1423,6 +1584,15 @@ function numberValue(event: Event) {
     </div>
 
     <div
+      v-if="!elementPicking && useEmbeddedBusinessSimulation && selectedStepPreviewStyle.width"
+      class="element-picker-highlight selected-step-preview-highlight"
+      :style="selectedStepPreviewStyle"
+      aria-hidden="true"
+    >
+      <span>已绑定元素</span>
+    </div>
+
+    <div
       v-if="elementPicking"
       class="element-picker-toolbar"
       :class="`position-${pickerToolbarPosition}`"
@@ -1534,7 +1704,7 @@ function numberValue(event: Event) {
               :key="step.id"
               type="button"
               :class="{ active: step.id === selectedStepId }"
-              @click="selectedStepId = step.id"
+              @click="selectRecordedStep(step)"
               @dblclick="openPanel('step')"
             >
               <i>{{ stepIndex + 1 }}</i>
@@ -2105,6 +2275,50 @@ function numberValue(event: Event) {
   height: 100%;
   border: 0;
   background: #fff;
+}
+
+.authoring-launch-state {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  padding: 32px;
+  text-align: center;
+  background: #f2f5f9;
+}
+
+.authoring-launch-state > span {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 24px;
+  font-weight: 800;
+  background: #087f70;
+}
+
+.authoring-launch-state h2,
+.authoring-launch-state p {
+  margin: 0;
+}
+
+.authoring-launch-state p {
+  max-width: 560px;
+  color: #667085;
+}
+
+.authoring-launch-state button {
+  border: 0;
+  border-radius: 8px;
+  padding: 10px 18px;
+  color: #fff;
+  background: #087f70;
+  cursor: pointer;
 }
 
 .business-header {

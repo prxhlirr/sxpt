@@ -9,6 +9,7 @@ import {
   findOrganizationByIdOrCode,
   mapBusinessModule,
   mapConnectorSystem,
+  mapPracticeStepActionType,
   mapStepActionType,
   safeCode,
   serializeRecordedStepSnapshot,
@@ -206,6 +207,16 @@ describe('后端训练接口映射', () => {
     expect(
       mapStepActionType({ actionType } as Pick<RecordedStep, 'actionType'> as RecordedStep)
     ).toBe(expected);
+  });
+
+  it('练习中的元素说明节点按点击轨迹上报', () => {
+    expect(
+      mapPracticeStepActionType({
+        kind: 'guide',
+        actionType: 'guide',
+        selector: '#query'
+      } as RecordedStep)
+    ).toBe('CLICK');
   });
 
   it('按 LocalDateTime 格式发送时间，不携带时区后缀', () => {
@@ -472,7 +483,7 @@ describe('后端训练接口映射', () => {
         moduleCode: 'PURCHASE_APPLY',
         moduleName: '采购申请',
         sceneType: 'PRACTICE',
-        templateId: 'template-active-1',
+        templateId: 'template-disabled-1',
         dataSourceStrategy: 'CREATE',
         sharePolicy: 'ATTEMPT_EXCLUSIVE',
         regeneratePolicy: 'ON_ATTEMPT',
@@ -506,7 +517,10 @@ describe('后端训练接口映射', () => {
     dataPrepareApiMock.listPools.mockResolvedValue([
       {
         id: 'pool-1',
-        questionId: 'question-1',
+        questionId: safeCode(
+          'training-practice-lesson-32120f48-24a2-485d-bf37-c6faf4101ec6-user-demo-student-01',
+          64
+        ),
         poolStatus: 'READY',
         readyCount: 1
       }
@@ -582,7 +596,8 @@ describe('后端训练接口映射', () => {
             groupKeys: ['buyer'],
             unitId: 'unit-1',
             unitName: '采购科',
-            dataItemId: 'question-1',
+            dataItemId:
+              'training-practice-lesson-32120f48-24a2-485d-bf37-c6faf4101ec6-user-demo-student-01',
             attemptNumber: 1,
             submissionValues: {},
             status: 'TODO',
@@ -600,6 +615,18 @@ describe('后端训练接口映射', () => {
       moduleCode: 'PURCHASE_APPLY',
       sceneType: 'PRACTICE'
     });
+    expect(dataPrepareApiMock.createRequirement).toHaveBeenCalledWith(
+      expect.objectContaining({ templateId: 'template-active-1' })
+    );
+    const participant =
+      dataPrepareApiMock.prepareAndExecute.mock.calls[0][0].generateRequest
+        .participants[0];
+    expect(participant.questionId.length).toBeLessThanOrEqual(64);
+    expect(participant.questionAttemptId.length).toBeLessThanOrEqual(64);
+    const allocationRequest =
+      dataPrepareApiMock.acquireDataInstance.mock.calls[0][0];
+    expect(allocationRequest.attemptId.length).toBeLessThanOrEqual(64);
+    expect(allocationRequest.questionAttemptId.length).toBeLessThanOrEqual(64);
     expect(dataPrepareApiMock.acquireDataInstance).toHaveBeenCalledWith(
       expect.objectContaining({
         poolId: 'pool-1',

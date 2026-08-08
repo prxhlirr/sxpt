@@ -3,8 +3,16 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import type { BusinessPageSnapshot, CaptureRect } from '../../domain/models';
 import {
   calculateContainedViewport,
-  DEFAULT_RECORDING_VIEWPORT
+  DEFAULT_RECORDING_VIEWPORT,
+  mapRectToContainedViewport,
+  mapRectToFilledViewport,
+  normalizeViewport
 } from '../../utils/viewportScaling';
+import {
+  createBusinessStepPreviewClearMessages,
+  createBusinessStepPreviewMessages,
+  type BusinessStepPreviewLocator
+} from '../../utils/businessStepPreview';
 
 interface BusinessReadyPayload {
   url: string;
@@ -30,6 +38,10 @@ interface TargetPayload {
   rect?: CaptureRect;
   url: string;
   pageTitle: string;
+  viewport?: {
+    width: number;
+    height: number;
+  };
 }
 
 const props = withDefaults(
@@ -68,9 +80,18 @@ const recordingEnabled = ref(false);
 const elementPickRequested = ref(false);
 const containerSize = ref({ width: 0, height: 0 });
 const activeFrameOrigin = ref('');
+const previewRect = ref<CaptureRect>();
+const previewViewport = ref<{ width: number; height: number }>();
 let resizeObserver: ResizeObserver | undefined;
 let lastActionSignature = '';
 let lastActionAt = 0;
+let previewRequestSequence = 0;
+let activePreviewRequest:
+  | {
+      requestId: string;
+      locator: BusinessStepPreviewLocator;
+    }
+  | undefined;
 const frameOrigin = computed(() => {
   try {
     return new URL(frameSrc.value, window.location.href).origin;
@@ -117,6 +138,41 @@ const frameViewportStyle = computed(() => {
     top: `${placement.top}px`,
     transform: `scale(${placement.scale})`,
     transformOrigin: 'top left'
+  };
+});
+const previewRectStyle = computed(() => {
+  if (
+    !previewRect.value ||
+    containerSize.value.width <= 0 ||
+    containerSize.value.height <= 0
+  ) {
+    return undefined;
+  }
+  const viewport = normalizeViewport(
+    previewViewport.value,
+    props.fitMode === 'contain'
+      ? DEFAULT_RECORDING_VIEWPORT
+      : containerSize.value
+  );
+  if (!viewport) return undefined;
+  const mapped =
+    props.fitMode === 'contain'
+      ? mapRectToContainedViewport(
+          previewRect.value,
+          viewport,
+          containerSize.value
+        )
+      : mapRectToFilledViewport(
+          previewRect.value,
+          viewport,
+          containerSize.value
+        );
+  if (mapped.width <= 0 || mapped.height <= 0) return undefined;
+  return {
+    left: `${mapped.left}px`,
+    top: `${mapped.top}px`,
+    width: `${mapped.width}px`,
+    height: `${mapped.height}px`
   };
 });
 
@@ -197,7 +253,36 @@ function handleMessage(event: MessageEvent) {
     return;
   }
   if (message.type === 'SXPT_TARGET_RECT') {
-    emit('target-resolved', message.payload as TargetPayload);
+    const payload = message.payload as TargetPayload;
+    if (activePreviewRequest && payload?.rect) {
+      previewRect.value = payload.rect;
+      previewViewport.value = payload.viewport;
+    }
+    emit('target-resolved', payload);
+    return;
+  }
+  if (message.type === 'TARGET_RESOLUTION_RESULT') {
+    if (
+      !activePreviewRequest ||
+      message.requestId !== activePreviewRequest.requestId
+    ) {
+      return;
+    }
+    if (message.success && message.rect) {
+      previewRect.value = message.rect as CaptureRect;
+      previewViewport.value = message.viewport as
+        | { width: number; height: number }
+        | undefined;
+      emit('target-resolved', {
+        selector: String(
+          message.selector ?? activePreviewRequest.locator.selector
+        ),
+        rect: message.rect as CaptureRect,
+        url: String(message.url ?? activePreviewRequest.locator.url ?? frameSrc.value),
+        pageTitle: props.title,
+        viewport: previewViewport.value
+      });
+    }
     return;
   }
   if (message.type === 'SXPT_ELEMENT_PICKED') {
@@ -271,10 +356,43 @@ function syncFrameControls() {
     post({ type: 'SXPT_SET_STUDENT_MODE', mode: props.studentMode });
   }
   if (elementPickRequested.value) postElementPickState();
+  postActivePreview();
 }
 
-function previewStep(selector: string, url?: string) {
-  post({ type: 'SXPT_PREVIEW_STEP', selector, url });
+function postActivePreview() {
+  if (!activePreviewRequest) return;
+  for (const message of createBusinessStepPreviewMessages(
+    activePreviewRequest.requestId,
+    activePreviewRequest.locator
+  )) {
+    post(message);
+  }
+}
+
+function previewStep(
+  selector: string,
+  url?: string,
+  selectorCandidates?: string[],
+  fallbackRect?: CaptureRect,
+  fallbackViewport?: { width: number; height: number }
+) {
+  previewRequestSequence += 1;
+  activePreviewRequest = {
+    requestId: `step-preview-${Date.now()}-${previewRequestSequence}`,
+    locator: { selector, selectorCandidates, url }
+  };
+  previewRect.value = fallbackRect;
+  previewViewport.value = fallbackViewport;
+  postActivePreview();
+}
+
+function clearStepPreview() {
+  activePreviewRequest = undefined;
+  previewRect.value = undefined;
+  previewViewport.value = undefined;
+  for (const message of createBusinessStepPreviewClearMessages()) {
+    post(message);
+  }
 }
 
 function reload() {
@@ -321,6 +439,7 @@ defineExpose({
   startElementPick,
   cancelElementPick,
   previewStep,
+  clearStepPreview,
   reload
 });
 </script>
@@ -340,6 +459,14 @@ defineExpose({
       :title="title"
       @load="handleLoad"
     />
+    <span
+      v-if="previewRectStyle"
+      class="business-capture-frame__preview-highlight"
+      :style="previewRectStyle"
+      aria-hidden="true"
+    >
+      <b>已绑定元素</b>
+    </span>
     <span v-if="showResolution" class="business-capture-frame__resolution">
       {{ fitMode === 'fill' ? '自适应全屏' : '等比例视口' }}
       {{ Math.round(containerSize.width) }} × {{ Math.round(containerSize.height) }}
@@ -379,5 +506,34 @@ defineExpose({
   font-size: 8px;
   font-weight: 800;
   pointer-events: none;
+}
+
+.business-capture-frame__preview-highlight {
+  position: absolute;
+  z-index: 3;
+  box-sizing: border-box;
+  border: 3px solid #6d5dfc;
+  border-radius: 6px;
+  background: rgb(109 93 252 / 9%);
+  box-shadow:
+    0 0 0 5px rgb(109 93 252 / 18%),
+    0 8px 28px rgb(35 24 118 / 24%);
+  pointer-events: none;
+}
+
+.business-capture-frame__preview-highlight > b {
+  position: absolute;
+  bottom: calc(100% + 5px);
+  left: -3px;
+  max-width: 180px;
+  overflow: hidden;
+  border-radius: 5px;
+  padding: 4px 8px;
+  color: #fff;
+  background: #5948dc;
+  font-size: 11px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

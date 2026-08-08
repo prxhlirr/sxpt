@@ -415,3 +415,46 @@ describe('原平台角色组织字典接口', () => {
     expect(fetchMock.mock.calls[5][0]).toContain('api/v1/connector/origin-orgs/org_001/enable');
   });
 });
+
+describe('教师编排单点启动接口', () => {
+  it('请求后端新建编排数据实例和启动令牌', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        success: true,
+        code: 200,
+        message: 'OK',
+        result: {
+          tenantId: 'tenant-001',
+          launchContextId: 'launch-001',
+          launchToken: 'ctx-token',
+          dataInstanceId: 'instance-001',
+          redirectUrl: 'https://oa.example.com/purchase/apply',
+          launchUrl: 'https://oa.example.com/sso?tenantId=tenant-001'
+        },
+        timestamp: Date.now()
+      })
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await dataPrepareApi.createAuthoringLaunch({
+      lessonId: 'lesson-001',
+      connectorSystemId: 'system-001',
+      businessModuleId: 'module-001'
+    });
+
+    expect(result.dataInstanceId).toBe('instance-001');
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('api/v1/teaching-data/authoring-launches/create'),
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          lessonId: 'lesson-001',
+          connectorSystemId: 'system-001',
+          businessModuleId: 'module-001'
+        })
+      })
+    );
+  });
+});
