@@ -1816,17 +1816,17 @@ function numberValue(event: Event) {
           </div>
           <p v-else>尚未上传教学点附件。</p>
         </section>
-        <div class="visibility-editor">
-          <span>模式可见性 visibility</span>
-          <label v-for="mode in modes" :key="mode.key">
-            <input v-model="stageForm.visibility[mode.key]" type="checkbox" :disabled="configurationLocked" />
-            {{ mode.label }}
-          </label>
-        </div>
-        <label class="checkbox-row">
-          <input v-model="stageForm.required" type="checkbox" :disabled="configurationLocked" />
-          必做教学点
-        </label>
+<!--        <div class="visibility-editor">-->
+<!--          <span>模式可见性 visibility</span>-->
+<!--          <label v-for="mode in modes" :key="mode.key">-->
+<!--            <input v-model="stageForm.visibility[mode.key]" type="checkbox" :disabled="configurationLocked" />-->
+<!--            {{ mode.label }}-->
+<!--          </label>-->
+<!--        </div>-->
+<!--        <label class="checkbox-row">-->
+<!--          <input v-model="stageForm.required" type="checkbox" :disabled="configurationLocked" />-->
+<!--          必做教学点-->
+<!--        </label>-->
         <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveStage">
           保存教学点规则
         </button>
