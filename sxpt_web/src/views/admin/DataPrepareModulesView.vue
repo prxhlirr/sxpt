@@ -12,6 +12,7 @@ import {
   type BusinessModuleProcessStepRequest,
   type BusinessModuleRequest,
   type ConnectorSystem,
+  type DataPrepareMetadata,
   type OriginOrg,
   type OriginOrgRequest,
   type OriginRole,
@@ -27,6 +28,7 @@ const PAGE_SIZE = 10;
 
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
+const metadata = ref<DataPrepareMetadata | null>(null);
 const connectorSystemId = ref('');
 const systemKeyword = ref('');
 const systems = ref<ConnectorSystem[]>([]);
@@ -62,7 +64,7 @@ const moduleForm = reactive<BusinessModuleRequest>({
   needPreData: true,
   defaultInitialStatus: 'DRAFT',
   defaultTargetStatus: 'SUBMITTED',
-  capabilityCodesJson: '["DATA_CREATE","DATA_VALIDATE"]',
+  capabilityCodesJson: '["DATA_CREATE"]',
   defaultTemplateId: '',
   remark: ''
 });
@@ -123,9 +125,9 @@ function getDefaultModuleForm(): BusinessModuleRequest {
     moduleType: 'BUSINESS',
     supportScenes: 'PRACTICE,EXAM',
     needPreData: true,
-    defaultInitialStatus: 'DRAFT',
-    defaultTargetStatus: 'SUBMITTED',
-    capabilityCodesJson: '["DATA_CREATE","DATA_VALIDATE"]',
+    defaultInitialStatus: metadata.value?.moduleDefaults.initialStatus || 'DRAFT',
+    defaultTargetStatus: metadata.value?.moduleDefaults.targetStatus || 'SUBMITTED',
+    capabilityCodesJson: metadata.value?.moduleDefaults.capabilityCodesJson || '["DATA_CREATE"]',
     defaultTemplateId: '',
     remark: '本地联调业务模块，用于老师创建练习或考试数据准备批次'
   };
@@ -201,10 +203,20 @@ watch(connectorSystemId, async () => {
  */
 async function initialize() {
   await run(async () => {
+    await loadMetadata();
     systems.value = await dataPrepareApi.listConnectorSystems(tenantId.value);
     connectorSystemId.value = systems.value[0]?.id || '';
     await loadModules();
   }, '业务模块已加载');
+}
+
+async function loadMetadata() {
+  try {
+    metadata.value = await dataPrepareApi.getDataPrepareMetadata();
+    applyModuleDefaults();
+  } catch {
+    metadata.value = null;
+  }
 }
 
 /**
@@ -522,9 +534,9 @@ function openCreateStepDialog() {
     stepNo: processSteps.value.length + 1,
     stepCode: `STEP_${processSteps.value.length + 1}`,
     stepName: '',
-    stepType: 'BUSINESS',
-    initExternalStatus: selectedModule.value.defaultInitialStatus || 'DRAFT',
-    targetExternalStatus: selectedModule.value.defaultTargetStatus || 'SUBMITTED',
+    stepType: metadata.value?.moduleDefaults.processStepType || 'BUSINESS',
+    initExternalStatus: selectedModule.value.defaultInitialStatus || metadata.value?.moduleDefaults.initialStatus || 'DRAFT',
+    targetExternalStatus: selectedModule.value.defaultTargetStatus || metadata.value?.moduleDefaults.targetStatus || 'SUBMITTED',
     completionRuleJson: '{}',
     remark: ''
   });
@@ -757,11 +769,23 @@ function fillModuleForm(module: BusinessModuleRequest) {
   moduleForm.moduleType = module.moduleType || 'BUSINESS';
   moduleForm.supportScenes = module.supportScenes || 'PRACTICE,EXAM';
   moduleForm.needPreData = Boolean(module.needPreData);
-  moduleForm.defaultInitialStatus = module.defaultInitialStatus || '';
-  moduleForm.defaultTargetStatus = module.defaultTargetStatus || '';
-  moduleForm.capabilityCodesJson = module.capabilityCodesJson || '';
+  moduleForm.defaultInitialStatus = module.defaultInitialStatus || metadata.value?.moduleDefaults.initialStatus || '';
+  moduleForm.defaultTargetStatus = module.defaultTargetStatus || metadata.value?.moduleDefaults.targetStatus || '';
+  moduleForm.capabilityCodesJson = module.capabilityCodesJson || metadata.value?.moduleDefaults.capabilityCodesJson || '';
   moduleForm.defaultTemplateId = module.defaultTemplateId || '';
   moduleForm.remark = module.remark || '';
+}
+
+function applyModuleDefaults() {
+  const defaults = metadata.value?.moduleDefaults;
+  if (!defaults) return;
+  moduleForm.defaultInitialStatus = defaults.initialStatus;
+  moduleForm.defaultTargetStatus = defaults.targetStatus;
+  moduleForm.capabilityCodesJson = defaults.capabilityCodesJson;
+  stepForm.stepCode = defaults.processStepCode;
+  stepForm.stepType = defaults.processStepType;
+  stepForm.initExternalStatus = defaults.initialStatus;
+  stepForm.targetExternalStatus = defaults.targetStatus;
 }
 
 function fillStepForm(step: BusinessModuleProcessStepRequest) {

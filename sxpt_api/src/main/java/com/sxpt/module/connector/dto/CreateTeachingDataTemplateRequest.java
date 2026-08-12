@@ -51,6 +51,9 @@ public class CreateTeachingDataTemplateRequest {
     @Size(max = 128, message = "支持模式长度不能超过 128")
     private String supportMode;
 
+    @Size(max = 32, message = "模板用途长度不能超过 32")
+    private String templateUsage;
+
     @Size(max = 32768, message = "模板配置长度不能超过 32768")
     private String configJson;
 
@@ -132,6 +135,14 @@ public class CreateTeachingDataTemplateRequest {
 
     public void setSupportMode(String supportMode) {
         this.supportMode = supportMode;
+    }
+
+    public String getTemplateUsage() {
+        return templateUsage;
+    }
+
+    public void setTemplateUsage(String templateUsage) {
+        this.templateUsage = templateUsage;
     }
 
     public String getConfigJson() {

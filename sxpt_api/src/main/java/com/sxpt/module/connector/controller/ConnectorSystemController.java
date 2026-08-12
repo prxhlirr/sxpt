@@ -1,11 +1,18 @@
 package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.dto.CreateConnectorSystemRequest;
 import com.sxpt.module.connector.dto.UpdateConnectorSystemRequest;
+import com.sxpt.module.connector.entity.ConnectorExternalCredential;
 import com.sxpt.module.connector.entity.ConnectorSystem;
 import com.sxpt.module.connector.service.ConnectorSystemService;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService.GeneratedCredential;
 import com.sxpt.module.connector.vo.ConnectorSystemVO;
+import com.sxpt.module.connector.vo.ExternalCredentialVO;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -40,8 +47,12 @@ public class ConnectorSystemController {
 
     private final ConnectorSystemService connectorSystemService;
 
-    public ConnectorSystemController(ConnectorSystemService connectorSystemService) {
+    private final ExternalConnectorCredentialService externalConnectorCredentialService;
+
+    public ConnectorSystemController(ConnectorSystemService connectorSystemService,
+                                     ObjectProvider<ExternalConnectorCredentialService> externalConnectorCredentialServiceProvider) {
         this.connectorSystemService = connectorSystemService;
+        this.externalConnectorCredentialService = externalConnectorCredentialServiceProvider.getIfAvailable();
     }
 
     /**
@@ -121,6 +132,45 @@ public class ConnectorSystemController {
     }
 
     /**
+     * 为原平台正式环境生成第三方调用 API Key。
+     *
+     * @param id 原平台正式环境 ID。
+     * @param operator 操作人，可选。
+     * @return 凭证摘要和一次性 API Key 明文。
+     */
+    @PostMapping("/{id}/external-api-key/generate")
+    public ApiResult<ExternalCredentialVO> generateExternalApiKey(@PathVariable String id,
+                                                                  @RequestParam(required = false) String operator) {
+        GeneratedCredential generated = requireExternalConnectorCredentialService().generateApiKey(id, operator);
+        return ApiResult.success(toVO(generated));
+    }
+
+    /**
+     * 查询原平台正式环境已绑定的第三方调用 API Key 摘要。
+     *
+     * @param id 原平台正式环境 ID。
+     * @return 凭证摘要；未生成时返回空。
+     */
+    @GetMapping("/{id}/external-api-key")
+    public ApiResult<ExternalCredentialVO> getExternalApiKey(@PathVariable String id) {
+        ConnectorExternalCredential credential = requireExternalConnectorCredentialService().getApiKeyByConnectorSystemId(id);
+        return ApiResult.success(credential == null ? null : toVO(credential));
+    }
+
+    /**
+     * 禁用第三方调用 API Key。
+     *
+     * @param credentialId 凭证 ID。
+     * @param operator 操作人，可选。
+     * @return 已禁用凭证摘要。
+     */
+    @PostMapping("/external-api-keys/{credentialId}/disable")
+    public ApiResult<ExternalCredentialVO> disableExternalApiKey(@PathVariable String credentialId,
+                                                                 @RequestParam(required = false) String operator) {
+        return ApiResult.success(toVO(requireExternalConnectorCredentialService().disableApiKey(credentialId, operator)));
+    }
+
+    /**
      * 将创建请求转换为数据库实体。
      *
      * @param request 创建原平台配置请求。
@@ -133,6 +183,8 @@ public class ConnectorSystemController {
         connectorSystem.setSystemCode(request.getSystemCode());
         connectorSystem.setSystemName(request.getSystemName());
         connectorSystem.setSystemType(request.getSystemType());
+        connectorSystem.setEnvironmentType(request.getEnvironmentType());
+        connectorSystem.setEnvironmentGroupCode(request.getEnvironmentGroupCode());
         connectorSystem.setBaseUrl(request.getBaseUrl());
         connectorSystem.setAuthType(request.getAuthType());
         connectorSystem.setConfigJson(request.getConfigJson());
@@ -150,6 +202,8 @@ public class ConnectorSystemController {
         connectorSystem.setId(request.getId());
         connectorSystem.setSystemName(request.getSystemName());
         connectorSystem.setSystemType(request.getSystemType());
+        connectorSystem.setEnvironmentType(request.getEnvironmentType());
+        connectorSystem.setEnvironmentGroupCode(request.getEnvironmentGroupCode());
         connectorSystem.setBaseUrl(request.getBaseUrl());
         connectorSystem.setAuthType(request.getAuthType());
         connectorSystem.setConfigJson(request.getConfigJson());
@@ -169,12 +223,42 @@ public class ConnectorSystemController {
         vo.setSystemCode(connectorSystem.getSystemCode());
         vo.setSystemName(connectorSystem.getSystemName());
         vo.setSystemType(connectorSystem.getSystemType());
+        vo.setEnvironmentType(connectorSystem.getEnvironmentType());
+        vo.setEnvironmentGroupCode(connectorSystem.getEnvironmentGroupCode());
         vo.setBaseUrl(connectorSystem.getBaseUrl());
         vo.setAuthType(connectorSystem.getAuthType());
         vo.setStatus(connectorSystem.getStatus());
         vo.setCreateTime(connectorSystem.getCreateTime());
         vo.setUpdateTime(connectorSystem.getUpdateTime());
         return vo;
+    }
+
+    private ExternalCredentialVO toVO(GeneratedCredential generated) {
+        ExternalCredentialVO vo = toVO(generated.getCredential());
+        vo.setApiKey(generated.getApiKey());
+        return vo;
+    }
+
+    private ExternalCredentialVO toVO(ConnectorExternalCredential credential) {
+        ExternalCredentialVO vo = new ExternalCredentialVO();
+        vo.setId(credential.getId());
+        vo.setTenantId(credential.getTenantId());
+        vo.setConnectorSystemId(credential.getConnectorSystemId());
+        vo.setCredentialName(credential.getCredentialName());
+        vo.setApiKeyPrefix(credential.getApiKeyPrefix());
+        vo.setLastUsedTime(credential.getLastUsedTime());
+        vo.setExpireTime(credential.getExpireTime());
+        vo.setStatus(credential.getStatus());
+        vo.setCreateTime(credential.getCreateTime());
+        vo.setUpdateTime(credential.getUpdateTime());
+        return vo;
+    }
+
+    private ExternalConnectorCredentialService requireExternalConnectorCredentialService() {
+        if (externalConnectorCredentialService == null) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
+        }
+        return externalConnectorCredentialService;
     }
 
     /**

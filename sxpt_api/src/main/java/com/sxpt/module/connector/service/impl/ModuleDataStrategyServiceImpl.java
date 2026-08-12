@@ -59,12 +59,6 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
 
     private static final String CAPABILITY_DATA_CREATE = "DATA_CREATE";
 
-    private static final String CAPABILITY_DATA_LOCK = "DATA_LOCK";
-
-    private static final String CAPABILITY_RESULT_CHECK = "RESULT_CHECK";
-
-    private static final String CAPABILITY_DATA_ARCHIVE = "DATA_ARCHIVE";
-
     private static final String LOCAL_DEV_SYSTEM_TYPE = "LOCAL_DEV";
 
     private final ModuleDataStrategyMapper moduleDataStrategyMapper;
@@ -483,10 +477,6 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         if (!StrategySharePolicy.QUESTION_EXCLUSIVE.getValue().equals(strategy.getSharePolicy())) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
-        if (!StrategyLockPolicy.ON_EXAM_START.getValue().equals(strategy.getLockPolicy())) {
-            throw new BusinessException(ApiResultCode.PARAM_ERROR);
-        }
-        requireRuntimeText(strategy.getResultCheckPolicyJson(), "考试策略未配置结果校验策略");
     }
 
     /**
@@ -498,7 +488,7 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
     private void validateStrategyJsonFields(ModuleDataStrategy strategy, boolean requireRuntimeFields) {
         JsonNode defaultOrgRolePolicy = parseJsonObject(strategy.getDefaultOrgRolePolicyJson());
         JsonNode poolSizePolicy = parseJsonObject(strategy.getPoolSizePolicyJson());
-        JsonNode validationPolicy = parseJsonObject(strategy.getValidationPolicyJson());
+        parseJsonObject(strategy.getValidationPolicyJson());
         parseJsonObject(strategy.getExpirePolicyJson());
         parseJsonObject(strategy.getResultCheckPolicyJson());
         parseJsonObject(strategy.getArchivePolicyJson());
@@ -512,8 +502,6 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
         requireJsonObject(defaultOrgRolePolicy, "初始身份策略 JSON 不能为空");
         requireJsonText(defaultOrgRolePolicy, "org", "初始身份策略 JSON 缺少 org");
         requireJsonText(defaultOrgRolePolicy, "role", "初始身份策略 JSON 缺少 role");
-        requireJsonObject(validationPolicy, "初始数据校验策略 JSON 不能为空");
-        requireJsonText(validationPolicy, "requiredStatus", "初始数据校验策略 JSON 缺少 requiredStatus");
     }
 
     /**
@@ -590,15 +578,6 @@ public class ModuleDataStrategyServiceImpl implements ModuleDataStrategyService 
      */
     private void validatePlatformCapabilities(ModuleDataStrategy strategy) {
         requirePlatformCapability(strategy, CAPABILITY_DATA_CREATE);
-        if (!StrategyLockPolicy.NONE.getValue().equals(strategy.getLockPolicy())) {
-            requirePlatformCapability(strategy, CAPABILITY_DATA_LOCK);
-        }
-        if (StringUtils.hasText(strategy.getResultCheckPolicyJson())) {
-            requirePlatformCapability(strategy, CAPABILITY_RESULT_CHECK);
-        }
-        if (StringUtils.hasText(strategy.getArchivePolicyJson())) {
-            requirePlatformCapability(strategy, CAPABILITY_DATA_ARCHIVE);
-        }
     }
 
     /**

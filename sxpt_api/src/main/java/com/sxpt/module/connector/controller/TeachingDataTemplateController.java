@@ -179,6 +179,7 @@ public class TeachingDataTemplateController {
         template.setStrategyId(request.getStrategyId());
         template.setInitState(request.getInitState());
         template.setSupportMode(request.getSupportMode());
+        template.setTemplateUsage(request.getTemplateUsage());
         template.setConfigJson(request.getConfigJson());
         return template;
     }
@@ -200,6 +201,7 @@ public class TeachingDataTemplateController {
         template.setStrategyId(request.getStrategyId());
         template.setInitState(request.getInitState());
         template.setSupportMode(request.getSupportMode());
+        template.setTemplateUsage(request.getTemplateUsage());
         template.setConfigJson(request.getConfigJson());
         template.setDataSchemaJson(request.getDataSchemaJson());
         template.setMockRuleJson(request.getMockRuleJson());
@@ -245,6 +247,7 @@ public class TeachingDataTemplateController {
         vo.setStrategyId(template.getStrategyId());
         vo.setInitState(template.getInitState());
         vo.setSupportMode(template.getSupportMode());
+        vo.setTemplateUsage(template.getTemplateUsage());
         vo.setConfigJson(template.getConfigJson());
         vo.setDataSchemaJson(template.getDataSchemaJson());
         vo.setMockRuleJson(template.getMockRuleJson());

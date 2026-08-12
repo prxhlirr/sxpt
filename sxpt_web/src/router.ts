@@ -173,6 +173,12 @@ export const router = createRouter({
           meta: { title: '策略管理', roles: ['admin', 'teacher'] }
         },
         {
+          path: 'admin/data-prepare/classic-cases',
+          name: 'data-prepare-classic-cases',
+          component: () => import('./views/admin/DataPrepareClassicCasesView.vue'),
+          meta: { title: '经典案例', roles: ['admin', 'teacher'] }
+        },
+        {
           path: 'admin/lessons/:lessonId/publish',
           name: 'publish-center',
           component: () => import('./views/admin/PublishCenterView.vue'),

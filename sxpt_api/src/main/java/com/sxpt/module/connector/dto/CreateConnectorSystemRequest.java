@@ -32,6 +32,12 @@ public class CreateConnectorSystemRequest {
     @Size(max = 64, message = "原平台类型长度不能超过 64")
     private String systemType;
 
+    @Size(max = 32, message = "原平台环境类型长度不能超过 32")
+    private String environmentType;
+
+    @Size(max = 128, message = "原平台环境组编码长度不能超过 128")
+    private String environmentGroupCode;
+
     @NotBlank(message = "原平台基础地址不能为空")
     @Size(max = 512, message = "原平台基础地址长度不能超过 512")
     private String baseUrl;
@@ -73,6 +79,22 @@ public class CreateConnectorSystemRequest {
 
     public void setSystemType(String systemType) {
         this.systemType = systemType;
+    }
+
+    public String getEnvironmentType() {
+        return environmentType;
+    }
+
+    public void setEnvironmentType(String environmentType) {
+        this.environmentType = environmentType;
+    }
+
+    public String getEnvironmentGroupCode() {
+        return environmentGroupCode;
+    }
+
+    public void setEnvironmentGroupCode(String environmentGroupCode) {
+        this.environmentGroupCode = environmentGroupCode;
     }
 
     public String getBaseUrl() {

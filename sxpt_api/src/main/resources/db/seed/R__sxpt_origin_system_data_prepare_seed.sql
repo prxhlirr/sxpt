@@ -31,8 +31,10 @@ INSERT INTO connector_system (
     '采购申请业务系统',
     'LOCAL_DEV',
     'http://127.0.0.1:5174/business-sdk-demo.html',
-    'LAUNCH_TOKEN',
+    'API_KEY',
     $${
+        "apiKey": "sxpt-origin-purchase-api-key",
+        "headerName": "X-API-Key",
         "sourceSystem": "sxpt_origin_system",
         "entryPath": "/business-sdk-demo.html",
         "embeddedMode": "iframe",
@@ -91,7 +93,7 @@ INSERT INTO platform_capability (
         'DATA_VALIDATE',
         '校验采购申请数据可用性',
         'DATA_QUERY',
-        true,
+        false,
         '/origin/openapi/purchase/applications/validate',
         'POST',
         $${
@@ -102,7 +104,7 @@ INSERT INTO platform_capability (
         }$$::jsonb,
         5000,
         '{"maxAttempts":2,"backoffMs":500}'::jsonb,
-        'seed', now(), 'seed', now(), 'ACTIVE', false
+        'seed', now(), 'seed', now(), 'DISABLED', false
     ),
     (
         'cap-sxpt-purchase-data-lock',
@@ -111,14 +113,14 @@ INSERT INTO platform_capability (
         'DATA_LOCK',
         '锁定考试采购申请数据',
         'DATA_LOCK',
-        true,
+        false,
         '/origin/openapi/purchase/applications/lock',
         'POST',
         '{"required":["externalBusinessId","lockReason"]}'::jsonb,
         '{"required":["locked","externalStatus"]}'::jsonb,
         5000,
         '{"maxAttempts":2,"backoffMs":500}'::jsonb,
-        'seed', now(), 'seed', now(), 'ACTIVE', false
+        'seed', now(), 'seed', now(), 'DISABLED', false
     ),
     (
         'cap-sxpt-purchase-result-check',
@@ -127,14 +129,14 @@ INSERT INTO platform_capability (
         'RESULT_CHECK',
         '校验采购申请办理结果',
         'RESULT_CHECK',
-        true,
+        false,
         '/origin/openapi/purchase/applications/result-check',
         'POST',
         '{"required":["externalBusinessId","expectedStatus","expectedActions"]}'::jsonb,
         '{"required":["passed","externalStatus","matchedActions","matchedFields"]}'::jsonb,
         5000,
         '{"maxAttempts":2,"backoffMs":500}'::jsonb,
-        'seed', now(), 'seed', now(), 'ACTIVE', false
+        'seed', now(), 'seed', now(), 'DISABLED', false
     )
 ON CONFLICT (tenant_id, connector_system_id, capability_code) WHERE deleted = false
 DO UPDATE SET
@@ -149,7 +151,7 @@ DO UPDATE SET
     retry_policy_json = EXCLUDED.retry_policy_json,
     update_by = 'seed',
     update_time = now(),
-    status = 'ACTIVE';
+    status = EXCLUDED.status;
 
 INSERT INTO business_module (
     id, tenant_id, connector_system_id, module_code, module_name, external_module_id,
@@ -169,7 +171,7 @@ INSERT INTO business_module (
     true,
     'DRAFT',
     'APPROVED',
-    '["DATA_CREATE","DATA_VALIDATE","DATA_LOCK","RESULT_CHECK"]'::jsonb,
+    '["DATA_CREATE"]'::jsonb,
     'tdt-sxpt-purchase-practice-v1',
     '来自 sxpt_origin_system 的采购申请模块，页面包含供应商、采购品类、申请金额、期望到货日期和申请原因。',
     0,

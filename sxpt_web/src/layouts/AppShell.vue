@@ -103,7 +103,8 @@ function buildStaticNavigation(): NavigationItem[] {
     return [
       { label: '教学工作台', to: '/teacher/dashboard' },
       { label: '评阅反馈', to: '/teacher/review' },
-      { label: '批次准备', to: '/teacher/data-prepare', group: 'data-prepare' }
+      { label: '经典案例', to: '/admin/data-prepare/classic-cases' },
+      { label: '批次准备', to: '/admin/data-prepare', group: 'data-prepare' }
     ];
   }
   if (store.state.currentRole === 'student') {
@@ -124,6 +125,7 @@ function buildStaticNavigation(): NavigationItem[] {
     { label: '角色权限', to: '/admin/basic/role-permissions', group: 'basic-config' },
     { label: '字典配置', to: '/admin/basic/dict-items', group: 'basic-config' },
     { label: '教案管理', to: '/admin/lessons' },
+    { label: '经典案例', to: '/admin/data-prepare/classic-cases' },
     { label: '平台接入', to: '/admin/data-prepare/systems', group: 'data-prepare' },
     { label: '业务模块', to: '/admin/data-prepare/modules', group: 'data-prepare' },
     { label: '模板管理', to: '/admin/data-prepare/templates', group: 'data-prepare' },
@@ -159,6 +161,7 @@ function buildRuntimeNavigation(menus: SysMenuConfig[]): NavigationItem[] {
 
 function resolveNavigationGroup(routePath?: string): NavigationItem['group'] {
   if (routePath?.startsWith('/admin/basic/')) return 'basic-config';
+  if (routePath === '/admin/data-prepare/classic-cases') return undefined;
   if (routePath?.includes('/data-prepare')) return 'data-prepare';
   return undefined;
 }

@@ -7,15 +7,22 @@ import {
   isDataPrepareConfigIncompleteError,
   type BusinessModule,
   type ConnectorSystem,
+  type DataPrepareMetadata,
   type TeachingDataTemplate,
   type TeachingDataTemplateRequest
 } from '../../services/trainingApi';
 
 const PAGE_SIZE = 10;
+const TEMPLATE_USAGE_OPTIONS = [
+  { code: 'NORMAL', label: '普通造数模板' },
+  { code: 'CLASSIC_CASE_REPLAY', label: '经典案例还原模板' },
+  { code: 'CLASSIC_CASE_DEMO', label: '经典案例 demo 模板' }
+];
 
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
 const operatorId = session?.user.userId || 'admin';
+const metadata = ref<DataPrepareMetadata | null>(null);
 const connectorSystemId = ref('');
 const systemKeyword = ref('');
 const businessModuleId = ref('');
@@ -42,6 +49,7 @@ const templateForm = reactive<TeachingDataTemplateRequest>({
   strategyId: '',
   initState: 'DRAFT',
   supportMode: 'PRACTICE',
+  templateUsage: 'NORMAL',
   configJson: '{"adapter":"local","mode":"demo"}',
   dataSchemaJson: '',
   mockRuleJson: '',
@@ -69,8 +77,9 @@ function getDefaultTemplateForm(): TeachingDataTemplateRequest {
     moduleCode: selectedModule.value?.moduleCode || '',
     teachingPointId: '',
     strategyId: '',
-    initState: 'DRAFT',
-    supportMode: sceneType.value,
+    initState: metadata.value?.templateDefaults.initState || 'DRAFT',
+    supportMode: metadata.value?.templateDefaults.supportMode || sceneType.value,
+    templateUsage: 'NORMAL',
     configJson: '{"adapter":"local","mode":"demo"}',
     dataSchemaJson: '',
     mockRuleJson: '',
@@ -101,6 +110,14 @@ const pagedTemplates = computed(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE;
   return templates.value.slice(start, start + PAGE_SIZE);
 });
+const visibleSceneTypes = computed(() =>
+  (metadata.value?.sceneTypes ?? [
+    { code: 'RECORD', label: '备课', visible: true },
+    { code: 'LEARN', label: '学习', visible: true },
+    { code: 'PRACTICE', label: '练习', visible: true },
+    { code: 'EXAM', label: '考试', visible: true }
+  ]).filter((item) => item.visible)
+);
 const templateEnableChecklist = computed(() => {
   const config = parseJsonObject(templateForm.configJson);
   const orgRole = parseJsonObject(templateForm.requiredOrgRoleJson);
@@ -151,11 +168,23 @@ watch([businessModuleId, sceneType], async () => {
  */
 async function initialize() {
   await run(async () => {
+    await loadMetadata();
     systems.value = await dataPrepareApi.listConnectorSystems(tenantId.value);
     connectorSystemId.value = systems.value[0]?.id || '';
     await loadModules();
     await loadTemplates();
   }, '模板列表已加载');
+}
+
+async function loadMetadata() {
+  try {
+    metadata.value = await dataPrepareApi.getDataPrepareMetadata();
+    sceneType.value = metadata.value.templateDefaults.sceneType || sceneType.value;
+    templateJsonBuilder.requiredStatus = metadata.value.templateDefaults.requiredStatus;
+    fillTemplateForm(getDefaultTemplateForm());
+  } catch {
+    metadata.value = null;
+  }
 }
 
 /**
@@ -222,6 +251,7 @@ async function createLocalTemplate() {
       strategyId: templateForm.strategyId?.trim(),
       initState: templateForm.initState?.trim(),
       supportMode: templateForm.supportMode?.trim(),
+      templateUsage: templateForm.templateUsage?.trim() || 'NORMAL',
       configJson: templateForm.configJson?.trim()
     });
     templates.value = [created, ...templates.value];
@@ -342,6 +372,7 @@ function fillTemplateForm(template: TeachingDataTemplate | TeachingDataTemplateR
   templateForm.strategyId = template.strategyId || '';
   templateForm.initState = template.initState || '';
   templateForm.supportMode = template.supportMode || '';
+  templateForm.templateUsage = template.templateUsage || 'NORMAL';
   templateForm.configJson = template.configJson || '';
   templateForm.dataSchemaJson = template.dataSchemaJson || '';
   templateForm.mockRuleJson = template.mockRuleJson || '';
@@ -368,7 +399,7 @@ function applyTemplateJsonBuilder() {
     role: templateJsonBuilder.requiredRole
   });
   templateForm.resultCheckSchemaJson = stringifyJson({
-    requiredStatus: templateJsonBuilder.requiredStatus.trim() || 'DRAFT'
+    requiredStatus: templateJsonBuilder.requiredStatus.trim() || metadata.value?.templateDefaults.requiredStatus || 'DRAFT'
   });
   templateForm.sensitiveFieldPolicyJson = stringifyJson({
     maskFields: splitCsv(templateJsonBuilder.sensitiveFields)
@@ -408,6 +439,7 @@ function buildTemplateUpdateRequest(): TeachingDataTemplateRequest {
     strategyId: templateForm.strategyId?.trim(),
     initState: templateForm.initState?.trim(),
     supportMode: templateForm.supportMode?.trim(),
+    templateUsage: templateForm.templateUsage?.trim() || 'NORMAL',
     configJson: templateForm.configJson?.trim(),
     dataSchemaJson: templateForm.dataSchemaJson?.trim(),
     mockRuleJson: templateForm.mockRuleJson?.trim(),
@@ -501,13 +533,11 @@ function splitCsv(value: string) {
 }
 
 function sceneText(value: string) {
-  const map: Record<string, string> = {
-    RECORD: '备课',
-    LEARN: '学习',
-    PRACTICE: '练习',
-    EXAM: '考试'
-  };
-  return map[value] || value;
+  return visibleSceneTypes.value.find((item) => item.code === value)?.label || value;
+}
+
+function templateUsageText(value?: string) {
+  return TEMPLATE_USAGE_OPTIONS.find((item) => item.code === value)?.label || value || '普通造数模板';
 }
 
 function statusClass(status?: string) {
@@ -566,10 +596,9 @@ function statusClass(status?: string) {
       <label>
         <span>教学场景</span>
         <select v-model="sceneType">
-          <option value="RECORD">备课</option>
-          <option value="LEARN">学习</option>
-          <option value="PRACTICE">练习</option>
-          <option value="EXAM">考试</option>
+          <option v-for="scene in visibleSceneTypes" :key="scene.code" :value="scene.code">
+            {{ scene.label }}
+          </option>
         </select>
       </label>
     </section>
@@ -605,6 +634,7 @@ function statusClass(status?: string) {
               <th>初始状态</th>
               <th>支持模式</th>
               <th>状态</th>
+              <th>模板用途</th>
               <th>操作</th>
             </tr>
           </thead>
@@ -621,6 +651,7 @@ function statusClass(status?: string) {
                   {{ template.status || '未设置' }}
                 </span>
               </td>
+              <td>{{ templateUsageText(template.templateUsage) }}</td>
               <td>
                 <div class="row-actions">
                   <button type="button" @click="showTemplateDetail(template)">详情</button>
@@ -661,6 +692,7 @@ function statusClass(status?: string) {
           <span>模板编码</span><strong>{{ selectedTemplate.templateCode }}</strong>
           <span>模块编码</span><strong>{{ selectedTemplate.moduleCode || '-' }}</strong>
           <span>场景</span><strong>{{ sceneText(selectedTemplate.sceneType) }}</strong>
+          <span>模板用途</span><strong>{{ templateUsageText(selectedTemplate.templateUsage) }}</strong>
           <span>初始状态</span><strong>{{ selectedTemplate.initState || '-' }}</strong>
           <span>支持模式</span><strong>{{ selectedTemplate.supportMode || '-' }}</strong>
           <span>只读模板</span><strong>{{ selectedTemplate.readonlyFlag ? '是' : '否' }}</strong>
@@ -714,10 +746,21 @@ function statusClass(status?: string) {
           <label>
             <span>教学场景</span>
             <select v-model="templateForm.sceneType">
-              <option value="RECORD">备课</option>
-              <option value="LEARN">学习</option>
-              <option value="PRACTICE">练习</option>
-              <option value="EXAM">考试</option>
+              <option v-for="scene in visibleSceneTypes" :key="scene.code" :value="scene.code">
+                {{ scene.label }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>模板用途</span>
+            <select v-model="templateForm.templateUsage">
+              <option
+                v-for="usage in TEMPLATE_USAGE_OPTIONS"
+                :key="usage.code"
+                :value="usage.code"
+              >
+                {{ usage.label }}
+              </option>
             </select>
           </label>
           <label>

@@ -7,6 +7,7 @@ import {
   isDataPrepareConfigIncompleteError,
   type BusinessModule,
   type ConnectorSystem,
+  type DataPrepareMetadata,
   type ModuleDataStrategy,
   type ModuleDataStrategyRequest,
   type TeachingDataTemplate
@@ -17,6 +18,7 @@ const PAGE_SIZE = 10;
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
 const operatorId = session?.user.userId || 'admin';
+const metadata = ref<DataPrepareMetadata | null>(null);
 const connectorSystemId = ref('');
 const systemKeyword = ref('');
 const businessModuleId = ref('');
@@ -41,7 +43,7 @@ const strategyForm = reactive<ModuleDataStrategyRequest>({
   moduleName: '',
   templateId: '',
   needPreData: true,
-  dataSourceStrategy: 'CREATE',
+  dataSourceStrategy: 'MOCK_GENERATE',
   initExternalStatus: 'DRAFT',
   targetExternalStatus: 'SUBMITTED',
   defaultOrgRolePolicyJson: '{"org":"required","role":"required"}',
@@ -73,16 +75,16 @@ function getDefaultStrategyForm(): ModuleDataStrategyRequest {
     moduleName: selectedModule.value?.moduleName || '',
     templateId: templateId.value,
     needPreData: true,
-    dataSourceStrategy: 'CREATE',
-    initExternalStatus: 'DRAFT',
-    targetExternalStatus: 'SUBMITTED',
+    dataSourceStrategy: metadata.value?.strategyDefaults.dataSourceStrategy || 'MOCK_GENERATE',
+    initExternalStatus: metadata.value?.strategyDefaults.initExternalStatus || 'DRAFT',
+    targetExternalStatus: metadata.value?.strategyDefaults.targetExternalStatus || 'SUBMITTED',
     defaultOrgRolePolicyJson: '{"org":"required","role":"required"}',
-    sharePolicy: 'ATTEMPT_EXCLUSIVE',
-    regeneratePolicy: 'ON_ATTEMPT',
-    lockPolicy: 'NONE',
-    prepareTiming: 'ON_DEMAND',
+    sharePolicy: metadata.value?.strategyDefaults.sharePolicy || 'ATTEMPT_EXCLUSIVE',
+    regeneratePolicy: metadata.value?.strategyDefaults.regeneratePolicy || 'ON_ATTEMPT',
+    lockPolicy: metadata.value?.strategyDefaults.lockPolicy || 'NONE',
+    prepareTiming: metadata.value?.strategyDefaults.prepareTiming || 'ON_DEMAND',
     poolSizePolicyJson: '',
-    validationPolicyJson: '{"requiredStatus":"DRAFT"}',
+    validationPolicyJson: metadata.value?.strategyDefaults.validationPolicyJson || '{"requiredStatus":"DRAFT"}',
     expirePolicyJson: '',
     resultCheckPolicyJson: '',
     archivePolicyJson: '',
@@ -113,6 +115,34 @@ const pagedStrategies = computed(() => {
   const start = (currentPage.value - 1) * PAGE_SIZE;
   return strategies.value.slice(start, start + PAGE_SIZE);
 });
+const visibleSceneTypes = computed(() =>
+  (metadata.value?.sceneTypes ?? [
+    { code: 'RECORD', label: '备课', visible: true },
+    { code: 'LEARN', label: '学习', visible: true },
+    { code: 'PRACTICE', label: '练习', visible: true },
+    { code: 'EXAM', label: '考试', visible: true }
+  ]).filter((item) => item.visible)
+);
+const visibleDataSourceStrategies = computed(() =>
+  (metadata.value?.dataSourceStrategies ?? [{ code: 'MOCK_GENERATE', label: '本系统生成', visible: true }])
+    .filter((item) => item.visible)
+);
+const visiblePrepareTimings = computed(() =>
+  (metadata.value?.prepareTimings ?? [{ code: 'ON_DEMAND', label: '按需准备', visible: true }])
+    .filter((item) => item.visible)
+);
+const visibleSharePolicies = computed(() =>
+  (metadata.value?.sharePolicies ?? [{ code: 'ATTEMPT_EXCLUSIVE', label: '练习独占', visible: true }])
+    .filter((item) => item.visible)
+);
+const visibleRegeneratePolicies = computed(() =>
+  (metadata.value?.regeneratePolicies ?? [{ code: 'ON_ATTEMPT', label: '每次练习重建', visible: true }])
+    .filter((item) => item.visible)
+);
+const visibleLockPolicies = computed(() =>
+  (metadata.value?.lockPolicies ?? [{ code: 'NONE', label: '不锁定', visible: true }])
+    .filter((item) => item.visible)
+);
 const strategyEnableChecklist = computed(() => {
   const orgRole = parseJsonObject(strategyForm.defaultOrgRolePolicyJson);
   const validation = parseJsonObject(strategyForm.validationPolicyJson);
@@ -172,12 +202,26 @@ watch([businessModuleId, sceneType], async () => {
  */
 async function initialize() {
   await run(async () => {
+    await loadMetadata();
     systems.value = await dataPrepareApi.listConnectorSystems(tenantId.value);
     connectorSystemId.value = systems.value[0]?.id || '';
     await loadModules();
     await loadTemplates();
     await loadStrategies();
   }, '策略列表已加载');
+}
+
+async function loadMetadata() {
+  try {
+    metadata.value = await dataPrepareApi.getDataPrepareMetadata();
+    sceneType.value = metadata.value.strategyDefaults.sceneType || sceneType.value;
+    const validation = parseJsonObject(metadata.value.strategyDefaults.validationPolicyJson);
+    strategyJsonBuilder.requiredStatus =
+      String(validation.requiredStatus || strategyJsonBuilder.requiredStatus);
+    fillStrategyForm(getDefaultStrategyForm());
+  } catch {
+    metadata.value = null;
+  }
 }
 
 /**
@@ -369,14 +413,14 @@ function fillStrategyForm(strategy: ModuleDataStrategy | ModuleDataStrategyReque
   strategyForm.moduleName = strategy.moduleName || '';
   strategyForm.templateId = strategy.templateId || '';
   strategyForm.needPreData = strategy.needPreData ?? true;
-  strategyForm.dataSourceStrategy = strategy.dataSourceStrategy || 'CREATE';
-  strategyForm.initExternalStatus = strategy.initExternalStatus || '';
-  strategyForm.targetExternalStatus = strategy.targetExternalStatus || '';
+  strategyForm.dataSourceStrategy = strategy.dataSourceStrategy || metadata.value?.strategyDefaults.dataSourceStrategy || 'MOCK_GENERATE';
+  strategyForm.initExternalStatus = strategy.initExternalStatus || metadata.value?.strategyDefaults.initExternalStatus || '';
+  strategyForm.targetExternalStatus = strategy.targetExternalStatus || metadata.value?.strategyDefaults.targetExternalStatus || '';
   strategyForm.defaultOrgRolePolicyJson = strategy.defaultOrgRolePolicyJson || '';
-  strategyForm.sharePolicy = strategy.sharePolicy || 'ATTEMPT_EXCLUSIVE';
-  strategyForm.regeneratePolicy = strategy.regeneratePolicy || 'ON_ATTEMPT';
-  strategyForm.lockPolicy = strategy.lockPolicy || 'NONE';
-  strategyForm.prepareTiming = strategy.prepareTiming || 'ON_DEMAND';
+  strategyForm.sharePolicy = strategy.sharePolicy || metadata.value?.strategyDefaults.sharePolicy || 'ATTEMPT_EXCLUSIVE';
+  strategyForm.regeneratePolicy = strategy.regeneratePolicy || metadata.value?.strategyDefaults.regeneratePolicy || 'ON_ATTEMPT';
+  strategyForm.lockPolicy = strategy.lockPolicy || metadata.value?.strategyDefaults.lockPolicy || 'NONE';
+  strategyForm.prepareTiming = strategy.prepareTiming || metadata.value?.strategyDefaults.prepareTiming || 'ON_DEMAND';
   strategyForm.poolSizePolicyJson = strategy.poolSizePolicyJson || '';
   strategyForm.validationPolicyJson = strategy.validationPolicyJson || '';
   strategyForm.expirePolicyJson = strategy.expirePolicyJson || '';
@@ -400,7 +444,7 @@ function applyStrategyJsonBuilder() {
     maxReadyCount: Number(strategyJsonBuilder.maxReadyCount) || 50
   });
   strategyForm.validationPolicyJson = stringifyJson({
-    requiredStatus: strategyJsonBuilder.requiredStatus.trim() || 'DRAFT'
+    requiredStatus: strategyJsonBuilder.requiredStatus.trim() || metadata.value?.strategyDefaults.initExternalStatus || 'DRAFT'
   });
   strategyForm.expirePolicyJson = stringifyJson({
     expireHours: Number(strategyJsonBuilder.expireHours) || 24
@@ -535,13 +579,7 @@ function numberValue(value: unknown, fallback: number) {
 }
 
 function sceneText(value: string) {
-  const map: Record<string, string> = {
-    RECORD: '备课',
-    LEARN: '学习',
-    PRACTICE: '练习',
-    EXAM: '考试'
-  };
-  return map[value] || value;
+  return visibleSceneTypes.value.find((item) => item.code === value)?.label || value;
 }
 
 function statusClass(status?: string) {
@@ -600,10 +638,9 @@ function statusClass(status?: string) {
       <label>
         <span>教学场景</span>
         <select v-model="sceneType">
-          <option value="RECORD">备课</option>
-          <option value="LEARN">学习</option>
-          <option value="PRACTICE">练习</option>
-          <option value="EXAM">考试</option>
+          <option v-for="scene in visibleSceneTypes" :key="scene.code" :value="scene.code">
+            {{ scene.label }}
+          </option>
         </select>
       </label>
       <label>
@@ -754,10 +791,9 @@ function statusClass(status?: string) {
           <label v-if="dialogMode === 'create'">
             <span>教学场景</span>
             <select v-model="sceneType">
-              <option value="RECORD">备课</option>
-              <option value="LEARN">学习</option>
-              <option value="PRACTICE">练习</option>
-              <option value="EXAM">考试</option>
+              <option v-for="scene in visibleSceneTypes" :key="scene.code" :value="scene.code">
+                {{ scene.label }}
+              </option>
             </select>
           </label>
           <label>
@@ -789,9 +825,13 @@ function statusClass(status?: string) {
           <label>
             <span>数据来源</span>
             <select v-model="strategyForm.dataSourceStrategy">
-              <option value="CREATE">CREATE</option>
-              <option value="MOCK_GENERATE">MOCK_GENERATE</option>
-              <option value="QUERY_EXISTING">QUERY_EXISTING</option>
+              <option
+                v-for="strategy in visibleDataSourceStrategies"
+                :key="strategy.code"
+                :value="strategy.code"
+              >
+                {{ strategy.code }}
+              </option>
             </select>
           </label>
           <label>
@@ -805,34 +845,33 @@ function statusClass(status?: string) {
           <label>
             <span>分配策略</span>
             <select v-model="strategyForm.sharePolicy">
-              <option value="ATTEMPT_EXCLUSIVE">ATTEMPT_EXCLUSIVE</option>
-              <option value="QUESTION_EXCLUSIVE">QUESTION_EXCLUSIVE</option>
-              <option value="STUDENT_EXCLUSIVE">STUDENT_EXCLUSIVE</option>
-              <option value="SHARED_READONLY">SHARED_READONLY</option>
+              <option v-for="policy in visibleSharePolicies" :key="policy.code" :value="policy.code">
+                {{ policy.code }}
+              </option>
             </select>
           </label>
           <label>
             <span>重练策略</span>
             <select v-model="strategyForm.regeneratePolicy">
-              <option value="ON_ATTEMPT">ON_ATTEMPT</option>
-              <option value="ON_FAILURE">ON_FAILURE</option>
-              <option value="NEVER">NEVER</option>
+              <option v-for="policy in visibleRegeneratePolicies" :key="policy.code" :value="policy.code">
+                {{ policy.code }}
+              </option>
             </select>
           </label>
           <label>
             <span>锁定策略</span>
             <select v-model="strategyForm.lockPolicy">
-              <option value="NONE">NONE</option>
-              <option value="ON_ALLOCATE">ON_ALLOCATE</option>
-              <option value="ON_EXAM_START">ON_EXAM_START</option>
+              <option v-for="policy in visibleLockPolicies" :key="policy.code" :value="policy.code">
+                {{ policy.code }}
+              </option>
             </select>
           </label>
           <label>
             <span>准备时机</span>
             <select v-model="strategyForm.prepareTiming">
-              <option value="ON_DEMAND">ON_DEMAND</option>
-              <option value="ON_PUBLISH">ON_PUBLISH</option>
-              <option value="BEFORE_START">BEFORE_START</option>
+              <option v-for="timing in visiblePrepareTimings" :key="timing.code" :value="timing.code">
+                {{ timing.code }}
+              </option>
             </select>
           </label>
           <label class="check-line">

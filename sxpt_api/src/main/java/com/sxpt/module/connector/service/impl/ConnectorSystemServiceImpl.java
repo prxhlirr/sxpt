@@ -1,6 +1,9 @@
 package com.sxpt.module.connector.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.ConnectorSystem;
@@ -16,6 +19,7 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 /**
@@ -34,10 +38,20 @@ import java.util.UUID;
 @Profile("!test")
 public class ConnectorSystemServiceImpl implements ConnectorSystemService {
 
+    private static final ObjectMapper JSON_MAPPER = new ObjectMapper();
+
     private static final String LOCAL_DEV_SYSTEM_TYPE = "LOCAL_DEV";
 
+    private static final String AUTH_TYPE_API_KEY = "API_KEY";
+
+    private static final String CONFIG_API_KEY_FIELD = "apiKey";
+
+    private static final String ENVIRONMENT_TYPE_PROD = "PROD";
+
+    private static final String ENVIRONMENT_TYPE_LEARNING = "LEARNING";
+
     private static final String[] LOCAL_CAPABILITY_CODES = {
-            "DATA_CREATE", "DATA_QUERY", "DATA_VALIDATE", "DATA_LOCK", "DATA_ARCHIVE", "RESULT_CHECK"
+            "DATA_CREATE"
     };
 
     private final ConnectorSystemMapper connectorSystemMapper;
@@ -60,6 +74,8 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
     @Transactional(rollbackFor = Exception.class)
     public ConnectorSystem createConnectorSystem(ConnectorSystem connectorSystem) {
         validateRequiredFields(connectorSystem);
+        normalizeAndValidateAuthConfig(connectorSystem);
+        normalizeAndValidateEnvironment(connectorSystem);
         fillCreateDefaults(connectorSystem);
         connectorSystemMapper.insert(connectorSystem);
         createLocalCapabilitiesIfNeeded(connectorSystem);
@@ -77,10 +93,23 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
     public ConnectorSystem updateConnectorSystem(ConnectorSystem connectorSystem) {
         validateUpdateFields(connectorSystem);
         ConnectorSystem existing = getConnectorSystemById(connectorSystem.getId());
+        ConnectorSystem authCandidate = new ConnectorSystem();
+        authCandidate.setAuthType(connectorSystem.getAuthType());
+        authCandidate.setConfigJson(connectorSystem.getConfigJson() == null
+                ? existing.getConfigJson()
+                : connectorSystem.getConfigJson());
+        normalizeAndValidateAuthConfig(authCandidate);
         existing.setSystemName(connectorSystem.getSystemName());
         existing.setSystemType(connectorSystem.getSystemType());
+        if (connectorSystem.getEnvironmentType() != null) {
+            existing.setEnvironmentType(connectorSystem.getEnvironmentType());
+        }
+        if (connectorSystem.getEnvironmentGroupCode() != null) {
+            existing.setEnvironmentGroupCode(connectorSystem.getEnvironmentGroupCode());
+        }
+        normalizeAndValidateEnvironment(existing);
         existing.setBaseUrl(connectorSystem.getBaseUrl());
-        existing.setAuthType(connectorSystem.getAuthType());
+        existing.setAuthType(authCandidate.getAuthType());
         if (connectorSystem.getConfigJson() != null) {
             existing.setConfigJson(connectorSystem.getConfigJson());
         }
@@ -204,6 +233,67 @@ public class ConnectorSystemServiceImpl implements ConnectorSystemService {
      */
     private void requireText(String value) {
         if (!StringUtils.hasText(value)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 校验原平台首期只允许 API_KEY 认证，并确保 HTTP 适配器运行时能拿到真实密钥。
+     *
+     * @param connectorSystem 原平台配置实体。
+     */
+    private void normalizeAndValidateAuthConfig(ConnectorSystem connectorSystem) {
+        String authType = connectorSystem.getAuthType().trim().toUpperCase(Locale.ROOT);
+        if (!AUTH_TYPE_API_KEY.equals(authType)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        connectorSystem.setAuthType(authType);
+        JsonNode config = parseConfigJson(connectorSystem.getConfigJson());
+        JsonNode apiKeyNode = config.get(CONFIG_API_KEY_FIELD);
+        if (apiKeyNode == null || !StringUtils.hasText(apiKeyNode.asText())) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+    }
+
+    /**
+     * 规范化原平台环境字段；经典案例依赖 PROD/LEARNING 和环境组建立正式环境到学习环境的安全映射。
+     *
+     * @param connectorSystem 原平台配置实体。
+     */
+    private void normalizeAndValidateEnvironment(ConnectorSystem connectorSystem) {
+        if (StringUtils.hasText(connectorSystem.getEnvironmentType())) {
+            String environmentType = connectorSystem.getEnvironmentType().trim().toUpperCase(Locale.ROOT);
+            if (!ENVIRONMENT_TYPE_PROD.equals(environmentType) && !ENVIRONMENT_TYPE_LEARNING.equals(environmentType)) {
+                throw new BusinessException(ApiResultCode.PARAM_ERROR);
+            }
+            connectorSystem.setEnvironmentType(environmentType);
+        } else {
+            connectorSystem.setEnvironmentType(null);
+        }
+        if (StringUtils.hasText(connectorSystem.getEnvironmentGroupCode())) {
+            connectorSystem.setEnvironmentGroupCode(connectorSystem.getEnvironmentGroupCode().trim());
+        } else {
+            connectorSystem.setEnvironmentGroupCode(null);
+        }
+    }
+
+    /**
+     * 解析认证配置 JSON；认证配置是调用原平台的运行时凭据，必须保持对象结构便于后续扩展 headerName 等参数。
+     *
+     * @param configJson 认证配置 JSON 文本。
+     * @return JSON 对象节点。
+     */
+    private JsonNode parseConfigJson(String configJson) {
+        if (!StringUtils.hasText(configJson)) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        try {
+            JsonNode node = JSON_MAPPER.readTree(configJson);
+            if (node == null || !node.isObject()) {
+                throw new BusinessException(ApiResultCode.PARAM_ERROR);
+            }
+            return node;
+        } catch (JsonProcessingException ex) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
     }

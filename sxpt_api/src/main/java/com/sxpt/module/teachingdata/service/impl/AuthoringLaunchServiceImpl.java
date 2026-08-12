@@ -102,6 +102,7 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
                 buildRequirement(request, user, system, module, strategy, template, uniqueId));
         DataPrepareFacadeService.PrepareAndExecuteRequest prepareRequest = buildPrepareRequest(
                 requirement, requestBatchId, user, template, strategy, actor);
+        System.out.println("Prepare Request JSON: " + prepareRequest.getRequestJson());
         DataPrepareJob job = dataPrepareFacadeService.prepareAndExecute(prepareRequest);
         TeachingDataInstance instance = requirePreparedInstance(job, requestBatchId, user);
         PlatformLaunchContextService.CreatedLaunchContext created = platformLaunchContextService.createLaunchContext(

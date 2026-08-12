@@ -37,6 +37,8 @@ public class TeachingDataTemplateVO {
 
     private String supportMode;
 
+    private String templateUsage;
+
     private String configJson;
 
     private String dataSchemaJson;
@@ -145,6 +147,14 @@ public class TeachingDataTemplateVO {
 
     public void setSupportMode(String supportMode) {
         this.supportMode = supportMode;
+    }
+
+    public String getTemplateUsage() {
+        return templateUsage;
+    }
+
+    public void setTemplateUsage(String templateUsage) {
+        this.templateUsage = templateUsage;
     }
 
     public String getConfigJson() {

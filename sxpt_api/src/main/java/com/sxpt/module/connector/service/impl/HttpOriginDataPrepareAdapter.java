@@ -278,6 +278,9 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                         "原平台 API_KEY 认证缺少 apiKey");
             }
             headers.set(headerName, apiKey);
+        } else {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "原平台认证方式仅支持 API_KEY");
         }
         if (request != null) {
             requireText(request.getIdempotencyKey());

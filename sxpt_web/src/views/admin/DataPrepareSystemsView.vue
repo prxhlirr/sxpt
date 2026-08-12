@@ -6,12 +6,16 @@ import {
   dataPrepareApi,
   type ConnectorSystem,
   type CreateConnectorSystemRequest,
+  type DataPrepareMetadata,
+  type ExternalCredential,
   type PlatformCapability,
   type PlatformCapabilityRequest,
   type UpdateConnectorSystemRequest
 } from '../../services/trainingApi';
 
 type ConnectorSystemForm = Omit<CreateConnectorSystemRequest, 'tenantId' | 'configJson'> & {
+  environmentType: string;
+  environmentGroupCode: string;
   configJson: string;
 };
 
@@ -19,16 +23,18 @@ type PlatformDialogMode = 'none' | 'create' | 'detail' | 'edit';
 type CapabilityDialogMode = 'none' | 'list' | 'create' | 'edit';
 
 const PAGE_SIZE = 10;
-const CAPABILITY_PRESETS = ['DATA_CREATE', 'DATA_VALIDATE', 'DATA_LOCK', 'RESULT_CHECK', 'DATA_ARCHIVE'];
 
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
+const metadata = ref<DataPrepareMetadata | null>(null);
 const systems = ref<ConnectorSystem[]>([]);
 const loading = ref(false);
 const systemKeyword = ref('');
 const currentPage = ref(1);
 const dialogMode = ref<PlatformDialogMode>('none');
 const selectedSystem = ref<ConnectorSystem | null>(null);
+const selectedExternalCredential = ref<ExternalCredential | null>(null);
+const generatedExternalApiKey = ref('');
 const capabilityDialogMode = ref<CapabilityDialogMode>('none');
 const capabilitySystem = ref<ConnectorSystem | null>(null);
 const selectedCapability = ref<PlatformCapability | null>(null);
@@ -43,9 +49,11 @@ const form = reactive<ConnectorSystemForm>({
   systemName: '',
   systemCode: '',
   systemType: 'LOCAL_DEV',
+  environmentType: '',
+  environmentGroupCode: '',
   baseUrl: '',
-  authType: 'NONE',
-  configJson: ''
+  authType: 'API_KEY',
+  configJson: '{\n  "apiKey": "",\n  "headerName": "X-API-Key"\n}'
 });
 
 const capabilityForm = reactive<PlatformCapabilityRequest>({
@@ -88,8 +96,39 @@ const pagedSystems = computed(() => {
 
 const isDialogOpen = computed(() => dialogMode.value !== 'none');
 const isCapabilityDialogOpen = computed(() => capabilityDialogMode.value !== 'none');
+const selectedSystemCanGenerateExternalKey = computed(
+  () => selectedSystem.value?.environmentType === 'PROD'
+);
+const configJsonPlaceholder = computed(() =>
+  dialogMode.value === 'edit'
+    ? '留空表示不修改原认证配置'
+    : '例如：{"apiKey":"your-api-key","headerName":"X-API-Key"}'
+);
+const visibleCapabilities = computed(() =>
+  (metadata.value?.capabilities ?? [{ code: 'DATA_CREATE', label: '数据创建', visible: true }])
+    .filter((item) => item.visible)
+);
+const visibleAuthTypes = computed(() =>
+  (metadata.value?.authTypes ?? [{ code: 'API_KEY', label: 'API Key', visible: true }])
+    .filter((item) => item.visible)
+);
 
-onMounted(loadSystems);
+onMounted(initialize);
+
+async function initialize() {
+  await loadMetadata();
+  await loadSystems();
+}
+
+async function loadMetadata() {
+  try {
+    metadata.value = await dataPrepareApi.getDataPrepareMetadata();
+    resetForm();
+    applyCapabilityPreset();
+  } catch {
+    metadata.value = null;
+  }
+}
 
 /**
  * 业务功能：读取当前租户已接入的原平台系统，给管理员提供平台维护的事实列表。
@@ -121,10 +160,12 @@ function fillLocalDevDefaults() {
   const stamp = Date.now();
   form.systemName = '本地联调原平台';
   form.systemCode = `LOCAL_ORIGIN_${stamp}`;
-  form.systemType = 'LOCAL_DEV';
+  form.systemType = metadata.value?.platformDefaults.systemType || 'LOCAL_DEV';
+  form.environmentType = 'LEARNING';
+  form.environmentGroupCode = 'LOCAL_DEV';
   form.baseUrl = 'http://127.0.0.1:8080/local-origin';
-  form.authType = 'NONE';
-  form.configJson = '{"adapter":"local"}';
+  form.authType = metadata.value?.platformDefaults.authType || 'API_KEY';
+  form.configJson = metadata.value?.platformDefaults.authConfigJson || '{\n  "apiKey": "local-dev-api-key",\n  "headerName": "X-API-Key"\n}';
   notify('info', '已填充本地联调默认值，确认无误后再保存');
 }
 
@@ -135,6 +176,10 @@ function fillLocalDevDefaults() {
 async function showSystemDetail(system: ConnectorSystem) {
   await run(async () => {
     selectedSystem.value = await dataPrepareApi.getConnectorSystem(system.id);
+    generatedExternalApiKey.value = '';
+    selectedExternalCredential.value = selectedSystemCanGenerateExternalKey.value
+      ? await dataPrepareApi.getExternalApiKey(system.id)
+      : null;
     dialogMode.value = 'detail';
   }, '平台详情已加载');
 }
@@ -147,11 +192,15 @@ async function editSystem(system: ConnectorSystem) {
   await run(async () => {
     const detail = await dataPrepareApi.getConnectorSystem(system.id);
     selectedSystem.value = detail;
+    selectedExternalCredential.value = null;
+    generatedExternalApiKey.value = '';
     form.systemName = detail.systemName || '';
     form.systemCode = detail.systemCode || '';
-    form.systemType = detail.systemType || 'LOCAL_DEV';
+    form.systemType = detail.systemType || metadata.value?.platformDefaults.systemType || 'LOCAL_DEV';
+    form.environmentType = detail.environmentType || '';
+    form.environmentGroupCode = detail.environmentGroupCode || '';
     form.baseUrl = detail.baseUrl || '';
-    form.authType = detail.authType || 'NONE';
+    form.authType = detail.authType || metadata.value?.platformDefaults.authType || 'API_KEY';
     form.configJson = detail.configJson || '';
     dialogMode.value = 'edit';
   }, '平台编辑信息已加载');
@@ -164,8 +213,34 @@ async function editSystem(system: ConnectorSystem) {
 function closeDialog() {
   resetForm();
   selectedSystem.value = null;
+  selectedExternalCredential.value = null;
+  generatedExternalApiKey.value = '';
   dialogMode.value = 'none';
   closeNotice();
+}
+
+/**
+ * 业务功能：为原平台正式环境生成第三方对接 Key。
+ * 关键流程：只允许未生成过的正式环境调用；生成后立即展示一次明文，并保存凭证摘要用于后续只读展示。
+ */
+async function generateExternalApiKey() {
+  if (!selectedSystem.value) return;
+  if (!selectedSystemCanGenerateExternalKey.value) {
+    notify('error', '只有正式环境平台允许生成第三方对接 Key');
+    return;
+  }
+  if (selectedExternalCredential.value) {
+    notify('error', '该系统已存在第三方对接 Key，不允许重复生成');
+    return;
+  }
+  await run(async () => {
+    const credential = await dataPrepareApi.generateExternalApiKey(
+      selectedSystem.value!.id,
+      session?.user.userId || 'admin'
+    );
+    selectedExternalCredential.value = credential;
+    generatedExternalApiKey.value = credential.apiKey || '';
+  }, '第三方对接 Key 已生成，请立即保存明文');
 }
 
 /**
@@ -185,6 +260,8 @@ async function saveConnectorSystem() {
       systemName: form.systemName.trim(),
       systemCode: form.systemCode.trim(),
       systemType: form.systemType,
+      environmentType: form.environmentType || undefined,
+      environmentGroupCode: form.environmentGroupCode.trim() || undefined,
       baseUrl: form.baseUrl.trim(),
       authType: form.authType,
       configJson: form.configJson.trim() || undefined
@@ -211,6 +288,8 @@ async function updateConnectorSystem() {
     id: selectedSystem.value.id,
     systemName: form.systemName.trim(),
     systemType: form.systemType,
+    environmentType: form.environmentType || '',
+    environmentGroupCode: form.environmentGroupCode.trim(),
     baseUrl: form.baseUrl.trim(),
     authType: form.authType,
     configJson: form.configJson.trim() || undefined
@@ -254,10 +333,12 @@ async function openCapabilityDialog(system: ConnectorSystem) {
 async function loadCapabilities(system = capabilitySystem.value) {
   if (!system) return;
   await run(async () => {
-    capabilities.value = await dataPrepareApi.listPlatformCapabilities({
+    const capabilityList = await dataPrepareApi.listPlatformCapabilities({
       tenantId: tenantId.value,
       connectorSystemId: system.id
     });
+    const allowedCodes = visibleCapabilities.value.map((item) => item.code);
+    capabilities.value = capabilityList.filter((item) => allowedCodes.includes(item.capabilityCode));
   }, '能力列表已刷新');
 }
 
@@ -381,22 +462,44 @@ function validateForm() {
   if (!form.systemName.trim()) return '请填写平台名称';
   if (!form.systemCode.trim()) return '请填写平台编码';
   if (!form.baseUrl.trim()) return '请填写平台地址';
+  if (form.environmentType && !['PROD', 'LEARNING'].includes(form.environmentType)) return '环境类型仅支持 PROD 或 LEARNING';
+  if (form.authType !== defaultAuthType()) return `首期仅支持 ${defaultAuthType()} 认证`;
+  const authMessage = validateApiKeyConfig();
+  if (authMessage) return authMessage;
   return '';
 }
 
 function validateEditForm() {
   if (!form.systemName.trim()) return '请填写平台名称';
   if (!form.baseUrl.trim()) return '请填写平台地址';
+  if (form.environmentType && !['PROD', 'LEARNING'].includes(form.environmentType)) return '环境类型仅支持 PROD 或 LEARNING';
+  if (form.authType !== defaultAuthType()) return `首期仅支持 ${defaultAuthType()} 认证`;
+  if (!form.configJson.trim()) return '';
+  const authMessage = validateApiKeyConfig();
+  if (authMessage) return authMessage;
   return '';
 }
 
 function resetForm() {
   form.systemName = '';
   form.systemCode = '';
-  form.systemType = 'LOCAL_DEV';
+  form.systemType = metadata.value?.platformDefaults.systemType || 'LOCAL_DEV';
+  form.environmentType = '';
+  form.environmentGroupCode = '';
   form.baseUrl = '';
-  form.authType = 'NONE';
-  form.configJson = '';
+  form.authType = defaultAuthType();
+  form.configJson = metadata.value?.platformDefaults.authConfigJson || '{\n  "apiKey": "",\n  "headerName": "X-API-Key"\n}';
+}
+
+function validateApiKeyConfig() {
+  try {
+    const config = JSON.parse(form.configJson || '{}') as { apiKey?: unknown };
+    if (!config || typeof config !== 'object' || Array.isArray(config)) return '认证配置必须是 JSON 对象';
+    if (typeof config.apiKey !== 'string' || !config.apiKey.trim()) return '认证配置必须填写 apiKey';
+    return '';
+  } catch {
+    return '认证配置必须是合法 JSON';
+  }
 }
 
 function normalizePage() {
@@ -444,37 +547,39 @@ function statusClass(status?: string) {
 function resetCapabilityForm(system: ConnectorSystem) {
   capabilityForm.tenantId = tenantId.value;
   capabilityForm.connectorSystemId = system.id;
-  capabilityForm.capabilityCode = 'DATA_CREATE';
-  applyCapabilityPreset('DATA_CREATE');
+  capabilityForm.capabilityCode = defaultCapabilityCode();
+  applyCapabilityPreset(defaultCapabilityCode());
   capabilityForm.createBy = session?.user.userId || 'admin';
   capabilityForm.updateBy = session?.user.userId || 'admin';
 }
 
 function applyCapabilityPreset(code = capabilityForm.capabilityCode) {
+  if (!visibleCapabilities.value.some((item) => item.code === code)) {
+    code = defaultCapabilityCode();
+  }
+  const defaults = metadata.value?.platformDefaults;
+  const option = visibleCapabilities.value.find((item) => item.code === code);
   capabilityForm.capabilityCode = code;
-  capabilityForm.capabilityType = code;
+  capabilityForm.capabilityType = defaults?.capabilityType || code;
   capabilityForm.supportFlag = true;
-  capabilityForm.method = 'POST';
-  capabilityForm.timeoutMs = 10000;
+  capabilityForm.method = defaults?.capabilityMethod || 'POST';
+  capabilityForm.timeoutMs = defaults?.capabilityTimeoutMs || 10000;
   capabilityForm.requestSchemaJson = '{\n  "required": ["requestBatchId", "items"]\n}';
   capabilityForm.responseSchemaJson = '{\n  "required": ["requestBatchId", "items"]\n}';
   capabilityForm.retryPolicyJson = '{\n  "maxAttempts": 3,\n  "backoffMs": 1000\n}';
-  const names: Record<string, string> = {
-    DATA_CREATE: '批量创建教学初始数据',
-    DATA_VALIDATE: '校验教学数据可用性',
-    DATA_LOCK: '锁定教学业务数据',
-    RESULT_CHECK: '校验学生办理结果',
-    DATA_ARCHIVE: '归档教学业务数据'
-  };
   const endpoints: Record<string, string> = {
-    DATA_CREATE: '/openapi/teaching-data/batch-create',
-    DATA_VALIDATE: '/openapi/teaching-data/validate',
-    DATA_LOCK: '/openapi/teaching-data/lock',
-    RESULT_CHECK: '/openapi/teaching-data/result-check',
-    DATA_ARCHIVE: '/openapi/teaching-data/archive'
+    DATA_CREATE: '/openapi/teaching-data/batch-create'
   };
-  capabilityForm.capabilityName = names[code] || code;
+  capabilityForm.capabilityName = defaults?.capabilityName || option?.label || code;
   capabilityForm.endpointUrl = endpoints[code] || '/openapi/teaching-data';
+}
+
+function defaultAuthType() {
+  return metadata.value?.platformDefaults.authType || visibleAuthTypes.value[0]?.code || 'API_KEY';
+}
+
+function defaultCapabilityCode() {
+  return metadata.value?.platformDefaults.capabilityCode || visibleCapabilities.value[0]?.code || 'DATA_CREATE';
 }
 
 function validateCapabilityForm() {
@@ -560,6 +665,8 @@ function isJsonObjectText(value?: string) {
         <table>
           <thead>
             <tr>
+              <th>环境</th>
+              <th>环境组</th>
               <th>系统名称</th>
               <th>系统编码</th>
               <th>类型</th>
@@ -571,6 +678,8 @@ function isJsonObjectText(value?: string) {
           </thead>
           <tbody>
             <tr v-for="system in pagedSystems" :key="system.id">
+              <td>{{ system.environmentType || '-' }}</td>
+              <td>{{ system.environmentGroupCode || '-' }}</td>
               <td>{{ system.systemName }}</td>
               <td>{{ system.systemCode }}</td>
               <td>{{ system.systemType }}</td>
@@ -642,15 +751,58 @@ function isJsonObjectText(value?: string) {
           平台只维护接入边界；业务模块、模板和策略在后续菜单中维护。
         </p>
 
-        <div v-if="dialogMode === 'detail' && selectedSystem" class="detail-grid">
-          <span>系统名称</span><strong>{{ selectedSystem.systemName }}</strong>
-          <span>系统编码</span><strong>{{ selectedSystem.systemCode }}</strong>
-          <span>类型</span><strong>{{ selectedSystem.systemType }}</strong>
-          <span>认证</span><strong>{{ selectedSystem.authType }}</strong>
-          <span>地址</span><strong>{{ selectedSystem.baseUrl }}</strong>
-          <span>状态</span><strong>{{ selectedSystem.status || '未设置' }}</strong>
-          <span>创建时间</span><strong>{{ selectedSystem.createTime || '-' }}</strong>
-          <span>更新时间</span><strong>{{ selectedSystem.updateTime || '-' }}</strong>
+        <div v-if="dialogMode === 'detail' && selectedSystem" class="detail-section">
+          <div class="detail-grid">
+            <span>系统名称</span><strong>{{ selectedSystem.systemName }}</strong>
+            <span>系统编码</span><strong>{{ selectedSystem.systemCode }}</strong>
+            <span>类型</span><strong>{{ selectedSystem.systemType }}</strong>
+            <span>环境类型</span><strong>{{ selectedSystem.environmentType || '-' }}</strong>
+            <span>环境组编码</span><strong>{{ selectedSystem.environmentGroupCode || '-' }}</strong>
+            <span>认证</span><strong>{{ selectedSystem.authType }}</strong>
+            <span>地址</span><strong>{{ selectedSystem.baseUrl }}</strong>
+            <span>状态</span><strong>{{ selectedSystem.status || '未设置' }}</strong>
+            <span>创建时间</span><strong>{{ selectedSystem.createTime || '-' }}</strong>
+            <span>更新时间</span><strong>{{ selectedSystem.updateTime || '-' }}</strong>
+          </div>
+
+          <section class="external-key-panel">
+            <header>
+              <div>
+                <h3>第三方对接 Key</h3>
+                <p>用于原平台正式环境调用教学平台经典案例接收接口。</p>
+              </div>
+              <button
+                v-if="selectedSystemCanGenerateExternalKey && !selectedExternalCredential"
+                type="button"
+                class="primary-action"
+                :disabled="loading"
+                @click="generateExternalApiKey"
+              >
+                生成第三方对接 Key
+              </button>
+            </header>
+
+            <div v-if="!selectedSystemCanGenerateExternalKey" class="external-key-empty">
+              学习环境不需要生成第三方对接 Key。
+            </div>
+
+            <div v-else-if="selectedExternalCredential" class="external-key-detail">
+              <span>Key 前缀</span><strong>{{ selectedExternalCredential.apiKeyPrefix }}</strong>
+              <span>状态</span><strong>{{ selectedExternalCredential.status || '-' }}</strong>
+              <span>生成时间</span><strong>{{ selectedExternalCredential.createTime || '-' }}</strong>
+              <span>最近使用</span><strong>{{ selectedExternalCredential.lastUsedTime || '-' }}</strong>
+            </div>
+
+            <div v-else class="external-key-empty">
+              当前正式环境尚未生成第三方对接 Key。
+            </div>
+
+            <label v-if="generatedExternalApiKey" class="external-key-secret">
+              <span>本次生成的完整 Key</span>
+              <textarea :value="generatedExternalApiKey" readonly rows="3"></textarea>
+              <small>完整 Key 只展示本次，请立即交付给第三方正式系统并妥善保存。</small>
+            </label>
+          </section>
         </div>
 
         <div v-else class="create-form">
@@ -679,11 +831,26 @@ function isJsonObjectText(value?: string) {
           <label>
             <span>认证方式</span>
             <select v-model="form.authType">
-              <option value="NONE">无需认证</option>
-              <option value="TOKEN">Token</option>
-              <option value="SSO">单点登录</option>
-              <option value="COOKIE">Cookie</option>
+              <option
+                v-for="authType in visibleAuthTypes"
+                :key="authType.code"
+                :value="authType.code"
+              >
+                {{ authType.label }}
+              </option>
             </select>
+          </label>
+          <label>
+            <span>环境类型</span>
+            <select v-model="form.environmentType">
+              <option value="">未设置</option>
+              <option value="PROD">正式环境</option>
+              <option value="LEARNING">学习环境</option>
+            </select>
+          </label>
+          <label>
+            <span>环境组编码</span>
+            <input v-model="form.environmentGroupCode" type="text" placeholder="例如：OA_PURCHASE" />
           </label>
           <label class="field-wide">
             <span>平台地址 <em>*</em></span>
@@ -691,7 +858,11 @@ function isJsonObjectText(value?: string) {
           </label>
           <label class="field-wide">
             <span>扩展配置</span>
-            <textarea v-model="form.configJson" rows="4" placeholder='例如：{"adapter":"local"}'></textarea>
+            <textarea
+              v-model="form.configJson"
+              rows="4"
+              :placeholder="configJsonPlaceholder"
+            ></textarea>
           </label>
         </div>
 
@@ -764,7 +935,7 @@ function isJsonObjectText(value?: string) {
         </header>
 
         <p class="dialog-helper">
-          能力声明决定策略启用前能否确认原平台支持造数、锁定、校验和归档。
+          首期仅维护 DATA_CREATE，用于确认原平台支持创建教学业务数据。
         </p>
 
         <section v-if="capabilityDialogMode === 'list'" class="capability-section">
@@ -827,8 +998,12 @@ function isJsonObjectText(value?: string) {
               :disabled="capabilityDialogMode === 'edit'"
               @change="applyCapabilityPreset()"
             >
-              <option v-for="code in CAPABILITY_PRESETS" :key="code" :value="code">
-                {{ code }}
+              <option
+                v-for="capability in visibleCapabilities"
+                :key="capability.code"
+                :value="capability.code"
+              >
+                {{ capability.code }}
               </option>
             </select>
           </label>
@@ -1099,6 +1274,7 @@ function isJsonObjectText(value?: string) {
 }
 
 .create-form,
+.detail-section,
 .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1172,8 +1348,10 @@ function isJsonObjectText(value?: string) {
 }
 
 .detail-grid {
+  grid-column: 1 / -1;
   grid-template-columns: 120px minmax(0, 1fr);
   gap: 10px 14px;
+  padding: 0;
 }
 
 .detail-grid span {
@@ -1186,6 +1364,83 @@ function isJsonObjectText(value?: string) {
   color: #172033;
   font-size: 13px;
   overflow-wrap: anywhere;
+}
+
+.external-key-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #d7e0ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.external-key-panel header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.external-key-panel h3 {
+  margin: 0;
+  color: #172033;
+  font-size: 15px;
+}
+
+.external-key-panel p {
+  margin: 4px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.external-key-detail {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 8px 12px;
+  color: #172033;
+  font-size: 13px;
+}
+
+.external-key-detail span,
+.external-key-empty,
+.external-key-secret small {
+  color: #64748b;
+}
+
+.external-key-detail strong {
+  overflow-wrap: anywhere;
+}
+
+.external-key-empty {
+  font-size: 13px;
+}
+
+.external-key-secret {
+  display: grid;
+  gap: 7px;
+}
+
+.external-key-secret span {
+  color: #172033;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.external-key-secret textarea {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid #d7e0ec;
+  border-radius: 6px;
+  padding: 10px 11px;
+  background: #ffffff;
+  color: #172033;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .dialog-actions {
@@ -1295,8 +1550,14 @@ function isJsonObjectText(value?: string) {
 
   .query-panel,
   .create-form,
+  .detail-section,
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+
+  .external-key-panel header {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .modal-overlay {

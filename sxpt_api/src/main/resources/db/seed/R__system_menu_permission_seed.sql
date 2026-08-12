@@ -23,6 +23,30 @@ DO UPDATE SET
     update_time = now(),
     status = 'ACTIVE';
 
+INSERT INTO teach_role (
+    id, tenant_id, role_code, role_name, description,
+    create_by, create_time, update_by, update_time, status, deleted
+) VALUES (
+    'role-demo-expert',
+    'demo-tenant',
+    'expert',
+    '专家',
+    '查看教案管理、数据准备和经典案例菜单。',
+    'seed',
+    now(),
+    'seed',
+    now(),
+    'ACTIVE',
+    false
+)
+ON CONFLICT (tenant_id, role_code) WHERE deleted = false
+DO UPDATE SET
+    role_name = EXCLUDED.role_name,
+    description = EXCLUDED.description,
+    update_by = 'seed',
+    update_time = now(),
+    status = 'ACTIVE';
+
 INSERT INTO teach_user (
     id, tenant_id, username, real_name, phone, email, user_type, source_type,
     external_info_json, last_sync_time,
@@ -215,13 +239,82 @@ FROM (
         ('menu-data-prepare', 'demo-tenant', null, 'data-prepare', '批次准备', 'MENU', '/admin/data-prepare', 'views/admin/DataPrepareView.vue', 'menu:data-prepare:view', '20', 200, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-teacher-dashboard', 'demo-tenant', null, 'teacher-dashboard', '教学工作台', 'MENU', '/teacher/dashboard', 'views/teacher/TeacherDashboardView.vue', 'menu:teacher-dashboard:view', '01', 1010, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-teacher-review', 'demo-tenant', null, 'teacher-review', '评阅反馈', 'MENU', '/teacher/review', 'views/teacher/TeacherReviewView.vue', 'menu:teacher-review:view', '02', 1020, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
-        ('menu-teacher-data-prepare', 'demo-tenant', null, 'teacher-data-prepare', '批次准备', 'MENU', '/teacher/data-prepare', 'views/admin/DataPrepareView.vue', 'menu:teacher-data-prepare:view', '03', 1030, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-student-tasks', 'demo-tenant', null, 'student-tasks', '我的任务', 'MENU', '/student/tasks', 'views/student/StudentTasksView.vue', 'menu:student-tasks:view', '01', 2010, true, 'seed', now(), 'seed', now(), 'ACTIVE', false),
         ('menu-student-results', 'demo-tenant', null, 'student-results', '成绩反馈', 'MENU', '/student/results', 'views/student/StudentResultsView.vue', 'menu:student-results:view', '02', 2020, true, 'seed', now(), 'seed', now(), 'ACTIVE', false)
 ) AS value(
     id, tenant_id, parent_id, menu_code, menu_name, menu_type,
     route_path, component_path, permission_code, icon, sort_no, visible,
     create_by, create_time, update_by, update_time, status, deleted
+)
+ON CONFLICT (tenant_id, menu_code) WHERE deleted = false
+DO UPDATE SET
+    parent_id = EXCLUDED.parent_id,
+    menu_name = EXCLUDED.menu_name,
+    menu_type = EXCLUDED.menu_type,
+    route_path = EXCLUDED.route_path,
+    component_path = EXCLUDED.component_path,
+    permission_code = EXCLUDED.permission_code,
+    icon = EXCLUDED.icon,
+    sort_no = EXCLUDED.sort_no,
+    visible = EXCLUDED.visible,
+    update_by = 'seed',
+    update_time = now(),
+    status = 'ACTIVE';
+
+UPDATE sys_role_permission role_permission
+SET status = 'DISABLED',
+    deleted = true,
+    update_by = 'seed',
+    update_time = now()
+FROM sys_permission_config permission
+WHERE role_permission.tenant_id = 'demo-tenant'
+  AND role_permission.deleted = false
+  AND permission.id = role_permission.permission_id
+  AND permission.tenant_id = role_permission.tenant_id
+  AND permission.resource_code = 'teacher-data-prepare';
+
+UPDATE sys_permission_config
+SET status = 'DISABLED',
+    deleted = true,
+    update_by = 'seed',
+    update_time = now()
+WHERE tenant_id = 'demo-tenant'
+  AND deleted = false
+  AND resource_code = 'teacher-data-prepare';
+
+UPDATE sys_menu_config
+SET visible = false,
+    status = 'DISABLED',
+    deleted = true,
+    update_by = 'seed',
+    update_time = now()
+WHERE tenant_id = 'demo-tenant'
+  AND deleted = false
+  AND menu_code = 'teacher-data-prepare';
+
+INSERT INTO sys_menu_config (
+    id, tenant_id, parent_id, menu_code, menu_name, menu_type,
+    route_path, component_path, permission_code, icon, sort_no, visible,
+    create_by, create_time, update_by, update_time, status, deleted
+) VALUES (
+    'menu-data-prepare-classic-cases',
+    'demo-tenant',
+    null,
+    'data-prepare-classic-cases',
+    U&'\7ECF\5178\6848\4F8B',
+    'MENU',
+    '/admin/data-prepare/classic-cases',
+    'views/admin/DataPrepareClassicCasesView.vue',
+    'menu:data-prepare-classic-cases:view',
+    '20',
+    195,
+    true,
+    'seed',
+    now(),
+    'seed',
+    now(),
+    'ACTIVE',
+    false
 )
 ON CONFLICT (tenant_id, menu_code) WHERE deleted = false
 DO UPDATE SET
@@ -361,10 +454,40 @@ teacher_permissions AS (
      AND permission.resource_code IN (
         'teacher-dashboard',
         'teacher-review',
-        'lesson-list'
+        'lesson-list',
+        'data-prepare-systems',
+        'data-prepare-modules',
+        'data-prepare-templates',
+        'data-prepare-strategies',
+        'data-prepare-classic-cases',
+        'data-prepare'
      )
     WHERE role.tenant_id = 'demo-tenant'
       AND role.role_code = 'teacher'
+      AND role.deleted = false
+),
+expert_permissions AS (
+    SELECT
+        'srp-expert-' || permission.resource_code AS id,
+        role.tenant_id,
+        role.id AS role_id,
+        permission.id AS permission_id
+    FROM teach_role role
+    JOIN sys_permission_config permission
+      ON permission.tenant_id = role.tenant_id
+     AND permission.deleted = false
+     AND permission.status = 'ACTIVE'
+     AND permission.resource_code IN (
+        'lesson-list',
+        'data-prepare-systems',
+        'data-prepare-modules',
+        'data-prepare-templates',
+        'data-prepare-strategies',
+        'data-prepare-classic-cases',
+        'data-prepare'
+     )
+    WHERE role.tenant_id = 'demo-tenant'
+      AND role.role_code = 'expert'
       AND role.deleted = false
 ),
 student_permissions AS (
@@ -390,6 +513,8 @@ all_role_permissions AS (
     SELECT * FROM admin_permissions
     UNION ALL
     SELECT * FROM teacher_permissions
+    UNION ALL
+    SELECT * FROM expert_permissions
     UNION ALL
     SELECT * FROM student_permissions
 )

@@ -129,6 +129,7 @@ public class DataPrepareFacadeServiceImpl implements DataPrepareFacadeService {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
         DataRequirement requirement = generateResult.getRequirement();
+        System.out.println(request.getRequestJson());
         dataRequirementService.freezeRequirementPolicySnapshot(
                 requirement.getTenantId(), requirement.getId(), request.getRequestJson());
     }

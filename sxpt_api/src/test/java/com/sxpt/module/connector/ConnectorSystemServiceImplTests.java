@@ -72,7 +72,7 @@ class ConnectorSystemServiceImplTests {
         service.createConnectorSystem(connectorSystem);
 
         ArgumentCaptor<PlatformCapability> captor = ArgumentCaptor.forClass(PlatformCapability.class);
-        verify(capabilityMapper, times(6)).insert(captor.capture());
+        verify(capabilityMapper, times(1)).insert(captor.capture());
         for (PlatformCapability capability : captor.getAllValues()) {
             assertEquals("admin_001", capability.getCreateBy());
             assertEquals("admin_001", capability.getUpdateBy());
@@ -97,6 +97,66 @@ class ConnectorSystemServiceImplTests {
     }
 
     /**
+     * 验证首期原平台接入只允许 API_KEY 认证，避免前端隐藏项绕过后形成不可执行配置。
+     */
+    @Test
+    void createConnectorSystemShouldRejectUnsupportedAuthType() {
+        ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
+        ConnectorSystemServiceImpl service = buildService(mapper);
+        ConnectorSystem connectorSystem = buildValidConnectorSystem();
+        connectorSystem.setAuthType("TOKEN");
+
+        assertThrows(BusinessException.class, () -> service.createConnectorSystem(connectorSystem));
+        verify(mapper, times(0)).insert(connectorSystem);
+    }
+
+    /**
+     * 验证 API_KEY 认证必须包含 apiKey，保证 HTTP 适配器运行时能构造认证请求头。
+     */
+    @Test
+    void createConnectorSystemShouldRejectMissingApiKeyConfig() {
+        ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
+        ConnectorSystemServiceImpl service = buildService(mapper);
+        ConnectorSystem connectorSystem = buildValidConnectorSystem();
+        connectorSystem.setConfigJson("{\"headerName\":\"X-API-Key\"}");
+
+        assertThrows(BusinessException.class, () -> service.createConnectorSystem(connectorSystem));
+        verify(mapper, times(0)).insert(connectorSystem);
+    }
+
+    /**
+     * 校验创建原平台时环境类型统一归一为 PROD/LEARNING，环境组编码去掉首尾空格。
+     */
+    @Test
+    void createConnectorSystemShouldNormalizeEnvironmentFields() {
+        ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
+        ConnectorSystemServiceImpl service = buildService(mapper);
+        ConnectorSystem connectorSystem = buildValidConnectorSystem();
+        connectorSystem.setEnvironmentType(" learning ");
+        connectorSystem.setEnvironmentGroupCode(" OA_PURCHASE ");
+
+        ConnectorSystem saved = service.createConnectorSystem(connectorSystem);
+
+        assertEquals("LEARNING", saved.getEnvironmentType());
+        assertEquals("OA_PURCHASE", saved.getEnvironmentGroupCode());
+        verify(mapper, times(1)).insert(saved);
+    }
+
+    /**
+     * 校验原平台环境类型只能是正式环境或学习环境，避免经典案例复制时落入不可识别环境。
+     */
+    @Test
+    void createConnectorSystemShouldRejectUnsupportedEnvironmentType() {
+        ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
+        ConnectorSystemServiceImpl service = buildService(mapper);
+        ConnectorSystem connectorSystem = buildValidConnectorSystem();
+        connectorSystem.setEnvironmentType("SANDBOX");
+
+        assertThrows(BusinessException.class, () -> service.createConnectorSystem(connectorSystem));
+        verify(mapper, times(0)).insert(connectorSystem);
+    }
+
+    /**
      * 校验更新原平台配置时只覆盖允许编辑字段并刷新更新时间。
      */
     @Test
@@ -111,17 +171,21 @@ class ConnectorSystemServiceImplTests {
         update.setId("connector_001");
         update.setSystemName("更新后的原业务平台");
         update.setSystemType("CUSTOM");
+        update.setEnvironmentType(" prod ");
+        update.setEnvironmentGroupCode(" OA_PURCHASE ");
         update.setBaseUrl("https://new-origin.example.com");
-        update.setAuthType("TOKEN");
-        update.setConfigJson("{\"sdk\":\"enabled\"}");
+        update.setAuthType("API_KEY");
+        update.setConfigJson("{\"apiKey\":\"new-key\"}");
 
         ConnectorSystem result = service.updateConnectorSystem(update);
 
         assertEquals("tenant_001", result.getTenantId());
         assertEquals("origin_platform", result.getSystemCode());
         assertEquals("更新后的原业务平台", result.getSystemName());
+        assertEquals("PROD", result.getEnvironmentType());
+        assertEquals("OA_PURCHASE", result.getEnvironmentGroupCode());
         assertEquals("https://new-origin.example.com", result.getBaseUrl());
-        assertEquals("{\"sdk\":\"enabled\"}", result.getConfigJson());
+        assertEquals("{\"apiKey\":\"new-key\"}", result.getConfigJson());
         assertNotNull(result.getUpdateTime());
         verify(mapper, times(1)).updateById(result);
     }
@@ -134,7 +198,9 @@ class ConnectorSystemServiceImplTests {
         ConnectorSystemMapper mapper = mock(ConnectorSystemMapper.class);
         ConnectorSystemServiceImpl service = buildService(mapper);
         ConnectorSystem existing = buildValidConnectorSystem();
-        existing.setConfigJson("{\"adapter\":\"local\"}");
+        existing.setConfigJson("{\"apiKey\":\"local-dev-api-key\",\"adapter\":\"local\"}");
+        existing.setEnvironmentType("LEARNING");
+        existing.setEnvironmentGroupCode("LOCAL_DEV");
         when(mapper.selectOne(any())).thenReturn(existing);
 
         ConnectorSystem update = new ConnectorSystem();
@@ -142,11 +208,13 @@ class ConnectorSystemServiceImplTests {
         update.setSystemName("updated origin");
         update.setSystemType("LOCAL_DEV");
         update.setBaseUrl("http://127.0.0.1:8080/local-origin");
-        update.setAuthType("NONE");
+        update.setAuthType("API_KEY");
 
         ConnectorSystem result = service.updateConnectorSystem(update);
 
-        assertEquals("{\"adapter\":\"local\"}", result.getConfigJson());
+        assertEquals("{\"apiKey\":\"local-dev-api-key\",\"adapter\":\"local\"}", result.getConfigJson());
+        assertEquals("LEARNING", result.getEnvironmentType());
+        assertEquals("LOCAL_DEV", result.getEnvironmentGroupCode());
         verify(mapper, times(1)).updateById(result);
     }
 
@@ -298,7 +366,8 @@ class ConnectorSystemServiceImplTests {
         connectorSystem.setSystemName("原业务平台");
         connectorSystem.setSystemType("CUSTOM");
         connectorSystem.setBaseUrl("https://origin.example.com");
-        connectorSystem.setAuthType("TOKEN");
+        connectorSystem.setAuthType("API_KEY");
+        connectorSystem.setConfigJson("{\"apiKey\":\"key-0805\"}");
         return connectorSystem;
     }
 

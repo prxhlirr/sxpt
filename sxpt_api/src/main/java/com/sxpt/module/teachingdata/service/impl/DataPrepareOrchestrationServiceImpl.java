@@ -10,6 +10,9 @@ import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService;
 import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService.SnapshotResult;
+import com.sxpt.module.connector.service.DataCreateRequestBuildService;
+import com.sxpt.module.connector.service.DataCreateRequestBuildService.DataCreateRequestItem;
+import com.sxpt.module.connector.service.DataCreateRequestBuildService.NormalCreateContext;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataRequirement;
@@ -79,6 +82,8 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
 
     private final OriginDataPrepareAdapter originDataPrepareAdapter;
 
+    private final DataCreateRequestBuildService dataCreateRequestBuildService;
+
     private final BusinessModuleProcessSnapshotService processSnapshotService;
 
     public DataPrepareOrchestrationServiceImpl(DataPrepareJobMapper dataPrepareJobMapper,
@@ -87,6 +92,7 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
                                                TeachingDataPoolMapper teachingDataPoolMapper,
                                                TeachingDataInstanceMapper teachingDataInstanceMapper,
                                                OriginDataPrepareAdapter originDataPrepareAdapter,
+                                               DataCreateRequestBuildService dataCreateRequestBuildService,
                                                BusinessModuleProcessSnapshotService processSnapshotService) {
         this.dataPrepareJobMapper = dataPrepareJobMapper;
         this.dataRequirementItemMapper = dataRequirementItemMapper;
@@ -94,6 +100,7 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
         this.teachingDataPoolMapper = teachingDataPoolMapper;
         this.teachingDataInstanceMapper = teachingDataInstanceMapper;
         this.originDataPrepareAdapter = originDataPrepareAdapter;
+        this.dataCreateRequestBuildService = dataCreateRequestBuildService;
         this.processSnapshotService = processSnapshotService;
     }
 
@@ -256,21 +263,20 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      */
     private OriginDataPrepareAdapter.BatchCreateRequest buildBatchCreateRequest(DataPrepareJob job,
                                                                                 List<DataRequirementItem> items) {
-        OriginDataPrepareAdapter.BatchCreateRequest request = new OriginDataPrepareAdapter.BatchCreateRequest();
-        request.setTenantId(job.getTenantId());
-        request.setConnectorSystemId(job.getConnectorSystemId());
-        request.setModuleCode(job.getModuleCode());
-        if (!items.isEmpty()) {
-            request.setTemplateId(items.get(0).getTemplateId());
-            request.setInitState(items.get(0).getInitExternalStatus());
-        }
-        request.setSceneType(job.getSceneType());
-        request.setRequestBatchId(job.getRequestBatchId());
-        request.setIdempotencyKey(job.getIdempotencyKey());
-        request.setRequestJson(job.getRequestJson());
-        request.setTraceId(job.getTraceId());
-        request.setItems(items.stream().map(this::buildRequestItem).collect(Collectors.toList()));
-        return request;
+        DataRequirementItem first = items.get(0);
+        NormalCreateContext context = new NormalCreateContext();
+        context.setTenantId(job.getTenantId());
+        context.setConnectorSystemId(job.getConnectorSystemId());
+        context.setModuleCode(job.getModuleCode());
+        context.setTemplateId(first.getTemplateId());
+        context.setInitState(first.getInitExternalStatus());
+        context.setSceneType(job.getSceneType());
+        context.setRequestBatchId(job.getRequestBatchId());
+        context.setIdempotencyKey(job.getIdempotencyKey());
+        context.setRequestJson(job.getRequestJson());
+        context.setTraceId(job.getTraceId());
+        context.setItems(items.stream().map(this::buildDataCreateRequestItem).collect(Collectors.toList()));
+        return dataCreateRequestBuildService.buildNormalRequest(context);
     }
 
     /**
@@ -298,15 +304,15 @@ public class DataPrepareOrchestrationServiceImpl implements DataPrepareOrchestra
      * @param item 数据需求明细。
      * @return 原平台逐条创建请求。
      */
-    private OriginDataPrepareAdapter.RequestItem buildRequestItem(DataRequirementItem item) {
-        OriginDataPrepareAdapter.RequestItem requestItem = new OriginDataPrepareAdapter.RequestItem();
+    private DataCreateRequestItem buildDataCreateRequestItem(DataRequirementItem item) {
+        DataCreateRequestItem requestItem = new DataCreateRequestItem();
         requestItem.setRequestItemId(item.getRequestItemId());
-        requestItem.setStudentId(item.getStudentId());
+        requestItem.setOwnerUserId(item.getStudentId());
         requestItem.setQuestionId(item.getQuestionId());
         requestItem.setRequiredExternalOrgId(item.getRequiredExternalOrgId());
         requestItem.setRequiredExternalRoleId(item.getRequiredExternalRoleId());
         requestItem.setActorType(item.getActorType());
-        requestItem.setDataScopeJson(item.getDataScopeJson());
+        requestItem.setParticipantContextJson(item.getDataScopeJson());
         requestItem.setRequiredActionsJson(item.getRequiredActionsJson());
         return requestItem;
     }

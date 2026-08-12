@@ -299,43 +299,43 @@ class ModuleDataStrategyServiceImplTests {
     }
 
     /**
-     * 校验考试策略不是开考锁定时拒绝启用，避免考试期间原平台数据被继续修改。
+     * 校验首期仅依赖 DATA_CREATE 时，考试锁定策略不会阻断启用。
      */
     @Test
-    void enableExamStrategyShouldRejectNonExamStartLockPolicy() {
+    void enableExamStrategyShouldIgnoreLockPolicyWhenDataCreateCapabilityExists() {
         ModuleDataStrategy existing = buildValidExamStrategy();
         existing.setLockPolicy("ON_ALLOCATE");
+        existing.setStatus(RecordStatus.DISABLED.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
+        when(platformCapabilityMapper.selectOne(any())).thenReturn(buildSupportedCapability("DATA_CREATE"));
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> service.enableModuleDataStrategy("strategy_001"));
+        ModuleDataStrategy result = service.enableModuleDataStrategy("strategy_001");
 
-        assertEquals(ApiResultCode.PARAM_ERROR.getCode(), exception.getCode());
-        verify(mapper, times(0)).updateById(existing);
+        assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
+        verify(mapper).updateById(result);
     }
 
     /**
-     * 校验考试策略缺少结果校验策略时拒绝启用，避免考试得分缺少原平台结果核验依据。
+     * 校验首期隐藏结果校验时，考试策略缺少结果校验配置也不会阻断启用。
      */
     @Test
-    void enableExamStrategyShouldRejectMissingResultCheckPolicy() {
+    void enableExamStrategyShouldIgnoreMissingResultCheckPolicyWhenDataCreateCapabilityExists() {
         ModuleDataStrategy existing = buildValidExamStrategy();
         existing.setResultCheckPolicyJson(" ");
+        existing.setStatus(RecordStatus.DISABLED.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
+        when(platformCapabilityMapper.selectOne(any())).thenReturn(buildSupportedCapability("DATA_CREATE"));
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> service.enableModuleDataStrategy("strategy_001"));
+        ModuleDataStrategy result = service.enableModuleDataStrategy("strategy_001");
 
-        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
-        verify(mapper, times(0)).updateById(existing);
+        assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
+        verify(mapper).updateById(result);
     }
 
     /**
@@ -402,49 +402,42 @@ class ModuleDataStrategyServiceImplTests {
     }
 
     /**
-     * 验证锁定策略依赖原平台锁定能力，避免考试或强约束练习数据被并发修改。
+     * 验证首期隐藏锁定能力时，锁定策略字段不会触发额外能力依赖。
      */
     @Test
-    void enableModuleDataStrategyShouldRejectMissingLockCapability() {
+    void enableModuleDataStrategyShouldIgnoreMissingLockCapabilityWhenDataCreateCapabilityExists() {
         ModuleDataStrategy existing = buildValidStrategy();
         existing.setLockPolicy("ON_ALLOCATE");
+        existing.setStatus(RecordStatus.DISABLED.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate());
-        when(platformCapabilityMapper.selectOne(any()))
-                .thenReturn(buildSupportedCapability("DATA_CREATE"))
-                .thenReturn(null);
+        when(platformCapabilityMapper.selectOne(any())).thenReturn(buildSupportedCapability("DATA_CREATE"));
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> service.enableModuleDataStrategy("strategy_001"));
+        ModuleDataStrategy result = service.enableModuleDataStrategy("strategy_001");
 
-        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
-        verify(mapper, times(0)).updateById(existing);
+        assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
+        verify(mapper).updateById(result);
     }
 
     /**
-     * 校验结果校验策略依赖原平台结果校验能力，避免考试评分缺少原平台侧依据。
+     * 校验首期隐藏结果校验能力时，结果校验配置不会触发额外能力依赖。
      */
     @Test
-    void enableExamStrategyShouldRejectMissingResultCheckCapability() {
+    void enableExamStrategyShouldIgnoreMissingResultCheckCapabilityWhenDataCreateCapabilityExists() {
         ModuleDataStrategy existing = buildValidExamStrategy();
+        existing.setStatus(RecordStatus.DISABLED.getValue());
         when(mapper.selectOne(any())).thenReturn(existing);
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
-        when(platformCapabilityMapper.selectOne(any()))
-                .thenReturn(buildSupportedCapability("DATA_CREATE"))
-                .thenReturn(buildSupportedCapability("DATA_LOCK"))
-                .thenReturn(null);
+        when(platformCapabilityMapper.selectOne(any())).thenReturn(buildSupportedCapability("DATA_CREATE"));
 
-        BusinessException exception = assertThrows(
-                BusinessException.class,
-                () -> service.enableModuleDataStrategy("strategy_001"));
+        ModuleDataStrategy result = service.enableModuleDataStrategy("strategy_001");
 
-        assertEquals(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(), exception.getCode());
-        verify(mapper, times(0)).updateById(existing);
+        assertEquals(RecordStatus.ACTIVE.getValue(), result.getStatus());
+        verify(mapper).updateById(result);
     }
 
     /**
@@ -459,10 +452,7 @@ class ModuleDataStrategyServiceImplTests {
         when(businessModuleMapper.selectOne(any())).thenReturn(buildActiveBusinessModule());
         mockCompleteProcessDictionaries();
         when(teachingDataTemplateMapper.selectOne(any())).thenReturn(buildActiveTemplate("EXAM"));
-        when(platformCapabilityMapper.selectOne(any()))
-                .thenReturn(buildSupportedCapability("DATA_CREATE"))
-                .thenReturn(buildSupportedCapability("DATA_LOCK"))
-                .thenReturn(buildSupportedCapability("RESULT_CHECK"));
+        when(platformCapabilityMapper.selectOne(any())).thenReturn(buildSupportedCapability("DATA_CREATE"));
 
         ModuleDataStrategy result = service.enableModuleDataStrategy("strategy_001");
 

@@ -97,6 +97,8 @@ export interface ConnectorSystem {
   systemCode: string;
   systemName: string;
   systemType: string;
+  environmentType?: string;
+  environmentGroupCode?: string;
   baseUrl: string;
   authType: string;
   configJson?: string;
@@ -110,6 +112,8 @@ export interface CreateConnectorSystemRequest {
   systemCode: string;
   systemName: string;
   systemType: string;
+  environmentType?: string;
+  environmentGroupCode?: string;
   baseUrl: string;
   authType: string;
   configJson?: string;
@@ -119,6 +123,8 @@ export interface UpdateConnectorSystemRequest {
   id: string;
   systemName: string;
   systemType: string;
+  environmentType?: string;
+  environmentGroupCode?: string;
   baseUrl: string;
   authType: string;
   configJson?: string;
@@ -158,6 +164,58 @@ export interface PlatformCapabilityRequest {
   retryPolicyJson?: string;
   createBy?: string;
   updateBy?: string;
+}
+
+export interface DataPrepareMetadataOption {
+  code: string;
+  label: string;
+  visible: boolean;
+}
+
+export interface DataPrepareMetadata {
+  authTypes: DataPrepareMetadataOption[];
+  capabilities: DataPrepareMetadataOption[];
+  sceneTypes: DataPrepareMetadataOption[];
+  dataSourceStrategies: DataPrepareMetadataOption[];
+  prepareTimings: DataPrepareMetadataOption[];
+  sharePolicies: DataPrepareMetadataOption[];
+  regeneratePolicies: DataPrepareMetadataOption[];
+  lockPolicies: DataPrepareMetadataOption[];
+  recordStatuses: DataPrepareMetadataOption[];
+  platformDefaults: {
+    systemType: string;
+    authType: string;
+    authConfigJson: string;
+    capabilityCode: string;
+    capabilityName: string;
+    capabilityType: string;
+    capabilityMethod: string;
+    capabilityTimeoutMs: number;
+  };
+  moduleDefaults: {
+    initialStatus: string;
+    targetStatus: string;
+    capabilityCodesJson: string;
+    processStepCode: string;
+    processStepType: string;
+  };
+  templateDefaults: {
+    sceneType: string;
+    initState: string;
+    supportMode: string;
+    requiredStatus: string;
+  };
+  strategyDefaults: {
+    sceneType: string;
+    dataSourceStrategy: string;
+    initExternalStatus: string;
+    targetExternalStatus: string;
+    prepareTiming: string;
+    sharePolicy: string;
+    regeneratePolicy: string;
+    lockPolicy: string;
+    validationPolicyJson: string;
+  };
 }
 
 export interface OriginRole {
@@ -226,6 +284,7 @@ export interface TeachingDataTemplate {
   strategyId?: string;
   initState?: string;
   supportMode?: string;
+  templateUsage?: string;
   configJson?: string;
   dataSchemaJson?: string;
   mockRuleJson?: string;
@@ -247,6 +306,7 @@ export interface TeachingDataTemplateRequest {
   strategyId?: string;
   initState?: string;
   supportMode?: string;
+  templateUsage?: string;
   configJson?: string;
   dataSchemaJson?: string;
   mockRuleJson?: string;
@@ -269,6 +329,7 @@ export interface CreateTeachingDataTemplateRequest {
   strategyId?: string;
   initState?: string;
   supportMode?: string;
+  templateUsage?: string;
   configJson?: string;
 }
 
@@ -612,6 +673,111 @@ export interface AuthoringLaunchResult {
   expireTime?: string;
 }
 
+export interface ClassicCaseAsset {
+  id: string;
+  tenantId: string;
+  caseCode: string;
+  caseTitle: string;
+  caseSummary?: string;
+  sourceConnectorSystemId: string;
+  learningConnectorSystemId: string;
+  environmentGroupCode?: string;
+  businessModuleId: string;
+  moduleCode: string;
+  teachingPointId?: string;
+  sceneTypesJson?: string;
+  currentVersionId?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface ExternalCredential {
+  id: string;
+  tenantId: string;
+  connectorSystemId: string;
+  credentialName: string;
+  apiKeyPrefix: string;
+  apiKey?: string;
+  lastUsedTime?: string;
+  expireTime?: string;
+  status?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface ClassicCaseVersion {
+  id: string;
+  caseAssetId: string;
+  versionNo: number;
+  payloadSchemaVersion?: string;
+  payloadHash?: string;
+  status?: string;
+  createBy?: string;
+  createTime?: string;
+}
+
+export interface ClassicCaseUsage {
+  id: string;
+  caseAssetId: string;
+  caseVersionId: string;
+  usageScene: string;
+  sceneType?: string;
+  requestBatchId?: string;
+  requestItemId?: string;
+  ownerUserId?: string;
+  generatedInstanceId?: string;
+  teachingDataInstanceId?: string;
+  externalBusinessNo?: string;
+  externalBusinessName?: string;
+  externalStatus?: string;
+  targetUrl?: string;
+  status?: string;
+  useTime?: string;
+}
+
+export interface PlatformLaunchContext {
+  id: string;
+  tenantId: string;
+  launchToken: string;
+  userId: string;
+  connectorSystemId: string;
+  taskId?: string;
+  teachingPointId?: string;
+  executionId?: string;
+  sceneType?: string;
+  sdkMode?: string;
+  targetUrl?: string;
+  launchStatus?: string;
+  expireTime?: string;
+  createTime?: string;
+}
+
+export interface ClassicCaseGenerateLaunchRequest {
+  tenantId: string;
+  caseAssetId: string;
+  caseVersionId?: string;
+  usageScene: 'TEACHING_REPLICA' | 'STUDENT_DEMO' | string;
+  sceneType?: string;
+  taskId?: string;
+  ownerUserId: string;
+  questionId?: string;
+  requestBatchId?: string;
+  requestItemId?: string;
+  traceId?: string;
+  participantContextJson?: string;
+  requiredExternalOrgId?: string;
+  requiredExternalRoleId?: string;
+  actorType?: string;
+  sdkMode?: string;
+  segmentNo?: number;
+}
+
+export interface ClassicCaseLaunchResult {
+  usage: ClassicCaseUsage;
+  launchContext: PlatformLaunchContext;
+}
+
 export interface DataPrepareParticipant {
   studentId: string;
   questionId: string;
@@ -902,6 +1068,10 @@ export const trainingWorkspaceApi = {
  * 3. 刷新任务和明细状态，验证幂等和原平台返回字段。
  */
 export const dataPrepareApi = {
+  async getDataPrepareMetadata(): Promise<DataPrepareMetadata> {
+    return requestApi<DataPrepareMetadata>('api/v1/connector/data-prepare-metadata');
+  },
+
   async listConnectorSystems(tenantId: string): Promise<ConnectorSystem[]> {
     return requestApi<ConnectorSystem[]>(
       `api/v1/connector/system/list?${stringifyQuery({ tenantId })}`
@@ -933,14 +1103,17 @@ export const dataPrepareApi = {
   },
 
   async createLocalConnectorSystem(tenantId: string): Promise<ConnectorSystem> {
+    const metadata = await this.getDataPrepareMetadata();
     return this.createConnectorSystem({
       tenantId,
       systemCode: `LOCAL_ORIGIN_${Date.now()}`,
       systemName: '本地联调原平台',
-      systemType: 'LOCAL_DEV',
+      systemType: metadata.platformDefaults.systemType,
+      environmentType: 'LEARNING',
+      environmentGroupCode: 'LOCAL_DEV',
       baseUrl: 'http://127.0.0.1:8080/local-origin',
-      authType: 'NONE',
-      configJson: '{"adapter":"local"}'
+      authType: metadata.platformDefaults.authType,
+      configJson: metadata.platformDefaults.authConfigJson
     });
   },
 
@@ -954,6 +1127,23 @@ export const dataPrepareApi = {
   async disableConnectorSystem(id: string): Promise<ConnectorSystem> {
     return requestApi<ConnectorSystem>(
       `api/v1/connector/system/${encodeURIComponent(id)}/disable`,
+      { method: 'POST' }
+    );
+  },
+
+  async getExternalApiKey(connectorSystemId: string): Promise<ExternalCredential | null> {
+    return requestApi<ExternalCredential | null>(
+      `api/v1/connector/system/${encodeURIComponent(connectorSystemId)}/external-api-key`
+    );
+  },
+
+  async generateExternalApiKey(
+    connectorSystemId: string,
+    operator?: string
+  ): Promise<ExternalCredential> {
+    const query = stringifyQuery({ operator });
+    return requestApi<ExternalCredential>(
+      `api/v1/connector/system/${encodeURIComponent(connectorSystemId)}/external-api-key/generate${query ? `?${query}` : ''}`,
       { method: 'POST' }
     );
   },
@@ -1566,6 +1756,38 @@ export const dataPrepareApi = {
         body: JSON.stringify(request)
       }
     );
+  },
+
+  async listClassicCases(params: {
+    tenantId: string;
+    learningConnectorSystemId?: string;
+    moduleCode?: string;
+    teachingPointId?: string;
+  }): Promise<ClassicCaseAsset[]> {
+    return requestApi<ClassicCaseAsset[]>(
+      `api/v1/classic-cases/list?${stringifyQuery(params)}`
+    );
+  },
+
+  async getClassicCase(id: string, tenantId: string): Promise<ClassicCaseAsset> {
+    return requestApi<ClassicCaseAsset>(
+      `api/v1/classic-cases/${encodeURIComponent(id)}?${stringifyQuery({ tenantId })}`
+    );
+  },
+
+  async listClassicCaseVersions(id: string, tenantId: string): Promise<ClassicCaseVersion[]> {
+    return requestApi<ClassicCaseVersion[]>(
+      `api/v1/classic-cases/${encodeURIComponent(id)}/versions?${stringifyQuery({ tenantId })}`
+    );
+  },
+
+  async generateClassicCaseLaunch(
+    request: ClassicCaseGenerateLaunchRequest
+  ): Promise<ClassicCaseLaunchResult> {
+    return requestApi<ClassicCaseLaunchResult>('api/v1/classic-cases/generate-launch', {
+      method: 'POST',
+      body: JSON.stringify(request)
+    });
   },
 
   async listPools(params: {

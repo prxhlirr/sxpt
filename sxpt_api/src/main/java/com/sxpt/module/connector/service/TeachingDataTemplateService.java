@@ -95,6 +95,28 @@ public interface TeachingDataTemplateService {
                                                                     String sceneType);
 
     /**
+     * 查询指定模板用途下的启用模板。
+     *
+     * 业务功能：
+     * 1. 经典案例运行时通过用途精确选择还原模板或 demo 模板。
+     * 2. 普通造数仍可使用 NORMAL，避免混用经典案例模板。
+     *
+     * @param tenantId 租户 ID。
+     * @param connectorSystemId 原平台学习环境 ID。
+     * @param moduleCode 业务模块编码。
+     * @param teachingPointId 教学点 ID，可为空。
+     * @param sceneType 教学场景。
+     * @param templateUsage 模板用途。
+     * @return 匹配的启用模板列表。
+     */
+    List<TeachingDataTemplate> listActiveTemplatesByUsage(String tenantId,
+                                                          String connectorSystemId,
+                                                          String moduleCode,
+                                                          String teachingPointId,
+                                                          String sceneType,
+                                                          String templateUsage);
+
+    /**
      * 查询指定教学点和场景下的可用教学业务数据模板。
      *
      * @param tenantId 租户 ID。

@@ -18,14 +18,15 @@ INSERT INTO connector_system (
     'OA 协同办公系统',
     'OA',
     'http://127.0.0.1:9527',
-    'BEARER',
+    'API_KEY',
     $${
         "sourceSystem": "oa",
         "embeddedMode": "iframe",
         "entryPath": "/workspace/incoming",
         "dataPrepareMode": "CALL_ORIGIN_API",
-        "token": "oa-data-center-incoming-token",
-        "tokenEnv": "DATA_CENTER_INCOMING_API_TOKEN",
+        "apiKey": "oa-data-center-incoming-token",
+        "headerName": "X-API-Key",
+        "apiKeyEnv": "DATA_CENTER_INCOMING_API_KEY",
         "maintainScope": "OA 收文待登记教学造数"
     }$$::jsonb,
     'seed', now(), 'seed', now(), 'ACTIVE', false

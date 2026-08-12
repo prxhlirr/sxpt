@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
+import com.sxpt.module.connector.TeachingDataTemplateUsageConstants;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.TeachingDataTemplateService;
@@ -80,6 +81,7 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
         existing.setStrategyId(template.getStrategyId());
         existing.setInitState(template.getInitState());
         existing.setSupportMode(template.getSupportMode());
+        existing.setTemplateUsage(normalizeTemplateUsage(template.getTemplateUsage()));
         existing.setConfigJson(template.getConfigJson());
         existing.setDataSchemaJson(template.getDataSchemaJson());
         existing.setMockRuleJson(template.getMockRuleJson());
@@ -206,6 +208,48 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
                 .eq("scene_type", sceneType)
                 .eq("status", RecordStatus.ACTIVE.getValue())
                 .eq("deleted", Boolean.FALSE)
+                .orderByDesc("create_time"));
+    }
+
+    /**
+     * 查询指定模板用途下的启用模板。
+     *
+     * @param tenantId 租户 ID。
+     * @param connectorSystemId 原平台学习环境 ID。
+     * @param moduleCode 业务模块编码。
+     * @param teachingPointId 教学点 ID，可为空。
+     * @param sceneType 教学场景。
+     * @param templateUsage 模板用途。
+     * @return 匹配的启用模板列表。
+     */
+    @Override
+    public List<TeachingDataTemplate> listActiveTemplatesByUsage(String tenantId,
+                                                                 String connectorSystemId,
+                                                                 String moduleCode,
+                                                                 String teachingPointId,
+                                                                 String sceneType,
+                                                                 String templateUsage) {
+        requireText(tenantId);
+        requireText(connectorSystemId);
+        requireText(moduleCode);
+        requireText(sceneType);
+        String normalizedUsage = normalizeTemplateUsage(templateUsage);
+        QueryWrapper<TeachingDataTemplate> query = new QueryWrapper<TeachingDataTemplate>()
+                .eq("tenant_id", tenantId)
+                .eq("connector_system_id", connectorSystemId)
+                .eq("module_code", moduleCode)
+                .eq("scene_type", sceneType)
+                .eq("template_usage", normalizedUsage)
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE);
+        if (StringUtils.hasText(teachingPointId)) {
+            query.and(wrapper -> wrapper
+                    .eq("teaching_point_id", teachingPointId)
+                    .or()
+                    .isNull("teaching_point_id"));
+        }
+        return teachingDataTemplateMapper.selectList(query
+                .orderByDesc("teaching_point_id")
                 .orderByDesc("create_time"));
     }
 
@@ -387,9 +431,32 @@ public class TeachingDataTemplateServiceImpl implements TeachingDataTemplateServ
         if (!StringUtils.hasText(template.getStatus())) {
             template.setStatus(RecordStatus.DISABLED.getValue());
         }
+        template.setTemplateUsage(normalizeTemplateUsage(template.getTemplateUsage()));
         if (template.getDeleted() == null) {
             template.setDeleted(Boolean.FALSE);
         }
+    }
+
+    /**
+     * 规范化模板用途。
+     *
+     * 业务功能：
+     * 1. 空值默认 NORMAL，保证历史模板和旧接口创建请求兼容。
+     * 2. 拒绝未知用途，避免经典案例运行时选到语义不明确的模板。
+     *
+     * @param templateUsage 模板用途。
+     * @return 规范化后的模板用途。
+     */
+    private String normalizeTemplateUsage(String templateUsage) {
+        String normalized = StringUtils.hasText(templateUsage)
+                ? templateUsage.trim()
+                : TeachingDataTemplateUsageConstants.NORMAL;
+        if (TeachingDataTemplateUsageConstants.NORMAL.equals(normalized)
+                || TeachingDataTemplateUsageConstants.CLASSIC_CASE_REPLAY.equals(normalized)
+                || TeachingDataTemplateUsageConstants.CLASSIC_CASE_DEMO.equals(normalized)) {
+            return normalized;
+        }
+        throw new BusinessException(ApiResultCode.PARAM_ERROR);
     }
 }
 

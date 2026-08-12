@@ -4,6 +4,7 @@ import com.sxpt.common.exception.BusinessException;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.connector.service.BusinessModuleProcessSnapshotService;
+import com.sxpt.module.connector.service.DataCreateRequestBuildService;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.teachingdata.entity.DataPrepareJob;
 import com.sxpt.module.teachingdata.entity.DataRequirementItem;
@@ -69,6 +70,7 @@ class DataPrepareOrchestrationServiceImplTests {
             teachingDataPoolMapper,
             teachingDataInstanceMapper,
             originDataPrepareAdapter,
+            new DataCreateRequestBuildService(),
             processSnapshotService);
 
     /**
@@ -198,6 +200,51 @@ class DataPrepareOrchestrationServiceImplTests {
         verify(originDataPrepareAdapter).createTeachingData(requestCaptor.capture());
         assertEquals(1, requestCaptor.getValue().getItems().size());
         assertEquals("item_002", requestCaptor.getValue().getItems().get(0).getRequestItemId());
+    }
+
+    /**
+     * 验证普通批次准备通过统一 DATA_CREATE 构建器后，仍完整保留第三方适配器需要的批次字段和参与方约束。
+     */
+    @Test
+    void executeCreateJobShouldKeepNormalDataCreateRequestContract() {
+        DataPrepareJob job = buildJob();
+        job.setRequestJson("{\"source\":\"normal\"}");
+        job.setTraceId("trace_001");
+        DataRequirementItem item = buildItem("item_001", "student_001");
+        item.setQuestionId("question_001");
+        item.setInitExternalStatus("DRAFT");
+        when(dataPrepareJobMapper.selectById("job_001")).thenReturn(job);
+        when(dataRequirementItemMapper.selectList(any())).thenReturn(Collections.singletonList(item));
+        mockInsertedInstanceValidation(item, true, null);
+        when(originDataPrepareAdapter.createTeachingData(any())).thenReturn(buildResponse(
+                buildSuccessResponseItem("item_001", "biz_001")));
+
+        service.executeCreateJob("job_001");
+
+        ArgumentCaptor<OriginDataPrepareAdapter.BatchCreateRequest> requestCaptor =
+                ArgumentCaptor.forClass(OriginDataPrepareAdapter.BatchCreateRequest.class);
+        verify(originDataPrepareAdapter).createTeachingData(requestCaptor.capture());
+        OriginDataPrepareAdapter.BatchCreateRequest request = requestCaptor.getValue();
+        assertEquals("tenant_001", request.getTenantId());
+        assertEquals("connector_001", request.getConnectorSystemId());
+        assertEquals("record_apply", request.getModuleCode());
+        assertEquals("tpl_001", request.getTemplateId());
+        assertEquals("DRAFT", request.getInitState());
+        assertEquals("PRACTICE", request.getSceneType());
+        assertEquals("batch_001", request.getRequestBatchId());
+        assertEquals("idem_001", request.getIdempotencyKey());
+        assertEquals("{\"source\":\"normal\"}", request.getRequestJson());
+        assertEquals("trace_001", request.getTraceId());
+        assertEquals(1, request.getItems().size());
+        OriginDataPrepareAdapter.RequestItem requestItem = request.getItems().get(0);
+        assertEquals("item_001", requestItem.getRequestItemId());
+        assertEquals("student_001", requestItem.getStudentId());
+        assertEquals("question_001", requestItem.getQuestionId());
+        assertEquals("org_required", requestItem.getRequiredExternalOrgId());
+        assertEquals("role_required", requestItem.getRequiredExternalRoleId());
+        assertEquals("student", requestItem.getActorType());
+        assertEquals("{\"scope\":\"demo\"}", requestItem.getDataScopeJson());
+        assertEquals("[\"submit\"]", requestItem.getRequiredActionsJson());
     }
 
     /**

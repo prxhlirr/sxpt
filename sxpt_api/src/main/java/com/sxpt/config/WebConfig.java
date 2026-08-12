@@ -4,8 +4,11 @@ import com.sxpt.common.audit.ApiAccessLogInterceptor;
 import com.sxpt.common.trace.TraceIdInterceptor;
 import com.sxpt.common.idempotent.IdempotentInterceptor;
 import com.sxpt.common.security.AuthenticatedUserContextService;
+import com.sxpt.common.security.ExternalApiKeyAuthInterceptor;
 import com.sxpt.common.security.JwtAuthInterceptor;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService;
 import org.apache.shiro.mgt.SecurityManager;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.context.annotation.Configuration;
@@ -35,6 +38,8 @@ public class WebConfig implements WebMvcConfigurer {
 
     private final AuthenticatedUserContextService authenticatedUserContextService;
 
+    private final ExternalConnectorCredentialService externalConnectorCredentialService;
+
     private final String[] allowedOrigins;
 
     private final boolean accessLogEnabled;
@@ -42,12 +47,14 @@ public class WebConfig implements WebMvcConfigurer {
     public WebConfig(SecurityManager securityManager,
                      StringRedisTemplate stringRedisTemplate,
                      AuthenticatedUserContextService authenticatedUserContextService,
+                     ObjectProvider<ExternalConnectorCredentialService> externalConnectorCredentialServiceProvider,
                      @Value("${sxpt.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
                      String allowedOrigins,
                      @Value("${sxpt.access-log.enabled:false}") boolean accessLogEnabled) {
         this.securityManager = securityManager;
         this.stringRedisTemplate = stringRedisTemplate;
         this.authenticatedUserContextService = authenticatedUserContextService;
+        this.externalConnectorCredentialService = externalConnectorCredentialServiceProvider.getIfAvailable();
         this.allowedOrigins = Arrays.stream(allowedOrigins.split(","))
                 .map(String::trim)
                 .filter(origin -> !origin.isEmpty())
@@ -99,9 +106,14 @@ public class WebConfig implements WebMvcConfigurer {
     public void addInterceptors(InterceptorRegistry registry) {
         registry.addInterceptor(new TraceIdInterceptor()).addPathPatterns("/**");
         registry.addInterceptor(new IdempotentInterceptor(stringRedisTemplate)).addPathPatterns("/**");
+        if (externalConnectorCredentialService != null) {
+            registry.addInterceptor(new ExternalApiKeyAuthInterceptor(externalConnectorCredentialService))
+                    .addPathPatterns("/api/v1/external/**");
+        }
         registry.addInterceptor(new JwtAuthInterceptor(securityManager, authenticatedUserContextService))
                 .addPathPatterns("/api/v1/**")
                 .excludePathPatterns(
+                        "/api/v1/external/**",
                         "/api/v1/system/**",
                         "/api/v1/auth/login",
                         "/api/v1/auth/token",

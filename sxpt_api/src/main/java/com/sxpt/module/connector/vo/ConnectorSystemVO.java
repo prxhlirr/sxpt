@@ -25,6 +25,10 @@ public class ConnectorSystemVO {
 
     private String systemType;
 
+    private String environmentType;
+
+    private String environmentGroupCode;
+
     private String baseUrl;
 
     private String authType;
@@ -73,6 +77,22 @@ public class ConnectorSystemVO {
 
     public void setSystemType(String systemType) {
         this.systemType = systemType;
+    }
+
+    public String getEnvironmentType() {
+        return environmentType;
+    }
+
+    public void setEnvironmentType(String environmentType) {
+        this.environmentType = environmentType;
+    }
+
+    public String getEnvironmentGroupCode() {
+        return environmentGroupCode;
+    }
+
+    public void setEnvironmentGroupCode(String environmentGroupCode) {
+        this.environmentGroupCode = environmentGroupCode;
     }
 
     public String getBaseUrl() {

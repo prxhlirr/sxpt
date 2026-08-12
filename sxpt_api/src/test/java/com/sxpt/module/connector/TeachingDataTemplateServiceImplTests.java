@@ -2,6 +2,7 @@ package com.sxpt.module.connector;
 
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
+import com.sxpt.module.connector.TeachingDataTemplateUsageConstants;
 import com.sxpt.module.connector.entity.TeachingDataTemplate;
 import com.sxpt.module.connector.mapper.TeachingDataTemplateMapper;
 import com.sxpt.module.connector.service.TeachingDataTemplateService;
@@ -50,6 +51,7 @@ class TeachingDataTemplateServiceImplTests {
 
         assertSame(template, saved);
         assertEquals(RecordStatus.DISABLED.getValue(), saved.getStatus());
+        assertEquals(TeachingDataTemplateUsageConstants.NORMAL, saved.getTemplateUsage());
         assertEquals(Boolean.FALSE, saved.getDeleted());
         assertNotNull(saved.getCreateTime());
         assertNotNull(saved.getUpdateTime());
@@ -156,6 +158,7 @@ class TeachingDataTemplateServiceImplTests {
         update.setModuleCode("record_apply");
         update.setInitState("DRAFT");
         update.setSupportMode("PRACTICE");
+        update.setTemplateUsage(TeachingDataTemplateUsageConstants.CLASSIC_CASE_DEMO);
         update.setConfigJson("{\"mode\":\"practice\"}");
         update.setDataSchemaJson("{\"fields\":[]}");
         update.setReadonlyFlag(Boolean.FALSE);
@@ -166,6 +169,7 @@ class TeachingDataTemplateServiceImplTests {
         assertEquals("updated template", result.getTemplateName());
         assertEquals("PRACTICE", result.getSceneType());
         assertEquals("{\"mode\":\"practice\"}", result.getConfigJson());
+        assertEquals(TeachingDataTemplateUsageConstants.CLASSIC_CASE_DEMO, result.getTemplateUsage());
         assertEquals("{\"fields\":[]}", result.getDataSchemaJson());
         assertEquals(Boolean.FALSE, result.getReadonlyFlag());
         assertNotNull(result.getUpdateTime());

@@ -2,8 +2,15 @@ package com.sxpt.module.connector;
 
 import com.sxpt.SxptApiApplication;
 import com.sxpt.common.security.JwtService;
+import com.sxpt.module.connector.entity.ConnectorExternalCredential;
 import com.sxpt.module.connector.entity.ConnectorSystem;
+import com.sxpt.module.connector.mapper.BusinessModuleMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessActorMapper;
+import com.sxpt.module.connector.mapper.BusinessModuleProcessStepMapper;
+import com.sxpt.module.connector.service.ClassicCaseService;
 import com.sxpt.module.connector.service.ConnectorSystemService;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService.GeneratedCredential;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +60,21 @@ class ConnectorSystemControllerTests {
 
     @MockBean
     private ConnectorSystemService connectorSystemService;
+
+    @MockBean
+    private ExternalConnectorCredentialService externalConnectorCredentialService;
+
+    @MockBean
+    private ClassicCaseService classicCaseService;
+
+    @MockBean
+    private BusinessModuleMapper businessModuleMapper;
+
+    @MockBean
+    private BusinessModuleProcessStepMapper businessModuleProcessStepMapper;
+
+    @MockBean
+    private BusinessModuleProcessActorMapper businessModuleProcessActorMapper;
 
     /**
      * 校验创建原平台配置成功返回统一响应。
@@ -243,6 +265,51 @@ class ConnectorSystemControllerTests {
     }
 
     /**
+     * 验证后台为原平台正式环境生成第三方 API Key 时只在本次响应返回明文。
+     *
+     * @throws Exception MockMvc 请求异常由测试框架处理。
+     */
+    @Test
+    void generateExternalApiKeyShouldReturnPlainKeyOnce() throws Exception {
+        ConnectorExternalCredential credential = buildExternalCredential();
+        when(externalConnectorCredentialService.generateApiKey("connector_001", "admin_001"))
+                .thenReturn(new GeneratedCredential(credential, "sk_live_connector_001_plain"));
+
+        mockMvc.perform(post("/api/v1/connector/system/connector_001/external-api-key/generate")
+                        .header("Authorization", bearerToken())
+                        .param("operator", "admin_001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.result.connectorSystemId", is("connector_001")))
+                .andExpect(jsonPath("$.result.apiKeyPrefix", is("sk_live_connector_001")))
+                .andExpect(jsonPath("$.result.apiKey", is("sk_live_connector_001_plain")));
+
+        verify(externalConnectorCredentialService).generateApiKey("connector_001", "admin_001");
+    }
+
+    /**
+     * 验证后台查询第三方对接 Key 时只返回摘要，不返回明文。
+     *
+     * @throws Exception MockMvc 请求异常由测试框架处理。
+     */
+    @Test
+    void getExternalApiKeyShouldReturnCredentialSummary() throws Exception {
+        ConnectorExternalCredential credential = buildExternalCredential();
+        when(externalConnectorCredentialService.getApiKeyByConnectorSystemId("connector_001"))
+                .thenReturn(credential);
+
+        mockMvc.perform(get("/api/v1/connector/system/connector_001/external-api-key")
+                        .header("Authorization", bearerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.result.connectorSystemId", is("connector_001")))
+                .andExpect(jsonPath("$.result.apiKeyPrefix", is("sk_live_connector_001")))
+                .andExpect(jsonPath("$.result.apiKey").doesNotExist());
+
+        verify(externalConnectorCredentialService).getApiKeyByConnectorSystemId("connector_001");
+    }
+
+    /**
      * 构造 Service 返回的已保存原平台配置。
      *
      * @return 原平台配置实体。
@@ -260,6 +327,20 @@ class ConnectorSystemControllerTests {
         connectorSystem.setCreateTime(LocalDateTime.now());
         connectorSystem.setUpdateTime(LocalDateTime.now());
         return connectorSystem;
+    }
+
+    private ConnectorExternalCredential buildExternalCredential() {
+        ConnectorExternalCredential credential = new ConnectorExternalCredential();
+        credential.setId("credential_001");
+        credential.setTenantId("tenant_001");
+        credential.setConnectorSystemId("connector_001");
+        credential.setCredentialName("正式环境外部调用密钥");
+        credential.setApiKeyPrefix("sk_live_connector_001");
+        credential.setStatus("ACTIVE");
+        credential.setCreateTime(LocalDateTime.now());
+        credential.setUpdateTime(LocalDateTime.now());
+        credential.setDeleted(Boolean.FALSE);
+        return credential;
     }
 
     /**

@@ -724,9 +724,14 @@ onMounted(initializePage);
         <h1>数据生成</h1>
         <p class="subtitle">面向教学任务触发原平台数据准备，并回看最近批次结果。</p>
       </div>
-      <button class="ghost-button" type="button" :disabled="refreshing" @click="refreshRecent">
-        {{ refreshing ? '刷新中' : '刷新结果' }}
-      </button>
+      <div class="header-actions">
+        <RouterLink class="ghost-button link-button" to="/admin/data-prepare/classic-cases">
+          经典案例
+        </RouterLink>
+        <button class="ghost-button" type="button" :disabled="refreshing" @click="refreshRecent">
+          {{ refreshing ? '刷新中' : '刷新结果' }}
+        </button>
+      </div>
     </header>
 
     <main class="workspace">
@@ -1158,6 +1163,13 @@ h2 {
   font-size: 14px;
 }
 
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(360px, 0.85fr);
@@ -1401,6 +1413,14 @@ button:disabled {
   border: 1px solid #cfd6e1;
   background: #ffffff;
   color: #334155;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  text-decoration: none;
 }
 
 .result-summary {
