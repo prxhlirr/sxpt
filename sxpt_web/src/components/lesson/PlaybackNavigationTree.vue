@@ -80,7 +80,7 @@ const currentStageStepEntries = computed(() =>
 }
 
 .playback-tree-item {
-  overflow: hidden;
+  //overflow: hidden;
   border: 1px solid #e5e9f0;
   border-radius: 10px;
   background: #fff;
