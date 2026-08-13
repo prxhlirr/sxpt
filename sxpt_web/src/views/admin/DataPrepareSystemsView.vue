@@ -23,6 +23,16 @@ type PlatformDialogMode = 'none' | 'create' | 'detail' | 'edit';
 type CapabilityDialogMode = 'none' | 'list' | 'create' | 'edit';
 
 const PAGE_SIZE = 10;
+const DATA_CREATE_REQUEST_SCHEMA = {
+  required: ['requestBatchId', 'items']
+};
+const DATA_CREATE_RESPONSE_SCHEMA = {
+  required: ['requestBatchId', 'items']
+};
+const DATA_CREATE_RETRY_POLICY = {
+  maxAttempts: 3,
+  backoffMs: 1000
+};
 
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
@@ -56,6 +66,14 @@ const form = reactive<ConnectorSystemForm>({
   configJson: '{\n  "apiKey": "",\n  "headerName": "X-API-Key"\n}'
 });
 
+const authConfigForm = reactive({
+  apiKey: '',
+  headerName: 'X-API-Key'
+});
+const extraAuthConfigRows = ref<Array<{ id: string; key: string; value: string }>>([]);
+const extraAuthConfigSeq = ref(0);
+const RESERVED_AUTH_CONFIG_KEYS = ['apiKey', 'headerName'];
+
 const capabilityForm = reactive<PlatformCapabilityRequest>({
   tenantId: tenantId.value,
   connectorSystemId: '',
@@ -71,6 +89,13 @@ const capabilityForm = reactive<PlatformCapabilityRequest>({
   retryPolicyJson: '{\n  "maxAttempts": 3,\n  "backoffMs": 1000\n}',
   createBy: session?.user.userId || 'admin',
   updateBy: session?.user.userId || 'admin'
+});
+
+const capabilitySchemaForm = reactive({
+  requestRequiredFields: 'requestBatchId,items',
+  responseRequiredFields: 'requestBatchId,items',
+  retryMaxAttempts: 3,
+  retryBackoffMs: 1000
 });
 
 const activeCount = computed(
@@ -99,11 +124,6 @@ const isCapabilityDialogOpen = computed(() => capabilityDialogMode.value !== 'no
 const selectedSystemCanGenerateExternalKey = computed(
   () => selectedSystem.value?.environmentType === 'PROD'
 );
-const configJsonPlaceholder = computed(() =>
-  dialogMode.value === 'edit'
-    ? '留空表示不修改原认证配置'
-    : '例如：{"apiKey":"your-api-key","headerName":"X-API-Key"}'
-);
 const visibleCapabilities = computed(() =>
   (metadata.value?.capabilities ?? [{ code: 'DATA_CREATE', label: '数据创建', visible: true }])
     .filter((item) => item.visible)
@@ -111,6 +131,20 @@ const visibleCapabilities = computed(() =>
 const visibleAuthTypes = computed(() =>
   (metadata.value?.authTypes ?? [{ code: 'API_KEY', label: 'API Key', visible: true }])
     .filter((item) => item.visible)
+);
+const visiblePlatformTypes = computed(() =>
+  (metadata.value?.platformTypes ?? [
+    { code: 'LOCAL_DEV', label: '本地联调', visible: true },
+    { code: 'CUSTOM', label: '自定义系统', visible: true },
+    { code: 'OA', label: 'OA 系统', visible: true },
+    { code: 'ERP', label: 'ERP 系统', visible: true }
+  ]).filter((item) => item.visible)
+);
+const visibleEnvironmentTypes = computed(() =>
+  (metadata.value?.environmentTypes ?? [
+    { code: 'PROD', label: '正式环境', visible: true },
+    { code: 'LEARNING', label: '学习环境', visible: true }
+  ]).filter((item) => item.visible)
 );
 
 onMounted(initialize);
@@ -166,6 +200,7 @@ function fillLocalDevDefaults() {
   form.baseUrl = 'http://127.0.0.1:8080/local-origin';
   form.authType = metadata.value?.platformDefaults.authType || 'API_KEY';
   form.configJson = metadata.value?.platformDefaults.authConfigJson || '{\n  "apiKey": "local-dev-api-key",\n  "headerName": "X-API-Key"\n}';
+  syncAuthConfigFormFromJson(form.configJson);
   notify('info', '已填充本地联调默认值，确认无误后再保存');
 }
 
@@ -202,6 +237,7 @@ async function editSystem(system: ConnectorSystem) {
     form.baseUrl = detail.baseUrl || '';
     form.authType = detail.authType || metadata.value?.platformDefaults.authType || 'API_KEY';
     form.configJson = detail.configJson || '';
+    syncAuthConfigFormFromJson(form.configJson);
     dialogMode.value = 'edit';
   }, '平台编辑信息已加载');
 }
@@ -248,6 +284,7 @@ async function generateExternalApiKey() {
  * 关键流程：先做必填校验，再调用创建接口；成功后插入列表首位并回到第一页。
  */
 async function saveConnectorSystem() {
+  syncFormConfigJsonFromAuthConfig();
   const validationMessage = validateForm();
   if (validationMessage) {
     notify('error', validationMessage);
@@ -278,6 +315,7 @@ async function saveConnectorSystem() {
  */
 async function updateConnectorSystem() {
   if (!selectedSystem.value) return;
+  syncFormConfigJsonFromAuthConfig();
   const validationMessage = validateEditForm();
   if (validationMessage) {
     notify('error', validationMessage);
@@ -372,6 +410,7 @@ function editCapability(capability: PlatformCapability) {
   capabilityForm.timeoutMs = capability.timeoutMs || 10000;
   capabilityForm.retryPolicyJson = capability.retryPolicyJson || '';
   capabilityForm.updateBy = session?.user.userId || 'admin';
+  syncCapabilitySchemaFormFromJson();
   capabilityDialogMode.value = 'edit';
 }
 
@@ -380,6 +419,7 @@ function editCapability(capability: PlatformCapability) {
  * 关键流程：先校验必填和 JSON，再调用后端创建接口；成功后回到能力列表并刷新事实状态。
  */
 async function saveCapability() {
+  syncCapabilityJsonFieldsFromForm();
   const validationMessage = validateCapabilityForm();
   if (validationMessage) {
     notify('error', validationMessage);
@@ -398,6 +438,7 @@ async function saveCapability() {
  */
 async function updateCapability() {
   if (!selectedCapability.value) return;
+  syncCapabilityJsonFieldsFromForm();
   const validationMessage = validateCapabilityForm();
   if (validationMessage) {
     notify('error', validationMessage);
@@ -462,7 +503,7 @@ function validateForm() {
   if (!form.systemName.trim()) return '请填写平台名称';
   if (!form.systemCode.trim()) return '请填写平台编码';
   if (!form.baseUrl.trim()) return '请填写平台地址';
-  if (form.environmentType && !['PROD', 'LEARNING'].includes(form.environmentType)) return '环境类型仅支持 PROD 或 LEARNING';
+  if (form.environmentType && !isKnownEnvironmentType(form.environmentType)) return '请选择有效的环境类型';
   if (form.authType !== defaultAuthType()) return `首期仅支持 ${defaultAuthType()} 认证`;
   const authMessage = validateApiKeyConfig();
   if (authMessage) return authMessage;
@@ -472,9 +513,8 @@ function validateForm() {
 function validateEditForm() {
   if (!form.systemName.trim()) return '请填写平台名称';
   if (!form.baseUrl.trim()) return '请填写平台地址';
-  if (form.environmentType && !['PROD', 'LEARNING'].includes(form.environmentType)) return '环境类型仅支持 PROD 或 LEARNING';
+  if (form.environmentType && !isKnownEnvironmentType(form.environmentType)) return '请选择有效的环境类型';
   if (form.authType !== defaultAuthType()) return `首期仅支持 ${defaultAuthType()} 认证`;
-  if (!form.configJson.trim()) return '';
   const authMessage = validateApiKeyConfig();
   if (authMessage) return authMessage;
   return '';
@@ -489,9 +529,14 @@ function resetForm() {
   form.baseUrl = '';
   form.authType = defaultAuthType();
   form.configJson = metadata.value?.platformDefaults.authConfigJson || '{\n  "apiKey": "",\n  "headerName": "X-API-Key"\n}';
+  syncAuthConfigFormFromJson(form.configJson);
 }
 
 function validateApiKeyConfig() {
+  if (!authConfigForm.apiKey.trim()) return '认证配置必须填写 apiKey';
+  if (!authConfigForm.headerName.trim()) return '认证配置必须填写请求头名称';
+  const extraConfigMessage = validateExtraAuthConfigRows();
+  if (extraConfigMessage) return extraConfigMessage;
   try {
     const config = JSON.parse(form.configJson || '{}') as { apiKey?: unknown };
     if (!config || typeof config !== 'object' || Array.isArray(config)) return '认证配置必须是 JSON 对象';
@@ -500,6 +545,99 @@ function validateApiKeyConfig() {
   } catch {
     return '认证配置必须是合法 JSON';
   }
+}
+
+function isKnownEnvironmentType(value: string) {
+  return visibleEnvironmentTypes.value.some((item) => item.code === value);
+}
+
+function parseAuthConfigJson(value?: string) {
+  try {
+    const parsed = JSON.parse(value || '{}') as { apiKey?: unknown; headerName?: unknown };
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function syncAuthConfigFormFromJson(value?: string) {
+  const config = parseAuthConfigJson(value);
+  authConfigForm.apiKey = typeof config.apiKey === 'string' ? config.apiKey : '';
+  authConfigForm.headerName =
+    typeof config.headerName === 'string' && config.headerName.trim()
+      ? config.headerName
+      : 'X-API-Key';
+  extraAuthConfigRows.value = Object.entries(config)
+    .filter(([key]) => !RESERVED_AUTH_CONFIG_KEYS.includes(key))
+    .map(([key, rowValue]) => ({
+      id: nextExtraAuthConfigRowId(),
+      key,
+      value: stringifyAuthConfigValue(rowValue)
+    }));
+}
+
+function buildAuthConfigJson() {
+  const config: Record<string, string> = {
+    apiKey: authConfigForm.apiKey.trim(),
+    headerName: authConfigForm.headerName.trim() || 'X-API-Key'
+  };
+  extraAuthConfigRows.value.forEach((row) => {
+    const key = row.key.trim();
+    if (key) {
+      config[key] = row.value;
+    }
+  });
+  return JSON.stringify(
+    config,
+    null,
+    2
+  );
+}
+
+function syncFormConfigJsonFromAuthConfig() {
+  form.authType = defaultAuthType();
+  form.configJson = buildAuthConfigJson();
+}
+
+function addExtraAuthConfigRow() {
+  extraAuthConfigRows.value.push({
+    id: nextExtraAuthConfigRowId(),
+    key: '',
+    value: ''
+  });
+}
+
+function removeExtraAuthConfigRow(rowId: string) {
+  extraAuthConfigRows.value = extraAuthConfigRows.value.filter((row) => row.id !== rowId);
+}
+
+function nextExtraAuthConfigRowId() {
+  extraAuthConfigSeq.value += 1;
+  return `auth-extra-${extraAuthConfigSeq.value}`;
+}
+
+function stringifyAuthConfigValue(value: unknown) {
+  if (typeof value === 'string') return value;
+  if (value == null) return '';
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function validateExtraAuthConfigRows() {
+  const usedKeys = new Set<string>();
+  for (const row of extraAuthConfigRows.value) {
+    const key = row.key.trim();
+    if (!key && !row.value.trim()) continue;
+    if (!key) return '高级认证配置的 key 不能为空';
+    if (RESERVED_AUTH_CONFIG_KEYS.includes(key)) return `高级认证配置不能覆盖保留字段 ${key}`;
+    if (usedKeys.has(key)) return `高级认证配置 key 重复：${key}`;
+    usedKeys.add(key);
+  }
+  return '';
+}
+
+function authConfigValueInputType(key: string) {
+  return /key|token|secret|password/i.test(key) ? 'password' : 'text';
 }
 
 function normalizePage() {
@@ -564,14 +702,33 @@ function applyCapabilityPreset(code = capabilityForm.capabilityCode) {
   capabilityForm.supportFlag = true;
   capabilityForm.method = defaults?.capabilityMethod || 'POST';
   capabilityForm.timeoutMs = defaults?.capabilityTimeoutMs || 10000;
-  capabilityForm.requestSchemaJson = '{\n  "required": ["requestBatchId", "items"]\n}';
-  capabilityForm.responseSchemaJson = '{\n  "required": ["requestBatchId", "items"]\n}';
-  capabilityForm.retryPolicyJson = '{\n  "maxAttempts": 3,\n  "backoffMs": 1000\n}';
+  syncCapabilityJsonFieldsFromForm();
+  syncCapabilitySchemaFormFromJson();
   const endpoints: Record<string, string> = {
     DATA_CREATE: '/openapi/teaching-data/batch-create'
   };
   capabilityForm.capabilityName = defaults?.capabilityName || option?.label || code;
   capabilityForm.endpointUrl = endpoints[code] || '/openapi/teaching-data';
+}
+
+function syncCapabilitySchemaFormFromJson() {
+  const requestSchema = parseJsonObject(capabilityForm.requestSchemaJson);
+  const responseSchema = parseJsonObject(capabilityForm.responseSchemaJson);
+  const retryPolicy = parseJsonObject(capabilityForm.retryPolicyJson);
+  capabilitySchemaForm.requestRequiredFields = csvFromArray(requestSchema.required, 'requestBatchId,items');
+  capabilitySchemaForm.responseRequiredFields = csvFromArray(responseSchema.required, 'requestBatchId,items');
+  capabilitySchemaForm.retryMaxAttempts = numberValue(retryPolicy.maxAttempts, 3);
+  capabilitySchemaForm.retryBackoffMs = numberValue(retryPolicy.backoffMs, 1000);
+}
+
+function syncCapabilityJsonFieldsFromForm() {
+  capabilitySchemaForm.requestRequiredFields = DATA_CREATE_REQUEST_SCHEMA.required.join(',');
+  capabilitySchemaForm.responseRequiredFields = DATA_CREATE_RESPONSE_SCHEMA.required.join(',');
+  capabilitySchemaForm.retryMaxAttempts = DATA_CREATE_RETRY_POLICY.maxAttempts;
+  capabilitySchemaForm.retryBackoffMs = DATA_CREATE_RETRY_POLICY.backoffMs;
+  capabilityForm.requestSchemaJson = JSON.stringify(DATA_CREATE_REQUEST_SCHEMA, null, 2);
+  capabilityForm.responseSchemaJson = JSON.stringify(DATA_CREATE_RESPONSE_SCHEMA, null, 2);
+  capabilityForm.retryPolicyJson = JSON.stringify(DATA_CREATE_RETRY_POLICY, null, 2);
 }
 
 function defaultAuthType() {
@@ -601,6 +758,33 @@ function isJsonObjectText(value?: string) {
   } catch {
     return false;
   }
+}
+
+function parseJsonObject(value?: string) {
+  if (!value?.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function splitCsv(value: string) {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function csvFromArray(value: unknown, fallback: string) {
+  return Array.isArray(value) && value.length > 0 ? value.join(',') : fallback;
+}
+
+function numberValue(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 </script>
 
@@ -822,15 +1006,18 @@ function isJsonObjectText(value?: string) {
           <label>
             <span>平台类型</span>
             <select v-model="form.systemType">
-              <option value="LOCAL_DEV">本地联调</option>
-              <option value="CUSTOM">自定义系统</option>
-              <option value="OA">OA 系统</option>
-              <option value="ERP">ERP 系统</option>
+              <option
+                v-for="platformType in visiblePlatformTypes"
+                :key="platformType.code"
+                :value="platformType.code"
+              >
+                {{ platformType.label }}
+              </option>
             </select>
           </label>
           <label>
             <span>认证方式</span>
-            <select v-model="form.authType">
+            <select v-model="form.authType" disabled>
               <option
                 v-for="authType in visibleAuthTypes"
                 :key="authType.code"
@@ -844,8 +1031,13 @@ function isJsonObjectText(value?: string) {
             <span>环境类型</span>
             <select v-model="form.environmentType">
               <option value="">未设置</option>
-              <option value="PROD">正式环境</option>
-              <option value="LEARNING">学习环境</option>
+              <option
+                v-for="environmentType in visibleEnvironmentTypes"
+                :key="environmentType.code"
+                :value="environmentType.code"
+              >
+                {{ environmentType.label }}
+              </option>
             </select>
           </label>
           <label>
@@ -856,14 +1048,68 @@ function isJsonObjectText(value?: string) {
             <span>平台地址 <em>*</em></span>
             <input v-model="form.baseUrl" type="text" placeholder="例如：http://127.0.0.1:8080/local-origin" />
           </label>
-          <label class="field-wide">
-            <span>扩展配置</span>
-            <textarea
-              v-model="form.configJson"
-              rows="4"
-              :placeholder="configJsonPlaceholder"
-            ></textarea>
-          </label>
+          <section class="field-wide auth-config-panel">
+            <div class="panel-heading">
+              <div>
+                <strong>认证配置</strong>
+                <span>首期固定使用 API Key，系统会自动生成接口需要的 JSON。</span>
+              </div>
+            </div>
+            <div class="capability-preset-summary">
+              <span>请求必填：{{ capabilitySchemaForm.requestRequiredFields }}</span>
+              <span>响应必填：{{ capabilitySchemaForm.responseRequiredFields }}</span>
+              <span>失败重试：最多 {{ capabilitySchemaForm.retryMaxAttempts }} 次，间隔 {{ capabilitySchemaForm.retryBackoffMs }} 毫秒</span>
+            </div>
+            <div v-if="false" class="auth-config-grid">
+              <label>
+                <span>API Key <em>*</em></span>
+                <input
+                  v-model="authConfigForm.apiKey"
+                  type="password"
+                  autocomplete="off"
+                  placeholder="请输入原平台接口认证 Key"
+                />
+              </label>
+              <label>
+                <span>请求头名称 <em>*</em></span>
+                <input v-model="authConfigForm.headerName" type="text" placeholder="X-API-Key" />
+              </label>
+            </div>
+            <details class="auth-extra-config">
+              <summary>高级键值配置</summary>
+              <div class="auth-extra-list">
+                <div
+                  v-for="row in extraAuthConfigRows"
+                  :key="row.id"
+                  class="auth-extra-row"
+                >
+                  <label>
+                    <span>Key</span>
+                    <input v-model="row.key" type="text" placeholder="例如：tenantId" />
+                  </label>
+                  <label>
+                    <span>Value</span>
+                    <input
+                      v-model="row.value"
+                      :type="authConfigValueInputType(row.key)"
+                      autocomplete="off"
+                      placeholder="请输入配置值"
+                    />
+                  </label>
+                  <button type="button" class="secondary-action" @click="removeExtraAuthConfigRow(row.id)">
+                    删除
+                  </button>
+                </div>
+                <button type="button" class="secondary-action" @click="addExtraAuthConfigRow">
+                  新增一组配置
+                </button>
+              </div>
+            </details>
+            <label class="json-preview">
+              <span>认证 JSON 预览</span>
+              <textarea :value="buildAuthConfigJson()" rows="4" readonly />
+            </label>
+          </section>
         </div>
 
         <footer class="dialog-actions">
@@ -1037,18 +1283,54 @@ function isJsonObjectText(value?: string) {
             <span>接口地址 <em>*</em></span>
             <input v-model="capabilityForm.endpointUrl" type="text" />
           </label>
-          <label class="field-wide">
-            <span>请求 Schema JSON</span>
-            <textarea v-model="capabilityForm.requestSchemaJson" rows="4" />
-          </label>
-          <label class="field-wide">
-            <span>响应 Schema JSON</span>
-            <textarea v-model="capabilityForm.responseSchemaJson" rows="4" />
-          </label>
-          <label class="field-wide">
-            <span>重试策略 JSON</span>
-            <textarea v-model="capabilityForm.retryPolicyJson" rows="3" />
-          </label>
+          <section class="field-wide capability-schema-panel">
+            <div class="panel-heading">
+              <div>
+                <strong>能力协议声明</strong>
+                <span>填写接口必填字段和重试参数，系统自动生成后端需要的 Schema JSON。</span>
+              </div>
+            </div>
+            <div class="auth-config-grid">
+              <label>
+                <span>请求必填字段</span>
+                <input
+                  v-model="capabilitySchemaForm.requestRequiredFields"
+                  type="text"
+                  placeholder="requestBatchId,items"
+                />
+              </label>
+              <label>
+                <span>响应必填字段</span>
+                <input
+                  v-model="capabilitySchemaForm.responseRequiredFields"
+                  type="text"
+                  placeholder="requestBatchId,items"
+                />
+              </label>
+              <label>
+                <span>最大重试次数</span>
+                <input v-model.number="capabilitySchemaForm.retryMaxAttempts" type="number" min="1" />
+              </label>
+              <label>
+                <span>退避毫秒</span>
+                <input v-model.number="capabilitySchemaForm.retryBackoffMs" type="number" min="0" />
+              </label>
+            </div>
+            <div class="schema-preview-grid">
+              <label class="json-preview">
+                <span>请求 Schema JSON</span>
+                <textarea :value="capabilityForm.requestSchemaJson" rows="4" readonly />
+              </label>
+              <label class="json-preview">
+                <span>响应 Schema JSON</span>
+                <textarea :value="capabilityForm.responseSchemaJson" rows="4" readonly />
+              </label>
+              <label class="json-preview">
+                <span>重试策略 JSON</span>
+                <textarea :value="capabilityForm.retryPolicyJson" rows="4" readonly />
+              </label>
+            </div>
+          </section>
         </section>
 
         <footer class="dialog-actions">
@@ -1329,6 +1611,12 @@ function isJsonObjectText(value?: string) {
   color: #64748b;
 }
 
+.create-form select:disabled {
+  cursor: not-allowed;
+  background: #f8fafc;
+  color: #64748b;
+}
+
 .create-form textarea {
   min-height: 96px;
   padding: 10px 11px;
@@ -1345,6 +1633,95 @@ function isJsonObjectText(value?: string) {
 
 .field-wide {
   grid-column: 1 / -1;
+}
+
+.auth-config-panel,
+.capability-schema-panel {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-heading div {
+  display: grid;
+  gap: 4px;
+}
+
+.panel-heading strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.panel-heading span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.auth-config-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+
+.auth-extra-config {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.auth-extra-config summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.auth-extra-config[open] summary {
+  margin-bottom: 10px;
+}
+
+.auth-extra-list {
+  display: grid;
+  gap: 10px;
+}
+
+.auth-extra-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.auth-extra-row .secondary-action {
+  min-height: 44px;
+}
+
+.json-preview textarea {
+  background: #ffffff;
+  color: #475569;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.schema-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .detail-grid {
@@ -1529,6 +1906,22 @@ function isJsonObjectText(value?: string) {
   padding-top: 18px;
 }
 
+.capability-preset-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.capability-preset-summary span {
+  border: 1px solid #dbe3ef;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 10px;
+}
+
 .check-line {
   display: flex;
   align-items: center;
@@ -1551,7 +1944,10 @@ function isJsonObjectText(value?: string) {
   .query-panel,
   .create-form,
   .detail-section,
-  .detail-grid {
+  .detail-grid,
+  .auth-config-grid,
+  .auth-extra-row,
+  .schema-preview-grid {
     grid-template-columns: 1fr;
   }
 

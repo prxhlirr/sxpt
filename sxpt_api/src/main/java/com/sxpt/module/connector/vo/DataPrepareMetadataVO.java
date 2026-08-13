@@ -22,6 +22,12 @@ public class DataPrepareMetadataVO {
 
     private List<OptionVO> sceneTypes;
 
+    private List<OptionVO> templateUsages;
+
+    private List<OptionVO> platformTypes;
+
+    private List<OptionVO> environmentTypes;
+
     private List<OptionVO> dataSourceStrategies;
 
     private List<OptionVO> prepareTimings;
@@ -64,6 +70,30 @@ public class DataPrepareMetadataVO {
 
     public void setSceneTypes(List<OptionVO> sceneTypes) {
         this.sceneTypes = sceneTypes;
+    }
+
+    public List<OptionVO> getTemplateUsages() {
+        return templateUsages;
+    }
+
+    public void setTemplateUsages(List<OptionVO> templateUsages) {
+        this.templateUsages = templateUsages;
+    }
+
+    public List<OptionVO> getPlatformTypes() {
+        return platformTypes;
+    }
+
+    public void setPlatformTypes(List<OptionVO> platformTypes) {
+        this.platformTypes = platformTypes;
+    }
+
+    public List<OptionVO> getEnvironmentTypes() {
+        return environmentTypes;
+    }
+
+    public void setEnvironmentTypes(List<OptionVO> environmentTypes) {
+        this.environmentTypes = environmentTypes;
     }
 
     public List<OptionVO> getDataSourceStrategies() {

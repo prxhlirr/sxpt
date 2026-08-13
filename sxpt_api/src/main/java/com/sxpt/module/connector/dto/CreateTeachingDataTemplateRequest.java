@@ -57,6 +57,29 @@ public class CreateTeachingDataTemplateRequest {
     @Size(max = 32768, message = "模板配置长度不能超过 32768")
     private String configJson;
 
+    @Size(max = 32768, message = "数据结构 JSON 长度不能超过 32768")
+    private String dataSchemaJson;
+
+    @Size(max = 32768, message = "模拟规则 JSON 长度不能超过 32768")
+    private String mockRuleJson;
+
+    private Boolean readonlyFlag;
+
+    @Size(max = 32768, message = "请求结构 JSON 长度不能超过 32768")
+    private String requestSchemaJson;
+
+    @Size(max = 32768, message = "单位角色要求 JSON 长度不能超过 32768")
+    private String requiredOrgRoleJson;
+
+    @Size(max = 32768, message = "结果校验 JSON 长度不能超过 32768")
+    private String resultCheckSchemaJson;
+
+    @Size(max = 32768, message = "敏感字段策略 JSON 长度不能超过 32768")
+    private String sensitiveFieldPolicyJson;
+
+    @Size(max = 64, message = "更新人长度不能超过 64")
+    private String updateBy;
+
     public String getTenantId() {
         return tenantId;
     }
@@ -151,5 +174,69 @@ public class CreateTeachingDataTemplateRequest {
 
     public void setConfigJson(String configJson) {
         this.configJson = configJson;
+    }
+
+    public String getDataSchemaJson() {
+        return dataSchemaJson;
+    }
+
+    public void setDataSchemaJson(String dataSchemaJson) {
+        this.dataSchemaJson = dataSchemaJson;
+    }
+
+    public String getMockRuleJson() {
+        return mockRuleJson;
+    }
+
+    public void setMockRuleJson(String mockRuleJson) {
+        this.mockRuleJson = mockRuleJson;
+    }
+
+    public Boolean getReadonlyFlag() {
+        return readonlyFlag;
+    }
+
+    public void setReadonlyFlag(Boolean readonlyFlag) {
+        this.readonlyFlag = readonlyFlag;
+    }
+
+    public String getRequestSchemaJson() {
+        return requestSchemaJson;
+    }
+
+    public void setRequestSchemaJson(String requestSchemaJson) {
+        this.requestSchemaJson = requestSchemaJson;
+    }
+
+    public String getRequiredOrgRoleJson() {
+        return requiredOrgRoleJson;
+    }
+
+    public void setRequiredOrgRoleJson(String requiredOrgRoleJson) {
+        this.requiredOrgRoleJson = requiredOrgRoleJson;
+    }
+
+    public String getResultCheckSchemaJson() {
+        return resultCheckSchemaJson;
+    }
+
+    public void setResultCheckSchemaJson(String resultCheckSchemaJson) {
+        this.resultCheckSchemaJson = resultCheckSchemaJson;
+    }
+
+    public String getSensitiveFieldPolicyJson() {
+        return sensitiveFieldPolicyJson;
+    }
+
+    public void setSensitiveFieldPolicyJson(String sensitiveFieldPolicyJson) {
+        this.sensitiveFieldPolicyJson = sensitiveFieldPolicyJson;
+    }
+
+    public String getUpdateBy() {
+        return updateBy;
+    }
+
+    public void setUpdateBy(String updateBy) {
+        this.updateBy = updateBy;
     }
 }

@@ -1,6 +1,14 @@
 export type PortalRole = 'admin' | 'teacher' | 'student';
 export type LessonStatus = 'DRAFT' | 'RECORDED' | 'PUBLISHED' | 'ARCHIVED';
 export type RunMode = 'LEARNING' | 'PRACTICE' | 'EXAM';
+export type DataPrepareMode = 'NORMAL' | 'CLASSIC_CASE';
+export interface TaskDataPrepareBinding {
+  dataPrepareMode: DataPrepareMode;
+  classicCaseAssetId?: string;
+  classicCaseVersionId?: string;
+  classicCaseCode?: string;
+  classicCaseTitle?: string;
+}
 export type CompletionMethod =
   | 'click'
   | 'business_check'
@@ -209,6 +217,11 @@ export interface ExamDataItem {
   status: DataItemStatus;
   revision: number;
   maskedReference: string;
+  dataPrepareMode?: DataPrepareMode;
+  classicCaseAssetId?: string;
+  classicCaseVersionId?: string;
+  classicCaseCode?: string;
+  classicCaseTitle?: string;
   replacementOf?: string;
   failureReason?: string;
   assignedStudentTaskIds?: string[];
@@ -227,6 +240,11 @@ export interface PublishedTask {
   groupCount: number;
   dataCount: number;
   completedCount: number;
+  dataPrepareMode?: DataPrepareMode;
+  classicCaseAssetId?: string;
+  classicCaseVersionId?: string;
+  classicCaseCode?: string;
+  classicCaseTitle?: string;
   remoteCourseId?: string;
   remoteTaskId?: string;
   remoteTeachingPointId?: string;
@@ -270,6 +288,11 @@ export interface StudentTask {
   status: 'TODO' | 'DOING' | 'SUBMITTED' | 'GRADED';
   currentStageIndex: number;
   completedStageIds: string[];
+  dataPrepareMode?: DataPrepareMode;
+  classicCaseAssetId?: string;
+  classicCaseVersionId?: string;
+  classicCaseCode?: string;
+  classicCaseTitle?: string;
   completedPracticeStepIds?: string[];
   practiceStepResults?: PracticeStepResult[];
   objectiveScore?: number;

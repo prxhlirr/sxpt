@@ -42,7 +42,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = SxptApiApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@TestPropertySource(properties = "sxpt.connector.data-template-controller.enabled=true")
+@TestPropertySource(properties = {
+        "sxpt.connector.data-template-controller.enabled=true",
+        "sxpt.connector.classic-case-controller.enabled=false",
+        "sxpt.connector.external-classic-case-controller.enabled=false"
+})
 class TeachingDataTemplateControllerTests {
 
     @Autowired

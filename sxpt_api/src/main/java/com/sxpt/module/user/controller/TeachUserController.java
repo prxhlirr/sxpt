@@ -1,8 +1,6 @@
 package com.sxpt.module.user.controller;
 
 import com.sxpt.common.api.ApiResult;
-import com.sxpt.common.api.ApiResultCode;
-import com.sxpt.common.exception.BusinessException;
 import com.sxpt.common.security.PasswordHashService;
 import com.sxpt.module.user.dto.CreateTeachUserRequest;
 import com.sxpt.module.user.entity.TeachUser;
@@ -42,6 +40,8 @@ import java.util.UUID;
 @RequestMapping("/api/v1/user")
 @ConditionalOnProperty(name = "sxpt.user.controller.enabled", havingValue = "true", matchIfMissing = true)
 public class TeachUserController {
+
+    private static final String DEFAULT_INITIAL_PASSWORD = "Sxpt@123456";
 
     private final TeachUserService teachUserService;
 
@@ -88,6 +88,24 @@ public class TeachUserController {
                 request.getTenantId(),
                 request.getId(),
                 request.getStatus());
+        return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 重置教学平台用户密码。
+     *
+     * 业务功能：管理员在用户管理页面将账号密码恢复为平台统一初始密码，避免运维人员直接修改数据库。
+     * 关键流程：Controller 固定使用平台初始密码，Service 负责按租户边界重置 salt/hash 并清理登录失败锁定信息。
+     *
+     * @param request 重置密码请求。
+     * @return 已重置密码的教学平台用户。
+     */
+    @PostMapping("/reset-password")
+    public ApiResult<TeachUserVO> resetPassword(@Valid @RequestBody ResetTeachUserPasswordRequest request) {
+        TeachUser saved = teachUserService.resetTeachUserPassword(
+                request.getTenantId(),
+                request.getId(),
+                DEFAULT_INITIAL_PASSWORD);
         return ApiResult.success(toVO(saved));
     }
 
@@ -159,15 +177,12 @@ public class TeachUserController {
      * @param teachUser 教学平台用户实体。
      */
     private void fillInitialPassword(CreateTeachUserRequest request, TeachUser teachUser) {
-        if (!StringUtils.hasText(request.getInitialPassword())) {
-            if ("LOCAL".equals(request.getSourceType())) {
-                throw new BusinessException(ApiResultCode.PARAM_ERROR);
-            }
-            return;
-        }
+        String initialPassword = StringUtils.hasText(request.getInitialPassword())
+                ? request.getInitialPassword()
+                : DEFAULT_INITIAL_PASSWORD;
         String salt = passwordHashService.generateSalt();
         teachUser.setPasswordSalt(salt);
-        teachUser.setPasswordHash(passwordHashService.hash(request.getInitialPassword(), salt));
+        teachUser.setPasswordHash(passwordHashService.hash(initialPassword, salt));
         teachUser.setPasswordAlgorithm(PasswordHashService.ALGORITHM);
         teachUser.setPasswordIterations(PasswordHashService.DEFAULT_ITERATIONS);
         teachUser.setPasswordStatus("NORMAL");
@@ -280,5 +295,20 @@ public class TeachUserController {
         public void setId(String id) { this.id = id; }
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
+    }
+
+    public static class ResetTeachUserPasswordRequest {
+        @NotBlank(message = "租户 ID 不能为空")
+        @Size(max = 64, message = "租户 ID 长度不能超过 64")
+        private String tenantId;
+
+        @NotBlank(message = "用户 ID 不能为空")
+        @Size(max = 64, message = "用户 ID 长度不能超过 64")
+        private String id;
+
+        public String getTenantId() { return tenantId; }
+        public void setTenantId(String tenantId) { this.tenantId = tenantId; }
+        public String getId() { return id; }
+        public void setId(String id) { this.id = id; }
     }
 }

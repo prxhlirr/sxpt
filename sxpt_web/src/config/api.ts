@@ -23,7 +23,7 @@ const defaults: SxptApiRuntimeConfig = {
   apiBaseUrl: 'http://127.0.0.1:8080/api/v1',
   timeoutMs: 15000,
   bearerToken: '',
-  autoDevToken: true,
+  autoDevToken: import.meta.env.VITE_API_AUTO_DEV_TOKEN === 'true',
   tenantId: 'demo-tenant',
   currentUserId: 'demo-teacher',
   currentUsername: 'demo-teacher',

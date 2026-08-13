@@ -1,6 +1,10 @@
 package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.CurrentUserContext;
+import com.sxpt.module.connector.ClassicCaseRuntimeConstants;
 import com.sxpt.module.connector.dto.ClassicCaseBatchGenerateRequest;
 import com.sxpt.module.connector.dto.ClassicCaseGenerateLaunchRequest;
 import com.sxpt.module.connector.dto.ClassicCaseGenerateRequest;
@@ -25,6 +29,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.util.StringUtils;
 
 import javax.validation.Valid;
 import java.util.ArrayList;
@@ -62,12 +67,13 @@ public class ClassicCaseController {
      * @return 经典案例列表。
      */
     @GetMapping("/list")
-    public ApiResult<List<ClassicCaseAssetVO>> listClassicCases(@RequestParam String tenantId,
+    public ApiResult<List<ClassicCaseAssetVO>> listClassicCases(@RequestParam(required = false) String tenantId,
                                                                 @RequestParam(required = false) String learningConnectorSystemId,
                                                                 @RequestParam(required = false) String moduleCode,
                                                                 @RequestParam(required = false) String teachingPointId) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
         List<ClassicCaseAsset> assets = classicCaseService.listClassicCaseAssets(
-                tenantId,
+                currentUser.getTenantId(),
                 learningConnectorSystemId,
                 moduleCode,
                 teachingPointId);
@@ -87,8 +93,9 @@ public class ClassicCaseController {
      */
     @GetMapping("/{id}")
     public ApiResult<ClassicCaseAssetVO> getClassicCase(@PathVariable String id,
-                                                        @RequestParam String tenantId) {
-        return ApiResult.success(toVO(classicCaseService.getClassicCaseAssetDetail(tenantId, id)));
+                                                        @RequestParam(required = false) String tenantId) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
+        return ApiResult.success(toVO(classicCaseService.getClassicCaseAssetDetail(currentUser.getTenantId(), id)));
     }
 
     /**
@@ -100,8 +107,9 @@ public class ClassicCaseController {
      */
     @GetMapping("/{id}/versions")
     public ApiResult<List<ClassicCaseVersionVO>> listClassicCaseVersions(@PathVariable String id,
-                                                                         @RequestParam String tenantId) {
-        List<ClassicCaseVersion> versions = classicCaseService.listClassicCaseVersions(tenantId, id);
+                                                                         @RequestParam(required = false) String tenantId) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
+        List<ClassicCaseVersion> versions = classicCaseService.listClassicCaseVersions(currentUser.getTenantId(), id);
         List<ClassicCaseVersionVO> result = new ArrayList<>();
         for (ClassicCaseVersion version : versions) {
             result.add(toVO(version));
@@ -117,6 +125,8 @@ public class ClassicCaseController {
      */
     @PostMapping("/import")
     public ApiResult<ClassicCaseAssetVO> importClassicCase(@Valid @RequestBody ClassicCaseImportRequest request) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
+        bindImportRequestToCurrentUser(request, currentUser);
         ClassicCaseAsset asset = classicCaseService.importClassicCase(request);
         return ApiResult.success(toVO(asset));
     }
@@ -129,6 +139,8 @@ public class ClassicCaseController {
      */
     @PostMapping("/generate")
     public ApiResult<ClassicCaseUsageVO> generateClassicCaseData(@Valid @RequestBody ClassicCaseGenerateRequest request) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseGenerateOperator(request);
+        bindGenerateRequestToCurrentUser(request, currentUser);
         ClassicCaseUsage usage = classicCaseService.generateClassicCaseData(request);
         return ApiResult.success(toVO(usage));
     }
@@ -142,6 +154,8 @@ public class ClassicCaseController {
     @PostMapping("/batch-generate")
     public ApiResult<ClassicCaseBatchGenerateVO> batchGenerateClassicCaseData(
             @Valid @RequestBody ClassicCaseBatchGenerateRequest request) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
+        bindBatchGenerateRequestToCurrentUser(request, currentUser);
         List<ClassicCaseUsage> usages = classicCaseService.batchGenerateClassicCaseData(request);
         ClassicCaseBatchGenerateVO vo = new ClassicCaseBatchGenerateVO();
         List<ClassicCaseUsageVO> usageVOList = new ArrayList<>();
@@ -164,9 +178,122 @@ public class ClassicCaseController {
      */
     @PostMapping("/generate-launch")
     public ApiResult<ClassicCaseLaunchVO> generateAndLaunch(@Valid @RequestBody ClassicCaseGenerateLaunchRequest request) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseGenerateOperator(request);
+        bindGenerateRequestToCurrentUser(request, currentUser);
         ClassicCaseService.ClassicCaseLaunchResult result =
                 classicCaseService.generateAndCreateLaunchContext(request);
         return ApiResult.success(toLaunchVO(result));
+    }
+
+    /**
+     * 读取当前登录用户并校验经典案例后台入口权限。
+     *
+     * 业务功能：
+     * 1. 经典案例管理属于教学平台内部能力，只允许管理员、老师和专家访问。
+     * 2. 所有租户边界都从认证上下文取得，避免继续信任前端传入的 tenantId。
+     *
+     * @return 当前可信登录用户。
+     */
+    private CurrentUserContext.CurrentUser requireClassicCaseOperator() {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        if (!isClassicCaseManager(currentUser)) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
+        return requireTenant(currentUser);
+    }
+
+    /**
+     * 校验经典案例生成入口权限。
+     *
+     * 业务功能：
+     * 1. 管理员、老师、专家可以用于备案/教学复刻和批量准备。
+     * 2. 学生只能在练习场景下按经典案例模板生成自己的 demo 数据，避免学生通过接口冒用教学备案能力。
+     *
+     * 关键流程：
+     * 1. 先读取可信登录上下文，不信任前端传入的用户身份。
+     * 2. 对学生角色额外限制 usageScene 必须是 STUDENT_DEMO。
+     *
+     * @param request 经典案例生成请求。
+     * @return 当前可信登录用户。
+     */
+    private CurrentUserContext.CurrentUser requireClassicCaseGenerateOperator(ClassicCaseGenerateRequest request) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        if (isClassicCaseManager(currentUser)) {
+            return requireTenant(currentUser);
+        }
+        if (currentUser.hasAnyRole("STUDENT")
+                && request != null
+                && ClassicCaseRuntimeConstants.USAGE_SCENE_STUDENT_DEMO.equals(request.getUsageScene())) {
+            return requireTenant(currentUser);
+        }
+        throw new BusinessException(ApiResultCode.FORBIDDEN);
+    }
+
+    private boolean isClassicCaseManager(CurrentUserContext.CurrentUser currentUser) {
+        return currentUser.hasAnyRole("ADMIN", "TEACHER", "EXPERT");
+    }
+
+    private CurrentUserContext.CurrentUser requireTenant(CurrentUserContext.CurrentUser currentUser) {
+        if (currentUser.getTenantId() == null || currentUser.getTenantId().trim().isEmpty()) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
+        return currentUser;
+    }
+
+    /**
+     * 将内部导入请求绑定到当前登录用户。
+     *
+     * 业务功能：
+     * 1. 内部管理入口允许管理员/老师/专家手工导入或补录经典案例。
+     * 2. 租户和创建人必须以后端认证上下文为准，防止请求体伪造跨租户案例。
+     *
+     * @param request 导入请求。
+     * @param currentUser 当前可信登录用户。
+     */
+    private void bindImportRequestToCurrentUser(ClassicCaseImportRequest request,
+                                                CurrentUserContext.CurrentUser currentUser) {
+        request.setTenantId(currentUser.getTenantId());
+        request.setCreateBy(currentUser.getUserId());
+    }
+
+    /**
+     * 将单条经典案例生成请求绑定到当前登录用户。
+     *
+     * 业务功能：
+     * 1. tenantId 必须从 JWT 上下文取得，避免前端伪造其他租户数据。
+     * 2. ownerUserId 默认使用当前用户；当老师/专家后续需要为学生生成数据时，仍保留显式 ownerUserId 的业务扩展点。
+     *
+     * @param request 生成请求。
+     * @param currentUser 当前可信登录用户。
+     */
+    private void bindGenerateRequestToCurrentUser(ClassicCaseGenerateRequest request,
+                                                  CurrentUserContext.CurrentUser currentUser) {
+        request.setTenantId(currentUser.getTenantId());
+        if (currentUser.hasAnyRole("STUDENT")) {
+            request.setOwnerUserId(currentUser.getUserId());
+            request.setRequiredExternalOrgId(null);
+            request.setRequiredExternalRoleId(null);
+            request.setActorType(null);
+            return;
+        }
+        if (!StringUtils.hasText(request.getOwnerUserId())) {
+            request.setOwnerUserId(currentUser.getUserId());
+        }
+    }
+
+    /**
+     * 将批量经典案例生成请求绑定到当前登录用户租户。
+     *
+     * 业务功能：
+     * 1. 批量 demo 生成可能面向一组学生，明细 ownerUserId 不能粗暴改成当前老师。
+     * 2. 租户边界仍必须由服务端上下文统一覆盖，避免跨租户批量造数。
+     *
+     * @param request 批量生成请求。
+     * @param currentUser 当前可信登录用户。
+     */
+    private void bindBatchGenerateRequestToCurrentUser(ClassicCaseBatchGenerateRequest request,
+                                                       CurrentUserContext.CurrentUser currentUser) {
+        request.setTenantId(currentUser.getTenantId());
     }
 
     /**

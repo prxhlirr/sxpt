@@ -618,12 +618,33 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         if (actors == null || actors.isEmpty()) {
             return null;
         }
-        String moduleActorCode = firstText(requestedActorType, firstModuleActorCode(identityBindingJson));
+        String moduleActorCode = resolveRequestedOrBoundActorCode(actors, requestedActorType, identityBindingJson);
         BusinessModuleProcessActor actor = resolveActorByCode(actors, moduleActorCode);
         return new ResolvedClassicCaseActor(
                 trimToNull(actor.getRequiredOrgCode()),
                 trimToNull(actor.getRequiredRoleCode()),
                 firstText(actor.getActorType(), actor.getActorRelation()));
+    }
+
+    /**
+     * 解析经典案例运行时应采用的模块参与方编码。
+     *
+     * 业务功能：
+     * 1. 请求入参 actorType 只在能命中模块参与方时作为显式选择。
+     * 2. teacher/student 等门户角色不能命中模块参与方时，回退到经典案例入库时确认过的 identityBinding。
+     *
+     * @param actors 模块参与方配置。
+     * @param requestedActorType 请求显式传入的参与方编码。
+     * @param identityBindingJson 经典案例身份绑定 JSON。
+     * @return 可用于匹配模块参与方的编码。
+     */
+    private String resolveRequestedOrBoundActorCode(List<BusinessModuleProcessActor> actors,
+                                                    String requestedActorType,
+                                                    String identityBindingJson) {
+        if (StringUtils.hasText(requestedActorType) && containsActorCode(actors, requestedActorType.trim())) {
+            return requestedActorType.trim();
+        }
+        return firstModuleActorCode(identityBindingJson);
     }
 
     /**
@@ -809,9 +830,7 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
      * @return 最终传给第三方学习环境的参与方类型。
      */
     private String resolveActorType(String requestedActorType, ResolvedClassicCaseActor defaultActor) {
-        if (StringUtils.hasText(requestedActorType)) {
-            return requestedActorType;
-        }
+        // actorType 必须来自教学平台模块参与方配置，避免前端把 teacher/student 等门户角色误传给原平台。
         return defaultActor == null ? null : defaultActor.getActorType();
     }
 

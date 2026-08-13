@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import TimedToast from '../../components/ui/TimedToast.vue';
 import { usersApi, type StudentDirectoryItem, type TeachOrg } from '../../api/users';
@@ -6,6 +6,7 @@ import { authApi, dataPrepareApi } from '../../services/trainingApi';
 import type {
   BusinessModule,
   ConnectorSystem,
+  DataPrepareMetadata,
   DataPrepareJob,
   DataPrepareParticipant,
   DataPreparePreflightCheck,
@@ -28,6 +29,7 @@ const toasts = ref<Array<{ id: number; message: string; tone: ToastTone }>>([]);
 let toastId = 0;
 
 const connectorSystems = ref<ConnectorSystem[]>([]);
+const metadata = ref<DataPrepareMetadata | null>(null);
 const businessModules = ref<BusinessModule[]>([]);
 const originOrgs = ref<OriginOrg[]>([]);
 const originRoles = ref<OriginRole[]>([]);
@@ -79,6 +81,12 @@ const selectedTemplate = computed(() =>
 );
 const latestRequirement = computed(() => requirements.value[0]);
 const latestJob = computed(() => jobs.value[0]);
+const visibleSceneTypes = computed(() =>
+  (metadata.value?.sceneTypes ?? [
+    { code: 'PRACTICE', label: '练习', visible: true },
+    { code: 'EXAM', label: '考试', visible: true }
+  ]).filter((item) => item.visible)
+);
 const classOptions = computed(() =>
   teachOrgs.value.filter((org) => org.orgType === 'CLASS')
 );
@@ -176,11 +184,26 @@ const preflightBlockingChecks = computed(() =>
  */
 async function initializePage() {
   await run(async () => {
-    await loadConnectorSystems();
+    await Promise.all([loadMetadata(), loadConnectorSystems()]);
     await Promise.all([loadTeachClassOptions(), loadStudentDirectory()]);
     await Promise.all([loadBusinessModules(), loadOriginAccessOptions()]);
     await Promise.all([loadTemplates(), loadStrategies(), refreshRecent()]);
   }, true);
+}
+
+/**
+ * 业务功能：加载数据准备元数据，为批次准备页提供统一的场景编码来源。
+ * 关键流程：后台字典不可用时保留页面兜底选项，避免运维发起造数主链路被配置中心短暂异常阻断。
+ */
+async function loadMetadata() {
+  try {
+    metadata.value = await dataPrepareApi.getDataPrepareMetadata();
+    if (!visibleSceneTypes.value.some((item) => item.code === form.sceneType)) {
+      form.sceneType = visibleSceneTypes.value[0]?.code || form.sceneType;
+    }
+  } catch (error) {
+    metadata.value = null;
+  }
 }
 
 /**
@@ -406,7 +429,7 @@ async function runPreflight() {
 
 /**
  * 业务功能：组装本次批次准备的全部参与者请求。
- * 关键流程：单学生模式生成一条参与者；班级模式按班级学生目录或粘贴学生 ID 生成多条参与者，确保后端一次请求即可创建 50 人级别的数据需求。
+ * 关键流程：单学生模式生成一条参与者；班级模式按班级学生目录或粘贴学生 ID 生成多条参与者，确保后端一次请求即可创建多人数据需求。
  */
 function buildParticipants(): DataPrepareParticipant[] {
   return batchStudentIds.value.map((studentId) => buildParticipantForStudent(studentId));
@@ -414,7 +437,7 @@ function buildParticipants(): DataPrepareParticipant[] {
 
 /**
  * 业务功能：为指定学生构造一条原平台数据需求参与者。
- * 关键流程：每个学生必须有独立 questionAttemptId，避免 50 人批量造数时因作答 ID 相同触发幂等冲突或结果覆盖。
+ * 关键流程：每个学生必须有独立 questionAttemptId，避免批量造数时因作答 ID 相同触发幂等冲突或结果覆盖。
  */
 function buildParticipantForStudent(studentId: string): DataPrepareParticipant {
   const trimmedStudentId = studentId.trim();
@@ -766,9 +789,9 @@ onMounted(initializePage);
             <label>
               <span>教学场景</span>
               <select v-model="form.sceneType">
-                <option value="PRACTICE">练习</option>
-                <option value="EXAM">考试</option>
-                <option value="TEACHING">教学</option>
+                <option v-for="scene in visibleSceneTypes" :key="scene.code" :value="scene.code">
+                  {{ scene.label }}
+                </option>
               </select>
             </label>
             <label>
@@ -935,7 +958,10 @@ onMounted(initializePage);
         </section>
 
         <details class="advanced-section">
-          <summary>高级参数与 JSON 预览</summary>
+          <summary>高级参数、兜底导入与 JSON 只读预览</summary>
+          <p class="advanced-helper">
+            下方 JSON 由页面字段自动生成，仅用于联调核对；日常造数不需要手动编辑。
+          </p>
           <div class="field-grid">
             <label>
               <span>批次 ID</span>
@@ -974,14 +1000,17 @@ onMounted(initializePage);
             <span>得分点快照 JSON（系统生成）</span>
             <textarea :value="generatedScorePointSnapshotJson" rows="4" readonly />
           </label>
-          <label>
-            <span>批量学生 ID 兜底</span>
-            <textarea
-              v-model.trim="form.pastedStudentIds"
-              rows="5"
-              placeholder="仅在班级学生目录为空时使用"
-            />
-          </label>
+          <details class="advanced-import">
+            <summary>学生 ID 兜底导入</summary>
+            <label>
+              <span>批量学生 ID</span>
+              <textarea
+                v-model.trim="form.pastedStudentIds"
+                rows="5"
+                placeholder="仅在班级学生目录为空时使用"
+              />
+            </label>
+          </details>
           <label>
             <span>参与者请求预览</span>
             <textarea :value="generatedParticipantPreviewJson" rows="10" readonly />
@@ -1041,7 +1070,7 @@ onMounted(initializePage);
           </div>
           <div>
             <span>生成对象</span>
-            <strong>{{ form.prepareScopeMode === 'class' ? `批量 ${participantCount} 人` : '单个学生' }}</strong>
+            <strong>{{ form.prepareScopeMode === 'class' ? '批量 ' + participantCount + ' 人' : '单个学生' }}</strong>
           </div>
         </section>
 
@@ -1280,6 +1309,36 @@ select:disabled {
 
 .advanced-section[open] summary {
   margin-bottom: 14px;
+}
+
+.advanced-helper {
+  margin: -4px 0 14px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.6;
+}
+
+.advanced-import {
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.advanced-import summary {
+  color: #334155;
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.advanced-import[open] summary {
+  margin-bottom: 12px;
+}
+
+.advanced-import label {
+  display: grid;
+  gap: 8px;
 }
 
 .batch-students {

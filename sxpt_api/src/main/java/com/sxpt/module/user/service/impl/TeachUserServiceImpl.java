@@ -3,9 +3,11 @@ package com.sxpt.module.user.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.PasswordHashService;
 import com.sxpt.module.user.entity.TeachUser;
 import com.sxpt.module.user.mapper.TeachUserMapper;
 import com.sxpt.module.user.service.TeachUserService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,10 +36,20 @@ public class TeachUserServiceImpl implements TeachUserService {
 
     private static final String DISABLED_STATUS = "DISABLED";
 
+    private static final String PASSWORD_STATUS_NORMAL = "NORMAL";
+
     private final TeachUserMapper teachUserMapper;
 
+    private final PasswordHashService passwordHashService;
+
     public TeachUserServiceImpl(TeachUserMapper teachUserMapper) {
+        this(teachUserMapper, new PasswordHashService());
+    }
+
+    @Autowired
+    public TeachUserServiceImpl(TeachUserMapper teachUserMapper, PasswordHashService passwordHashService) {
         this.teachUserMapper = teachUserMapper;
+        this.passwordHashService = passwordHashService;
     }
 
     /**
@@ -94,6 +106,36 @@ public class TeachUserServiceImpl implements TeachUserService {
         requireSupportedStatus(status);
         TeachUser existing = getExistingUser(tenantId, id);
         existing.setStatus(status);
+        existing.setUpdateTime(LocalDateTime.now());
+        teachUserMapper.updateById(existing);
+        return existing;
+    }
+
+    /**
+     * 重置教学平台本地登录密码。
+     *
+     * 业务功能：管理员在后台账号维护中将用户密码恢复为统一初始密码，避免用户忘记密码后只能通过数据库处理。
+     * 关键流程：先按租户边界读取未删除账号，再生成新的 salt/hash，最后恢复密码正常状态并清理登录失败锁定信息。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户 ID。
+     * @param rawPassword 重置后的明文密码。
+     * @return 已重置密码的用户实体。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachUser resetTeachUserPassword(String tenantId, String id, String rawPassword) {
+        requireText(rawPassword);
+        TeachUser existing = getExistingUser(tenantId, id);
+        String salt = passwordHashService.generateSalt();
+        existing.setPasswordSalt(salt);
+        existing.setPasswordHash(passwordHashService.hash(rawPassword, salt));
+        existing.setPasswordAlgorithm(PasswordHashService.ALGORITHM);
+        existing.setPasswordIterations(PasswordHashService.DEFAULT_ITERATIONS);
+        existing.setPasswordStatus(PASSWORD_STATUS_NORMAL);
+        existing.setPasswordUpdatedTime(LocalDateTime.now());
+        existing.setFailedLoginCount(0);
+        existing.setLockedUntil(null);
         existing.setUpdateTime(LocalDateTime.now());
         teachUserMapper.updateById(existing);
         return existing;

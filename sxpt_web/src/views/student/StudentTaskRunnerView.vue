@@ -10,6 +10,7 @@ import type { RecordedStep } from '../../domain/models';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import {
   dataPrepareApi,
+  type ClassicCaseLaunchResult,
   type DataInstanceAllocation,
   type StudentDataLaunchResult
 } from '../../services/trainingApi';
@@ -339,7 +340,45 @@ const modeLabel = computed(() =>
       ? '流程练习'
       : '正式考试'
 );
+const isClassicCaseTask = computed(
+  () =>
+    (task.value?.dataPrepareMode === 'CLASSIC_CASE' ||
+      publishedTask.value?.dataPrepareMode === 'CLASSIC_CASE') &&
+    Boolean(task.value?.classicCaseAssetId || publishedTask.value?.classicCaseAssetId)
+);
+const classicCaseAssetId = computed(
+  () => task.value?.classicCaseAssetId || publishedTask.value?.classicCaseAssetId || ''
+);
+const classicCaseVersionId = computed(
+  () => task.value?.classicCaseVersionId || publishedTask.value?.classicCaseVersionId || ''
+);
+const classicCaseTitle = computed(
+  () => task.value?.classicCaseTitle || publishedTask.value?.classicCaseTitle || ''
+);
 const activeAllocationId = computed(() => launchAllocation.value?.id || '');
+const originLaunchStatusTitle = computed(() => {
+  if (allocationLoading.value) return '正在识别原平台数据';
+  if (isClassicCaseTask.value) {
+    return launchResult.value ? '经典案例数据已生成' : '待生成经典案例数据';
+  }
+  return activeAllocationId.value ? '原平台数据已分配' : '暂无可进入的原平台数据';
+});
+const originLaunchStatusHint = computed(() => {
+  if (isClassicCaseTask.value) {
+    return launchResult.value
+      ? `已按经典案例${classicCaseTitle.value ? `「${classicCaseTitle.value}」` : ''}生成本次练习数据。`
+      : '进入原平台时，系统会按经典案例模板即时生成一份脱敏 demo 数据。';
+  }
+  return activeAllocationId.value
+    ? `分配记录 ${activeAllocationId.value}，系统将按该记录中的单位和角色进入原平台。`
+    : '系统会按当前学生、任务和场景查询数据分配记录；未查到时请确认老师是否已完成批次准备并下发。';
+});
+const originLaunchButtonText = computed(() => {
+  if (launchLoading.value) {
+    return isClassicCaseTask.value ? '正在生成案例数据' : '正在生成凭证';
+  }
+  return isClassicCaseTask.value ? '生成并进入原平台' : '进入原平台办理';
+});
 const activeOperationTarget = computed<
   'start' | 'search' | 'open' | 'submit' | undefined
 >(() => {
@@ -371,12 +410,78 @@ function resolveDataPrepareTaskId() {
   );
 }
 
+function adaptClassicCaseLaunchResult(
+  result: ClassicCaseLaunchResult
+): StudentDataLaunchResult {
+  const launchContext = result.launchContext;
+  const targetUrl = launchContext.targetUrl || result.usage.targetUrl || '';
+  return {
+    tenantId: launchContext.tenantId,
+    launchContextId: launchContext.id,
+    launchToken: launchContext.launchToken,
+    dataInstanceId:
+      result.usage.teachingDataInstanceId || result.usage.generatedInstanceId || '',
+    launchUrl: targetUrl,
+    targetUrl,
+    expireTime: launchContext.expireTime
+  };
+}
+
+async function prepareClassicCaseLaunch(openInNewWindow: boolean) {
+  if (!task.value) return;
+  if (!classicCaseAssetId.value) {
+    launchErrorMessage.value = '当前任务未绑定经典案例模板，请联系老师确认任务配置。';
+    return;
+  }
+  const session = authApi.getSession();
+  const taskId = resolveDataPrepareTaskId();
+  const requestId = `classic-case-${task.value.id}-${task.value.attemptNumber}-${Date.now()}`;
+  launchLoading.value = true;
+  launchMessage.value = '';
+  launchErrorMessage.value = '';
+  launchResult.value = null;
+  launchAllocation.value = null;
+  try {
+    const result = await dataPrepareApi.generateClassicCaseLaunch({
+      tenantId: session?.user.tenantId || '',
+      caseAssetId: classicCaseAssetId.value,
+      caseVersionId: classicCaseVersionId.value || undefined,
+      usageScene: 'STUDENT_DEMO',
+      sceneType: task.value.mode,
+      taskId,
+      ownerUserId: currentStudentId,
+      questionId: task.value.dataItemId || task.value.id,
+      requestBatchId: requestId,
+      requestItemId: task.value.id,
+      traceId: requestId,
+      sdkMode: 'STUDENT'
+    });
+    const adapted = adaptClassicCaseLaunchResult(result);
+    launchResult.value = adapted;
+    if (openInNewWindow && adapted.launchUrl) {
+      window.open(adapted.launchUrl, '_blank', 'noopener,noreferrer');
+      launchMessage.value = '经典案例数据已生成，请在新窗口继续办理。';
+    }
+  } catch (error) {
+    launchErrorMessage.value =
+      error instanceof Error ? error.message : '经典案例数据生成失败。';
+  } finally {
+    launchLoading.value = false;
+  }
+}
+
 /**
  * 业务功能：查询当前学生在本任务和场景下已分配的原平台数据。
  * 关键流程：学生页只展示已由数据准备批次分配好的记录，不在前端自行决定数据池或领取策略。
  */
 async function loadStudentAllocation() {
   if (!task.value) return;
+  if (isClassicCaseTask.value) {
+    launchAllocation.value = null;
+    launchMessage.value = '经典案例任务会在进入原平台时即时生成数据，无需查询普通分配记录。';
+    launchErrorMessage.value = '';
+    return;
+  }
   const taskId = resolveDataPrepareTaskId();
   if (!taskId) {
     launchAllocation.value = null;
@@ -411,6 +516,10 @@ async function loadStudentAllocation() {
  */
 async function prepareOriginPlatformLaunch(openInNewWindow: boolean) {
   if (!task.value) return;
+  if (isClassicCaseTask.value) {
+    await prepareClassicCaseLaunch(openInNewWindow);
+    return;
+  }
   const taskId = resolveDataPrepareTaskId();
   if (!taskId) {
     launchErrorMessage.value = '无法识别当前教学任务，请刷新后再试。';
@@ -427,7 +536,7 @@ async function prepareOriginPlatformLaunch(openInNewWindow: boolean) {
       executionId: task.value.remoteExecutionId
     });
     launchResult.value = result;
-    launchAllocation.value = result.allocation;
+    launchAllocation.value = result.allocation ?? null;
     if (openInNewWindow) {
       window.open(result.launchUrl, '_blank', 'noopener,noreferrer');
       launchMessage.value = '原平台进入凭证已生成，请在新窗口继续办理。';
@@ -462,7 +571,7 @@ async function ensurePracticeRuntime() {
     }
     if (
       task.value.status === 'DOING' &&
-      publishedTask.value?.remoteTaskId &&
+      (publishedTask.value?.remoteTaskId || isClassicCaseTask.value) &&
       !launchResult.value
     ) {
       await prepareOriginPlatformLaunch(false);
@@ -1929,7 +2038,24 @@ async function restartTrainingTask() {
                 <em>演示模式 · 操作不会写入真实业务系统</em>
               </header>
 
-              <div class="origin-launch-card">
+              <div v-if="isClassicCaseTask" class="origin-launch-card">
+                <div>
+                  <strong>{{ originLaunchStatusTitle }}</strong>
+                  <small>{{ originLaunchStatusHint }}</small>
+                </div>
+                <div class="origin-launch-card__actions">
+                  <button
+                    class="primary"
+                    type="button"
+                    :disabled="launchLoading || allocationLoading"
+                    @click="launchOriginPlatform"
+                  >
+                    {{ originLaunchButtonText }}
+                  </button>
+                </div>
+              </div>
+
+              <div v-else class="origin-launch-card">
                 <div>
                   <strong>
                     {{

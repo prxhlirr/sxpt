@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import PageHeader from '../../components/ui/PageHeader.vue';
-import type { PublishedTask } from '../../domain/models';
+import type { PublishedTask, TaskDataPrepareBinding } from '../../domain/models';
+import {
+  authApi,
+  dataPrepareApi,
+  type ClassicCaseAsset
+} from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { summarizeLessonRelease } from '../../utils/publishCenterPresentation';
 
@@ -14,6 +19,11 @@ const lesson = computed(() => store.getLesson(lessonId));
 const feedback = ref('');
 const feedbackSuccess = ref(false);
 const publishing = ref(false);
+const classicCases = ref<ClassicCaseAsset[]>([]);
+const classicCaseLoading = ref(false);
+const classicCaseError = ref('');
+const selectedClassicCaseId = ref('');
+const session = authApi.getSession();
 
 const learningTask = computed(() =>
   store.state.publishedTasks.find(
@@ -40,6 +50,48 @@ const releaseSummary = computed(() =>
   })
 );
 const assignedCount = computed(() => releaseSummary.value.assignedCount);
+const selectedClassicCase = computed(() =>
+  classicCases.value.find((item) => item.id === selectedClassicCaseId.value)
+);
+const dataPrepareBinding = computed<TaskDataPrepareBinding>(() => {
+  if (!selectedClassicCase.value) {
+    return { dataPrepareMode: 'NORMAL' };
+  }
+  return {
+    dataPrepareMode: 'CLASSIC_CASE',
+    classicCaseAssetId: selectedClassicCase.value.id,
+    classicCaseVersionId: selectedClassicCase.value.currentVersionId,
+    classicCaseCode: selectedClassicCase.value.caseCode,
+    classicCaseTitle: selectedClassicCase.value.caseTitle
+  };
+});
+const dataPrepareModeLabel = computed(() =>
+  selectedClassicCase.value
+    ? `经典案例：${selectedClassicCase.value.caseTitle}`
+    : '普通造数'
+);
+
+async function loadClassicCases() {
+  classicCaseLoading.value = true;
+  classicCaseError.value = '';
+  try {
+    classicCases.value = await dataPrepareApi.listClassicCases({
+      tenantId: session?.user.tenantId || '',
+      teachingPointId: lesson.value?.teachingPointId || undefined
+    });
+    if (
+      selectedClassicCaseId.value &&
+      !classicCases.value.some((item) => item.id === selectedClassicCaseId.value)
+    ) {
+      selectedClassicCaseId.value = '';
+    }
+  } catch (error) {
+    classicCaseError.value =
+      error instanceof Error ? error.message : '经典案例加载失败';
+  } finally {
+    classicCaseLoading.value = false;
+  }
+}
 
 function startLecture() {
   void router.push({
@@ -65,15 +117,25 @@ async function publishTrainingTasks() {
   }
   publishing.value = true;
   try {
-    const [, practice] = await store.publishLearningAndPracticeRemote(lessonId);
+    const [, practice] = await store.publishLearningAndPracticeRemote(
+      lessonId,
+      dataPrepareBinding.value
+    );
     feedbackSuccess.value = true;
-    feedback.value = `学习与练习已发布，为 ${practice.assignedCount} 名学生生成任务，并准备 ${practice.dataCount} 条原平台练习数据。`;
+    feedback.value =
+      practice.dataPrepareMode === 'CLASSIC_CASE'
+        ? `学习与练习已发布，为 ${practice.assignedCount} 名学生生成任务；练习数据将在学生进入原平台时按经典案例即时生成。`
+        : `学习与练习已发布，为 ${practice.assignedCount} 名学生生成任务，并准备 ${practice.dataCount} 条原平台练习数据。`;
   } catch (error) {
     feedback.value = error instanceof Error ? error.message : '学习、练习任务发布失败';
   } finally {
     publishing.value = false;
   }
 }
+
+onMounted(() => {
+  void loadClassicCases();
+});
 </script>
 
 <template>
@@ -131,6 +193,30 @@ async function publishTrainingTasks() {
           <span>练习数据</span>
           <strong>{{ releaseSummary.preparedDataCount }}</strong>
         </article>
+      </section>
+
+      <section class="release-data-source">
+        <div>
+          <span class="eyebrow">DATA SOURCE</span>
+          <h2>数据来源</h2>
+          <p>
+            当前：{{ dataPrepareModeLabel }}。普通造数会在发布练习时批量准备数据；
+            经典案例会在学生进入原平台时按模板即时生成 demo 数据。
+          </p>
+        </div>
+        <label>
+          <span>经典案例</span>
+          <select v-model="selectedClassicCaseId" :disabled="classicCaseLoading || publishing">
+            <option value="">不使用经典案例，按普通造数发布</option>
+            <option v-for="item in classicCases" :key="item.id" :value="item.id">
+              {{ item.caseTitle }}（{{ item.caseCode }}）
+            </option>
+          </select>
+        </label>
+        <button class="secondary" type="button" :disabled="classicCaseLoading" @click="loadClassicCases">
+          {{ classicCaseLoading ? '正在刷新' : '刷新案例' }}
+        </button>
+        <small v-if="classicCaseError" class="source-error">{{ classicCaseError }}</small>
       </section>
 
       <div v-if="feedback" class="notice" :class="feedbackSuccess ? 'success' : 'danger'">
@@ -299,6 +385,50 @@ async function publishTrainingTasks() {
   white-space: nowrap;
 }
 
+.release-data-source {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 360px) auto;
+  align-items: end;
+  gap: 14px;
+  border: 1px solid #dfe6f2;
+  border-radius: 14px;
+  padding: 16px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgb(41 47 75 / 6%);
+}
+
+.release-data-source h2,
+.release-data-source p {
+  margin: 0;
+}
+
+.release-data-source p,
+.release-data-source label span,
+.source-error {
+  color: var(--muted);
+}
+
+.release-data-source label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.release-data-source select {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid #d9deea;
+  border-radius: 10px;
+  padding: 0 12px;
+  background: #fff;
+  color: #31364f;
+}
+
+.source-error {
+  grid-column: 1 / -1;
+}
+
 .release-rail {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1.25fr);
@@ -423,6 +553,10 @@ async function publishTrainingTasks() {
   .release-rail {
     grid-template-columns: 1fr;
     gap: 10px;
+  }
+
+  .release-data-source {
+    grid-template-columns: 1fr;
   }
 
   .release-rail__connector {

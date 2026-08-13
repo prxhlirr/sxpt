@@ -63,9 +63,9 @@ INSERT INTO teach_user (
     'superadmin@example.com',
     'ADMIN',
     'LOCAL',
-    '{"seed":"system-menu-permission","role":"admin","initialPassword":"local-demo-only"}'::jsonb,
+    '{"seed":"system-menu-permission","role":"admin","initialPassword":"Sxpt@123456"}'::jsonb,
     now(),
-    'X9+UuJ57mFq+k1sEtguTvg8UP7BoocS+t+IsrKLyC3Q=',
+    'KwqqBr4ujZtPLEl805NTj3UgNJfZMNWjF2bl/hOE/58=',
     'c3hwdC1zdXBlci1hZG0=',
     'PBKDF2WithHmacSHA256',
     120000,
@@ -538,6 +538,56 @@ FROM all_role_permissions
 ON CONFLICT (tenant_id, role_id, permission_id) WHERE deleted = false
 DO UPDATE SET
     grant_source = EXCLUDED.grant_source,
+    update_by = 'seed',
+    update_time = now(),
+    status = 'ACTIVE';
+
+INSERT INTO sys_dict_item (
+    id, tenant_id, dict_code, dict_name, item_code, item_name, item_value,
+    sort_no, remark, create_by, create_time, update_by, update_time, status, deleted
+)
+VALUES
+    ('dict-dp-auth-api-key', 'demo-tenant', 'data_prepare_auth_type', '数据准备认证方式', 'API_KEY', 'API Key', 'API_KEY', 10, '第三方原平台通过 X-API-Key 请求头调用教学平台。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-cap-data-create', 'demo-tenant', 'data_prepare_capability', '数据准备能力', 'DATA_CREATE', '数据创建', 'DATA_CREATE', 10, 'P0 阶段唯一开放能力。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-scene-record', 'demo-tenant', 'data_prepare_scene_type', '数据准备场景', 'RECORD', '备案', 'RECORD', 10, '老师或专家备案讲解场景。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-scene-learn', 'demo-tenant', 'data_prepare_scene_type', '数据准备场景', 'LEARN', '学习', 'LEARN', 20, '学生学习场景。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-scene-practice', 'demo-tenant', 'data_prepare_scene_type', '数据准备场景', 'PRACTICE', '练习', 'PRACTICE', 30, '学生练习场景。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-scene-exam', 'demo-tenant', 'data_prepare_scene_type', '数据准备场景', 'EXAM', '考试', 'EXAM', 40, '考试场景。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-template-usage-normal', 'demo-tenant', 'data_prepare_template_usage', '模板用途', 'NORMAL', '普通造数模板', 'NORMAL', 10, '正常教学造数使用。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-template-usage-replay', 'demo-tenant', 'data_prepare_template_usage', '模板用途', 'CLASSIC_CASE_REPLAY', '经典案例还原模板', 'CLASSIC_CASE_REPLAY', 20, '专家或老师备案教学时还原经典案例数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-template-usage-demo', 'demo-tenant', 'data_prepare_template_usage', '模板用途', 'CLASSIC_CASE_DEMO', '经典案例练习模板', 'CLASSIC_CASE_DEMO', 30, '学生练习时按经典案例格式生成 demo 数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-platform-local-dev', 'demo-tenant', 'data_prepare_platform_type', '原平台类型', 'LOCAL_DEV', '本地联调', 'LOCAL_DEV', 10, '开发联调使用。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-platform-custom', 'demo-tenant', 'data_prepare_platform_type', '原平台类型', 'CUSTOM', '自定义系统', 'CUSTOM', 20, '通用第三方原平台。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-platform-oa', 'demo-tenant', 'data_prepare_platform_type', '原平台类型', 'OA', 'OA 系统', 'OA', 30, '办公类原平台。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-platform-erp', 'demo-tenant', 'data_prepare_platform_type', '原平台类型', 'ERP', 'ERP 系统', 'ERP', 40, '业务资源类原平台。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-env-prod', 'demo-tenant', 'data_prepare_environment_type', '原平台环境类型', 'PROD', '正式环境', 'PROD', 10, '专家创建经典案例的数据来源环境。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-env-learning', 'demo-tenant', 'data_prepare_environment_type', '原平台环境类型', 'LEARNING', '学习环境', 'LEARNING', 20, '备案、学习、练习、考试造数目标环境。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-source-mock', 'demo-tenant', 'data_prepare_source_strategy', '数据来源策略', 'MOCK_GENERATE', '系统生成', 'MOCK_GENERATE', 10, '由原平台学习环境按模板生成数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-source-pull', 'demo-tenant', 'data_prepare_source_strategy', '数据来源策略', 'PULL_ORIGIN', '原平台拉取', 'PULL_ORIGIN', 20, '从原平台读取或复刻数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-timing-demand', 'demo-tenant', 'data_prepare_prepare_timing', '数据准备时机', 'ON_DEMAND', '按需准备', 'ON_DEMAND', 10, '用户发起时即时造数。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-timing-publish', 'demo-tenant', 'data_prepare_prepare_timing', '数据准备时机', 'ON_PUBLISH', '发布时准备', 'ON_PUBLISH', 20, '教学任务发布时预生成。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-timing-before-start', 'demo-tenant', 'data_prepare_prepare_timing', '数据准备时机', 'BEFORE_START', '开始前准备', 'BEFORE_START', 30, '学习或考试开始前生成。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-share-readonly', 'demo-tenant', 'data_prepare_share_policy', '数据共享策略', 'SHARED_READONLY', '只读共享', 'SHARED_READONLY', 10, '多人只读复用同一份数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-share-student', 'demo-tenant', 'data_prepare_share_policy', '数据共享策略', 'STUDENT_EXCLUSIVE', '学生独占', 'STUDENT_EXCLUSIVE', 20, '每个学生独占一份数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-share-attempt', 'demo-tenant', 'data_prepare_share_policy', '数据共享策略', 'ATTEMPT_EXCLUSIVE', '练习独占', 'ATTEMPT_EXCLUSIVE', 30, '每次练习独占一份数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-share-question', 'demo-tenant', 'data_prepare_share_policy', '数据共享策略', 'QUESTION_EXCLUSIVE', '题目独占', 'QUESTION_EXCLUSIVE', 40, '按题目分配独立数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-regenerate-never', 'demo-tenant', 'data_prepare_regenerate_policy', '数据重建策略', 'NEVER', '不重建', 'NEVER', 10, '已生成数据持续复用。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-regenerate-attempt', 'demo-tenant', 'data_prepare_regenerate_policy', '数据重建策略', 'ON_ATTEMPT', '每次练习重建', 'ON_ATTEMPT', 20, '每次练习重新生成数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-regenerate-retake', 'demo-tenant', 'data_prepare_regenerate_policy', '数据重建策略', 'ON_RETAKE', '补考重建', 'ON_RETAKE', 30, '补考时重新生成数据。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-regenerate-failure', 'demo-tenant', 'data_prepare_regenerate_policy', '数据重建策略', 'ON_FAILURE', '失败重建', 'ON_FAILURE', 40, '生成失败后重新生成。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-lock-none', 'demo-tenant', 'data_prepare_lock_policy', '数据锁定策略', 'NONE', '不锁定', 'NONE', 10, '生成后不锁定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-lock-allocate', 'demo-tenant', 'data_prepare_lock_policy', '数据锁定策略', 'ON_ALLOCATE', '领取时锁定', 'ON_ALLOCATE', 20, '分配给用户后锁定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-dp-lock-exam-start', 'demo-tenant', 'data_prepare_lock_policy', '数据锁定策略', 'ON_EXAM_START', '考试开始锁定', 'ON_EXAM_START', 30, '考试开始后锁定。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-origin-status-draft', 'demo-tenant', 'origin_record_status', '原平台业务状态', 'DRAFT', '草稿', 'DRAFT', 10, '原平台草稿状态。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-origin-status-submitted', 'demo-tenant', 'origin_record_status', '原平台业务状态', 'SUBMITTED', '已提交', 'SUBMITTED', 20, '原平台提交状态。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
+    ('dict-origin-status-approved', 'demo-tenant', 'origin_record_status', '原平台业务状态', 'APPROVED', '已通过', 'APPROVED', 30, '原平台审批通过状态。', 'seed', now(), 'seed', now(), 'ACTIVE', false)
+ON CONFLICT (tenant_id, dict_code, item_code) WHERE deleted = false
+DO UPDATE SET
+    dict_name = EXCLUDED.dict_name,
+    item_name = EXCLUDED.item_name,
+    item_value = EXCLUDED.item_value,
+    sort_no = EXCLUDED.sort_no,
+    remark = EXCLUDED.remark,
     update_by = 'seed',
     update_time = now(),
     status = 'ACTIVE';

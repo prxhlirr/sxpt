@@ -1,14 +1,19 @@
 package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.connector.vo.DataPrepareMetadataVO;
+import com.sxpt.module.user.entity.SysDictItem;
+import com.sxpt.module.user.service.SystemConfigService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 /**
  * 数据准备后台配置元数据接口。
@@ -27,6 +32,30 @@ import java.util.Collections;
 @ConditionalOnProperty(name = "sxpt.connector.data-prepare-metadata-controller.enabled", havingValue = "true", matchIfMissing = true)
 public class DataPrepareMetadataController {
 
+    private static final String DICT_AUTH_TYPE = "data_prepare_auth_type";
+
+    private static final String DICT_CAPABILITY = "data_prepare_capability";
+
+    private static final String DICT_SCENE_TYPE = "data_prepare_scene_type";
+
+    private static final String DICT_TEMPLATE_USAGE = "data_prepare_template_usage";
+
+    private static final String DICT_PLATFORM_TYPE = "data_prepare_platform_type";
+
+    private static final String DICT_ENVIRONMENT_TYPE = "data_prepare_environment_type";
+
+    private static final String DICT_SOURCE_STRATEGY = "data_prepare_source_strategy";
+
+    private static final String DICT_PREPARE_TIMING = "data_prepare_prepare_timing";
+
+    private static final String DICT_SHARE_POLICY = "data_prepare_share_policy";
+
+    private static final String DICT_REGENERATE_POLICY = "data_prepare_regenerate_policy";
+
+    private static final String DICT_LOCK_POLICY = "data_prepare_lock_policy";
+
+    private static final String DICT_RECORD_STATUS = "origin_record_status";
+
     private static final String AUTH_TYPE_API_KEY = "API_KEY";
 
     private static final String CAPABILITY_DATA_CREATE = "DATA_CREATE";
@@ -37,6 +66,12 @@ public class DataPrepareMetadataController {
 
     private static final String SCENE_PRACTICE = "PRACTICE";
 
+    private final SystemConfigService systemConfigService;
+
+    public DataPrepareMetadataController(SystemConfigService systemConfigService) {
+        this.systemConfigService = systemConfigService;
+    }
+
     /**
      * 查询数据准备后台配置元数据。
      *
@@ -44,7 +79,42 @@ public class DataPrepareMetadataController {
      */
     @GetMapping
     public ApiResult<DataPrepareMetadataVO> detail() {
-        return ApiResult.success(buildMetadata());
+        return ApiResult.success(buildMetadataFromDict());
+    }
+
+    /**
+     * 业务功能：从后台字典构建数据准备元数据。
+     * 关键流程：优先读取当前租户字典；某组字典为空时复用内置兜底元数据，保证升级期页面仍可使用。
+     *
+     * @return 数据准备元数据响应。
+     */
+    private DataPrepareMetadataVO buildMetadataFromDict() {
+        String tenantId = CurrentUserContext.getRequiredUser().getTenantId();
+        DataPrepareMetadataVO fallback = buildMetadata();
+        DataPrepareMetadataVO metadata = new DataPrepareMetadataVO();
+        metadata.setAuthTypes(optionsFromDict(tenantId, DICT_AUTH_TYPE, fallback.getAuthTypes()));
+        metadata.setCapabilities(optionsFromDict(tenantId, DICT_CAPABILITY, fallback.getCapabilities()));
+        metadata.setSceneTypes(optionsFromDict(tenantId, DICT_SCENE_TYPE, fallback.getSceneTypes()));
+        metadata.setTemplateUsages(optionsFromDict(tenantId, DICT_TEMPLATE_USAGE, defaultTemplateUsages()));
+        metadata.setPlatformTypes(optionsFromDict(tenantId, DICT_PLATFORM_TYPE, defaultPlatformTypes()));
+        metadata.setEnvironmentTypes(optionsFromDict(tenantId, DICT_ENVIRONMENT_TYPE, defaultEnvironmentTypes()));
+        metadata.setDataSourceStrategies(optionsFromDict(
+                tenantId,
+                DICT_SOURCE_STRATEGY,
+                fallback.getDataSourceStrategies()));
+        metadata.setPrepareTimings(optionsFromDict(tenantId, DICT_PREPARE_TIMING, fallback.getPrepareTimings()));
+        metadata.setSharePolicies(optionsFromDict(tenantId, DICT_SHARE_POLICY, fallback.getSharePolicies()));
+        metadata.setRegeneratePolicies(optionsFromDict(
+                tenantId,
+                DICT_REGENERATE_POLICY,
+                fallback.getRegeneratePolicies()));
+        metadata.setLockPolicies(optionsFromDict(tenantId, DICT_LOCK_POLICY, fallback.getLockPolicies()));
+        metadata.setRecordStatuses(optionsFromDict(tenantId, DICT_RECORD_STATUS, fallback.getRecordStatuses()));
+        metadata.setPlatformDefaults(fallback.getPlatformDefaults());
+        metadata.setModuleDefaults(fallback.getModuleDefaults());
+        metadata.setTemplateDefaults(fallback.getTemplateDefaults());
+        metadata.setStrategyDefaults(fallback.getStrategyDefaults());
+        return metadata;
     }
 
     /**
@@ -68,6 +138,7 @@ public class DataPrepareMetadataController {
                 option(SCENE_PRACTICE, "练习", true),
                 option("EXAM", "考试", true)
         ));
+        metadata.setTemplateUsages(defaultTemplateUsages());
         metadata.setDataSourceStrategies(Arrays.asList(
                 option("MOCK_GENERATE", "本系统生成", true),
                 option("PULL_ORIGIN", "原平台拉取", true)
@@ -108,6 +179,49 @@ public class DataPrepareMetadataController {
 
     private DataPrepareMetadataVO.OptionVO option(String code, String label, boolean visible) {
         return new DataPrepareMetadataVO.OptionVO(code, label, visible);
+    }
+
+    /**
+     * 业务功能：把后台字典项转换为数据准备元数据选项。
+     * 关键流程：字典只查询 ACTIVE 项；字典为空时保留兜底值，避免误配置造成页面下拉为空。
+     */
+    private List<DataPrepareMetadataVO.OptionVO> optionsFromDict(
+            String tenantId,
+            String dictCode,
+            List<DataPrepareMetadataVO.OptionVO> fallbackOptions) {
+        List<SysDictItem> dictItems = systemConfigService.listActiveDictItemsByCode(tenantId, dictCode);
+        if (dictItems.isEmpty()) {
+            return fallbackOptions;
+        }
+        List<DataPrepareMetadataVO.OptionVO> options = new ArrayList<DataPrepareMetadataVO.OptionVO>();
+        for (SysDictItem dictItem : dictItems) {
+            options.add(option(dictItem.getItemValue(), dictItem.getItemName(), true));
+        }
+        return options;
+    }
+
+    private List<DataPrepareMetadataVO.OptionVO> defaultPlatformTypes() {
+        return Arrays.asList(
+                option("LOCAL_DEV", "本地联调", true),
+                option("CUSTOM", "自定义系统", true),
+                option("OA", "OA 系统", true),
+                option("ERP", "ERP 系统", true)
+        );
+    }
+
+    private List<DataPrepareMetadataVO.OptionVO> defaultEnvironmentTypes() {
+        return Arrays.asList(
+                option("PROD", "正式环境", true),
+                option("LEARNING", "学习环境", true)
+        );
+    }
+
+    private List<DataPrepareMetadataVO.OptionVO> defaultTemplateUsages() {
+        return Arrays.asList(
+                option("NORMAL", "普通造数模板", true),
+                option("CLASSIC_CASE_REPLAY", "经典案例还原模板", true),
+                option("CLASSIC_CASE_DEMO", "经典案例练习模板", true)
+        );
     }
 
     private DataPrepareMetadataVO.PlatformDefaultsVO buildPlatformDefaults() {

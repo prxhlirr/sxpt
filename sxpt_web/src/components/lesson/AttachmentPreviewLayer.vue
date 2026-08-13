@@ -12,7 +12,6 @@ import {
   type PreviewPlugin
 } from '@open-file-viewer/core';
 import '@open-file-viewer/core/style.css';
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import type { TrainingAttachment } from '../../domain/models';
 import { formatAttachmentSize } from '../../utils/trainingAttachments';
@@ -89,7 +88,6 @@ let resizeObserver: ResizeObserver | undefined;
 
 function buildPlugins(): PreviewPlugin[] {
   const pdfOptions = {
-    workerSrc: pdfWorkerSrc,
     useFetchData: true
   };
   return [

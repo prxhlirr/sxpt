@@ -1,0 +1,2 @@
+
+f8efdd471f9b5e7a0ffb613e6cd4fe865bcc87ef	{"key":"make-fetch-happen:request-cache:https://registry.npm.taobao.org/hls.js","integrity":null,"time":1786531516675,"size":"262","metadata":{"time":1786531516675,"url":"https://registry.npm.taobao.org/hls.js","reqHeaders":{"accept":"application/json"},"resHeaders":{"content-type":"text/html","date":"Wed, 12 Aug 2026 10:45:13 GMT","location":"https://registry.npmmirror.com/hls.js"},"options":{"compress":true},"status":301}}

@@ -25,6 +25,7 @@ type ModuleDetailTab = 'info' | 'chain' | 'dictionary';
 type OriginDictionaryMode = 'none' | 'org-create' | 'org-edit' | 'role-create' | 'role-edit';
 
 const PAGE_SIZE = 10;
+const DATA_CREATE_CAPABILITY_CODES_JSON = '["DATA_CREATE"]';
 
 const session = authApi.getSession();
 const tenantId = ref(session?.user.tenantId || 'demo-tenant');
@@ -78,6 +79,12 @@ const stepForm = reactive<BusinessModuleProcessStepRequest>({
   targetExternalStatus: 'SUBMITTED',
   completionRuleJson: '{"action":"submit"}',
   remark: ''
+});
+
+const completionRuleForm = reactive({
+  action: 'submit',
+  requiredStatus: 'SUBMITTED',
+  checkResult: true
 });
 
 const actorForm = reactive<BusinessModuleProcessActorRequest>({
@@ -287,7 +294,7 @@ async function createLocalModule() {
       needPreData: moduleForm.needPreData,
       defaultInitialStatus: moduleForm.defaultInitialStatus,
       defaultTargetStatus: moduleForm.defaultTargetStatus,
-      capabilityCodesJson: moduleForm.capabilityCodesJson,
+      capabilityCodesJson: DATA_CREATE_CAPABILITY_CODES_JSON,
       defaultTemplateId: moduleForm.defaultTemplateId,
       remark: moduleForm.remark,
       updateBy: session?.user.userId || 'admin'
@@ -697,7 +704,7 @@ async function updateModule() {
       needPreData: moduleForm.needPreData,
       defaultInitialStatus: moduleForm.defaultInitialStatus,
       defaultTargetStatus: moduleForm.defaultTargetStatus,
-      capabilityCodesJson: moduleForm.capabilityCodesJson,
+      capabilityCodesJson: DATA_CREATE_CAPABILITY_CODES_JSON,
       defaultTemplateId: moduleForm.defaultTemplateId,
       remark: moduleForm.remark,
       updateBy: session?.user.userId || 'admin'
@@ -771,7 +778,7 @@ function fillModuleForm(module: BusinessModuleRequest) {
   moduleForm.needPreData = Boolean(module.needPreData);
   moduleForm.defaultInitialStatus = module.defaultInitialStatus || metadata.value?.moduleDefaults.initialStatus || '';
   moduleForm.defaultTargetStatus = module.defaultTargetStatus || metadata.value?.moduleDefaults.targetStatus || '';
-  moduleForm.capabilityCodesJson = module.capabilityCodesJson || metadata.value?.moduleDefaults.capabilityCodesJson || '';
+  moduleForm.capabilityCodesJson = DATA_CREATE_CAPABILITY_CODES_JSON;
   moduleForm.defaultTemplateId = module.defaultTemplateId || '';
   moduleForm.remark = module.remark || '';
 }
@@ -796,6 +803,7 @@ function fillStepForm(step: BusinessModuleProcessStepRequest) {
   stepForm.initExternalStatus = step.initExternalStatus || '';
   stepForm.targetExternalStatus = step.targetExternalStatus || '';
   stepForm.completionRuleJson = step.completionRuleJson || '{}';
+  syncCompletionRuleFormFromJson(stepForm.completionRuleJson);
   stepForm.remark = step.remark || '';
 }
 
@@ -845,6 +853,35 @@ function handleOriginRoleChange() {
   actorForm.requiredRoleName = role?.roleName || '';
 }
 
+function parseCompletionRuleJson(value?: string) {
+  if (!value?.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function syncCompletionRuleFormFromJson(value?: string) {
+  const rule = parseCompletionRuleJson(value);
+  completionRuleForm.action = String(rule.action || 'submit');
+  completionRuleForm.requiredStatus = String(rule.requiredStatus || stepForm.targetExternalStatus || 'SUBMITTED');
+  completionRuleForm.checkResult =
+    typeof rule.checkResult === 'boolean' ? rule.checkResult : true;
+}
+
+function buildCompletionRuleJson() {
+  return JSON.stringify({
+    action: completionRuleForm.action || 'submit',
+    requiredStatus:
+      completionRuleForm.requiredStatus || stepForm.targetExternalStatus || 'SUBMITTED',
+    checkResult: completionRuleForm.checkResult
+  });
+}
+
 function buildStepRequest(): BusinessModuleProcessStepRequest {
   return {
     tenantId: tenantId.value,
@@ -857,7 +894,7 @@ function buildStepRequest(): BusinessModuleProcessStepRequest {
     stepType: stepForm.stepType?.trim(),
     initExternalStatus: stepForm.initExternalStatus?.trim(),
     targetExternalStatus: stepForm.targetExternalStatus?.trim(),
-    completionRuleJson: stepForm.completionRuleJson,
+    completionRuleJson: buildCompletionRuleJson(),
     remark: stepForm.remark,
     createBy: session?.user.userId || 'admin',
     updateBy: session?.user.userId || 'admin'
@@ -1568,10 +1605,11 @@ function relationText(value?: string) {
             <input v-model="moduleForm.needPreData" type="checkbox" />
             <span>需要预置数据</span>
           </label>
-          <label class="field-wide">
-            <span>能力编码 JSON</span>
-            <textarea v-model="moduleForm.capabilityCodesJson" rows="3"></textarea>
-          </label>
+          <div class="field-wide readonly-hint">
+            <span>造数能力</span>
+            <strong>DATA_CREATE</strong>
+            <small>首期仅开放数据创建能力，系统会自动保存为 {{ DATA_CREATE_CAPABILITY_CODES_JSON }}。</small>
+          </div>
           <label class="field-wide">
             <span>备注</span>
             <textarea v-model="moduleForm.remark" rows="3"></textarea>
@@ -1653,9 +1691,25 @@ function relationText(value?: string) {
             <span>完成状态</span>
             <input v-model="stepForm.targetExternalStatus" type="text" />
           </label>
+          <label>
+            <span>完成动作</span>
+            <select v-model="completionRuleForm.action">
+              <option value="submit">提交</option>
+              <option value="status_change">状态变化</option>
+              <option value="callback">原平台回调</option>
+            </select>
+          </label>
+          <label>
+            <span>要求状态</span>
+            <input v-model="completionRuleForm.requiredStatus" type="text" placeholder="SUBMITTED" />
+          </label>
+          <label class="checkbox-row">
+            <input v-model="completionRuleForm.checkResult" type="checkbox" />
+            <span>校验原平台返回结果</span>
+          </label>
           <label class="field-wide">
             <span>完成规则</span>
-            <textarea v-model="stepForm.completionRuleJson" rows="3"></textarea>
+            <textarea :value="buildCompletionRuleJson()" rows="3" readonly></textarea>
           </label>
           <label class="field-wide">
             <span>备注</span>
@@ -2400,6 +2454,42 @@ function relationText(value?: string) {
   padding: 11px 12px;
   resize: vertical;
   line-height: 1.55;
+}
+
+.readonly-hint,
+.json-preview {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #dbeafe;
+  border-radius: 12px;
+  padding: 12px;
+  background: #f8fbff;
+}
+
+.readonly-hint span,
+.json-preview span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.readonly-hint strong {
+  color: #1d4ed8;
+  font-size: 15px;
+}
+
+.readonly-hint small {
+  color: #64748b;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  width: auto;
+  min-height: auto;
 }
 
 .edit-form small {

@@ -16,6 +16,7 @@ import type {
   RunMode,
   StudentTask,
   StorageLike,
+  TaskDataPrepareBinding,
   TrainingState,
   UnitDataPlan
 } from '../domain/models';
@@ -1370,7 +1371,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   function ensureSimulatedModeTask(
     lessonId: string,
     mode: 'LEARNING' | 'PRACTICE',
-    audience: TrainingAudienceMember[]
+    audience: TrainingAudienceMember[],
+    dataPrepareBinding: TaskDataPrepareBinding = { dataPrepareMode: 'NORMAL' }
   ): PublishedTask {
     const existing = state.publishedTasks.find(
       (task) => task.lessonId === lessonId && task.mode === mode
@@ -1399,8 +1401,21 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       ).size,
       dataCount: 0,
       completedCount: 0,
+      dataPrepareMode: dataPrepareBinding.dataPrepareMode,
+      classicCaseAssetId: dataPrepareBinding.classicCaseAssetId,
+      classicCaseVersionId: dataPrepareBinding.classicCaseVersionId,
+      classicCaseCode: dataPrepareBinding.classicCaseCode,
+      classicCaseTitle: dataPrepareBinding.classicCaseTitle,
       syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
     };
+    published.dataPrepareMode = dataPrepareBinding.dataPrepareMode;
+    published.classicCaseAssetId = dataPrepareBinding.classicCaseAssetId;
+    published.classicCaseVersionId = dataPrepareBinding.classicCaseVersionId;
+    published.classicCaseCode = dataPrepareBinding.classicCaseCode;
+    published.classicCaseTitle = dataPrepareBinding.classicCaseTitle;
+    if (dataPrepareBinding.dataPrepareMode === 'CLASSIC_CASE') {
+      published.dataCount = 0;
+    }
     const membersByStudent = new Map<
       string,
       {
@@ -1436,6 +1451,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         existingAssignment.groupKeys = allGroupKeys;
         existingAssignment.unitId = member.unitId;
         existingAssignment.unitName = member.unitName;
+        existingAssignment.dataPrepareMode = dataPrepareBinding.dataPrepareMode;
+        existingAssignment.classicCaseAssetId = dataPrepareBinding.classicCaseAssetId;
+        existingAssignment.classicCaseVersionId = dataPrepareBinding.classicCaseVersionId;
+        existingAssignment.classicCaseCode = dataPrepareBinding.classicCaseCode;
+        existingAssignment.classicCaseTitle = dataPrepareBinding.classicCaseTitle;
         return;
       }
       state.studentTasks.push({
@@ -1456,6 +1476,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         status: 'TODO',
         currentStageIndex: 0,
         completedStageIds: [],
+        dataPrepareMode: dataPrepareBinding.dataPrepareMode,
+        classicCaseAssetId: dataPrepareBinding.classicCaseAssetId,
+        classicCaseVersionId: dataPrepareBinding.classicCaseVersionId,
+        classicCaseCode: dataPrepareBinding.classicCaseCode,
+        classicCaseTitle: dataPrepareBinding.classicCaseTitle,
         completedPracticeStepIds: [],
         practiceStepResults: [],
         syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
@@ -1529,7 +1554,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       published.remoteEvaluationRuleId = binding.evaluationRuleId;
       published.remoteTaskStepIdsByStepId =
         binding.taskStepIdsByStepId;
-      if (mode !== 'LEARNING') {
+      if (mode !== 'LEARNING' && published.dataPrepareMode !== 'CLASSIC_CASE') {
         const assignedStudentTasks = state.studentTasks.filter(
           (task) =>
             task.publishedTaskId === published.id && task.mode === mode
@@ -1577,7 +1602,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   }
 
   async function publishLearningAndPracticeRemote(
-    lessonId: string
+    lessonId: string,
+    dataPrepareBinding: TaskDataPrepareBinding = { dataPrepareMode: 'NORMAL' }
   ): Promise<PublishedTask[]> {
     let lesson = requireLesson(lessonId);
     // 学习、练习发布只设置一个业务门槛：教师已完成讲解。
@@ -1605,8 +1631,18 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       lesson = requireLesson(lessonId);
     }
     const audience = await resolveTrainingAudience(lessonId);
-    const learning = ensureSimulatedModeTask(lessonId, 'LEARNING', audience);
-    const practice = ensureSimulatedModeTask(lessonId, 'PRACTICE', audience);
+    const learning = ensureSimulatedModeTask(
+      lessonId,
+      'LEARNING',
+      audience,
+      dataPrepareBinding
+    );
+    const practice = ensureSimulatedModeTask(
+      lessonId,
+      'PRACTICE',
+      audience,
+      dataPrepareBinding
+    );
     await publishModeTaskRemote(lessonId, 'LEARNING', learning);
     await publishModeTaskRemote(lessonId, 'PRACTICE', practice);
     await saveAuthenticatedWorkspace();

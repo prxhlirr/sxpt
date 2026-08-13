@@ -185,11 +185,10 @@ async function generateTeachingReplica() {
       usageScene: 'TEACHING_REPLICA',
       sceneType: 'TEACHING',
       taskId: `classic-case-${selectedCase.value!.caseCode}`,
-      ownerUserId: session?.user.userId || 'teacher',
+      ownerUserId: session?.user.userId || '',
       requestBatchId: requestId,
       requestItemId: selectedCase.value!.id,
       traceId: requestId,
-      actorType: 'teacher',
       sdkMode: 'RECORD_SDK'
     });
   }, text.launchGenerated);

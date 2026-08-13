@@ -176,6 +176,9 @@ export interface DataPrepareMetadata {
   authTypes: DataPrepareMetadataOption[];
   capabilities: DataPrepareMetadataOption[];
   sceneTypes: DataPrepareMetadataOption[];
+  templateUsages?: DataPrepareMetadataOption[];
+  platformTypes?: DataPrepareMetadataOption[];
+  environmentTypes?: DataPrepareMetadataOption[];
   dataSourceStrategies: DataPrepareMetadataOption[];
   prepareTimings: DataPrepareMetadataOption[];
   sharePolicies: DataPrepareMetadataOption[];
@@ -331,6 +334,14 @@ export interface CreateTeachingDataTemplateRequest {
   supportMode?: string;
   templateUsage?: string;
   configJson?: string;
+  dataSchemaJson?: string;
+  mockRuleJson?: string;
+  readonlyFlag?: boolean;
+  requestSchemaJson?: string;
+  requiredOrgRoleJson?: string;
+  resultCheckSchemaJson?: string;
+  sensitiveFieldPolicyJson?: string;
+  updateBy?: string;
 }
 
 export interface BusinessModule {
@@ -654,7 +665,7 @@ export interface StudentDataLaunchResult {
   launchUrl: string;
   targetUrl: string;
   expireTime?: string;
-  allocation: DataInstanceAllocation;
+  allocation?: DataInstanceAllocation;
 }
 
 export interface CreateAuthoringLaunchRequest {
@@ -2227,8 +2238,13 @@ function normalizeState(state: TrainingState): TrainingState {
         normalized.businessPlatforms
       )
   }));
+  normalized.publishedTasks = normalized.publishedTasks.map((task) => ({
+    ...task,
+    dataPrepareMode: task.dataPrepareMode ?? 'NORMAL'
+  }));
   normalized.studentTasks = normalized.studentTasks.map((task) => ({
     ...task,
+    dataPrepareMode: task.dataPrepareMode ?? 'NORMAL',
     groupKeys:
       Array.isArray(task.groupKeys) && task.groupKeys.length > 0
         ? [...new Set(task.groupKeys)]

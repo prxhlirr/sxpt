@@ -7,13 +7,14 @@ import {
   isDataPrepareConfigIncompleteError,
   type BusinessModule,
   type ConnectorSystem,
+  type CreateTeachingDataTemplateRequest,
   type DataPrepareMetadata,
   type TeachingDataTemplate,
   type TeachingDataTemplateRequest
 } from '../../services/trainingApi';
 
 const PAGE_SIZE = 10;
-const TEMPLATE_USAGE_OPTIONS = [
+const TEMPLATE_USAGE_FALLBACK_OPTIONS = [
   { code: 'NORMAL', label: '普通造数模板' },
   { code: 'CLASSIC_CASE_REPLAY', label: '经典案例还原模板' },
   { code: 'CLASSIC_CASE_DEMO', label: '经典案例 demo 模板' }
@@ -70,6 +71,15 @@ const templateJsonBuilder = reactive({
   sensitiveFields: ''
 });
 
+const templateStructureForm = reactive({
+  dataFields: 'businessId,status,ownerExternalOrgId,requiredExternalRoleId',
+  dataRequiredFields: 'businessId,status',
+  mockMode: 'demo',
+  mockCount: 1,
+  mockVaryFields: 'businessId',
+  requestRequiredFields: 'requestBatchId,items'
+});
+
 function getDefaultTemplateForm(): TeachingDataTemplateRequest {
   return {
     templateName: '本地联调数据模板',
@@ -118,21 +128,29 @@ const visibleSceneTypes = computed(() =>
     { code: 'EXAM', label: '考试', visible: true }
   ]).filter((item) => item.visible)
 );
+
+const visibleTemplateUsages = computed(() => {
+  const usages = metadata.value?.templateUsages;
+  if (usages?.length) {
+    return usages.filter((item) => item.visible);
+  }
+  return TEMPLATE_USAGE_FALLBACK_OPTIONS.map((item) => ({ ...item, visible: true }));
+});
 const templateEnableChecklist = computed(() => {
   const config = parseJsonObject(templateForm.configJson);
   const orgRole = parseJsonObject(templateForm.requiredOrgRoleJson);
   const resultCheck = parseJsonObject(templateForm.resultCheckSchemaJson);
   return [
     {
-      label: '初始数据配置 JSON 包含 adapter',
+      label: '已配置数据创建适配器',
       done: hasText(config.adapter)
     },
     {
-      label: '单位要求 JSON 包含 org',
+      label: '已配置单位要求',
       done: hasText(orgRole.org)
     },
     {
-      label: '角色要求 JSON 包含 role',
+      label: '已配置角色要求',
       done: hasText(orgRole.role)
     },
     {
@@ -161,6 +179,9 @@ watch([businessModuleId, sceneType], async () => {
     templateForm.moduleCode = selectedModule.value?.moduleCode || '';
   }
 });
+
+watch(templateJsonBuilder, () => syncTemplateJsonFieldsFromBuilder(), { deep: true });
+watch(templateStructureForm, () => syncTemplateStructureJsonFieldsFromForm(), { deep: true });
 
 /**
  * 业务功能：初始化模板管理上下文，让模板绑定到平台、模块和教学场景。
@@ -224,12 +245,15 @@ async function loadTemplates() {
 function openCreateTemplateDialog() {
   createTemplateCode.value = `LOCAL_TEMPLATE_${Date.now()}`;
   fillTemplateForm(getDefaultTemplateForm());
-  applyTemplateJsonBuilder();
+  syncTemplateJsonFieldsFromBuilder();
+  syncTemplateStructureJsonFieldsFromForm();
   dialogMode.value = 'create';
 }
 
 async function createLocalTemplate() {
   const module = selectedModule.value;
+  syncTemplateJsonFieldsFromBuilder();
+  syncTemplateStructureJsonFieldsFromForm();
   if (!connectorSystemId.value || !module) {
     notify('error', '请先选择原平台和业务模块');
     return;
@@ -240,20 +264,7 @@ async function createLocalTemplate() {
   }
   await run(async () => {
     sceneType.value = templateForm.sceneType;
-    const created = await dataPrepareApi.createTemplate({
-      tenantId: tenantId.value,
-      connectorSystemId: connectorSystemId.value,
-      templateCode: createTemplateCode.value.trim(),
-      templateName: templateForm.templateName.trim(),
-      sceneType: templateForm.sceneType,
-      moduleCode: module.moduleCode,
-      teachingPointId: templateForm.teachingPointId?.trim(),
-      strategyId: templateForm.strategyId?.trim(),
-      initState: templateForm.initState?.trim(),
-      supportMode: templateForm.supportMode?.trim(),
-      templateUsage: templateForm.templateUsage?.trim() || 'NORMAL',
-      configJson: templateForm.configJson?.trim()
-    });
+    const created = await dataPrepareApi.createTemplate(buildTemplateCreateRequest(module));
     templates.value = [created, ...templates.value];
     currentPage.value = 1;
     closeDialog();
@@ -290,6 +301,8 @@ async function editTemplate(template: TeachingDataTemplate) {
  */
 async function updateTemplate() {
   if (!selectedTemplate.value) return;
+  syncTemplateJsonFieldsFromBuilder();
+  syncTemplateStructureJsonFieldsFromForm();
   if (!templateForm.templateName.trim() || !templateForm.moduleCode.trim()) {
     notify('error', '请填写模板名称和模块编码');
     return;
@@ -353,7 +366,7 @@ async function openTemplateEditorAfterEnableFailure(template: TeachingDataTempla
 function templateEnableErrorMessage(err: unknown) {
   const rawMessage = err instanceof Error ? err.message : '操作失败';
   const normalized = rawMessage.trim();
-  const guide = '请在“常用配置表单”中补齐适配器、单位要求、角色要求，并生成 JSON 后保存。';
+  const guide = '请在“常用配置表单”中补齐适配器、单位要求、角色要求后保存。';
   if (isDataPrepareConfigIncompleteError(err)) {
     return `模板启用失败：运行配置不完整。${guide}`;
   }
@@ -383,13 +396,14 @@ function fillTemplateForm(template: TeachingDataTemplate | TeachingDataTemplateR
   templateForm.sensitiveFieldPolicyJson = template.sensitiveFieldPolicyJson || '';
   templateForm.updateBy = operatorId;
   syncTemplateJsonBuilderFromForm();
+  syncTemplateStructureFormFromJson();
 }
 
 /**
  * 业务功能：用结构化表单生成模板 JSON，降低管理员直接维护 JSON 的理解成本。
  * 关键流程：把常用的适配器、单位角色、结果校验和脱敏字段转换为后端兼容 JSON 字段。
  */
-function applyTemplateJsonBuilder() {
+function syncTemplateJsonFieldsFromBuilder() {
   templateForm.configJson = stringifyJson({
     adapter: templateJsonBuilder.adapter.trim() || 'local',
     mode: templateJsonBuilder.mode.trim() || 'demo'
@@ -404,7 +418,53 @@ function applyTemplateJsonBuilder() {
   templateForm.sensitiveFieldPolicyJson = stringifyJson({
     maskFields: splitCsv(templateJsonBuilder.sensitiveFields)
   });
-  notify('success', '已根据表单生成模板 JSON');
+}
+
+function syncTemplateStructureJsonFieldsFromForm() {
+  const dataFields = splitCsv(templateStructureForm.dataFields);
+  const properties = dataFields.reduce<Record<string, { type: string }>>((result, field) => {
+    result[field] = { type: 'string' };
+    return result;
+  }, {});
+  templateForm.dataSchemaJson = stringifyJson({
+    required: splitCsv(templateStructureForm.dataRequiredFields),
+    properties
+  });
+  templateForm.mockRuleJson = stringifyJson({
+    mode: templateStructureForm.mockMode.trim() || 'demo',
+    count: Number(templateStructureForm.mockCount) || 1,
+    varyFields: splitCsv(templateStructureForm.mockVaryFields)
+  });
+  templateForm.requestSchemaJson = stringifyJson({
+    required: splitCsv(templateStructureForm.requestRequiredFields)
+  });
+}
+
+function syncTemplateStructureFormFromJson() {
+  const dataSchema = parseJsonObject(templateForm.dataSchemaJson);
+  const mockRule = parseJsonObject(templateForm.mockRuleJson);
+  const requestSchema = parseJsonObject(templateForm.requestSchemaJson);
+  const propertyNames =
+    dataSchema.properties && typeof dataSchema.properties === 'object' && !Array.isArray(dataSchema.properties)
+      ? Object.keys(dataSchema.properties)
+      : [];
+  templateStructureForm.dataFields = propertyNames.length
+    ? propertyNames.join(',')
+    : templateStructureForm.dataFields;
+  templateStructureForm.dataRequiredFields = csvFromArray(
+    dataSchema.required,
+    templateStructureForm.dataRequiredFields
+  );
+  templateStructureForm.mockMode = stringValue(mockRule.mode, templateStructureForm.mockMode);
+  templateStructureForm.mockCount = numberValue(mockRule.count, templateStructureForm.mockCount);
+  templateStructureForm.mockVaryFields = csvFromArray(
+    mockRule.varyFields,
+    templateStructureForm.mockVaryFields
+  );
+  templateStructureForm.requestRequiredFields = csvFromArray(
+    requestSchema.required,
+    templateStructureForm.requestRequiredFields
+  );
 }
 
 /**
@@ -430,6 +490,16 @@ function syncTemplateJsonBuilderFromForm() {
  * 业务功能：构造模板更新请求。
  * 关键流程：显式携带全部可编辑字段，使后端合并逻辑可预测。
  */
+function buildTemplateCreateRequest(module: BusinessModule): CreateTeachingDataTemplateRequest {
+  return {
+    ...buildTemplateUpdateRequest(),
+    tenantId: tenantId.value,
+    connectorSystemId: connectorSystemId.value,
+    templateCode: createTemplateCode.value.trim(),
+    moduleCode: module.moduleCode
+  };
+}
+
 function buildTemplateUpdateRequest(): TeachingDataTemplateRequest {
   return {
     templateName: templateForm.templateName.trim(),
@@ -532,12 +602,20 @@ function splitCsv(value: string) {
     .filter(Boolean);
 }
 
+function csvFromArray(value: unknown, fallback: string) {
+  return Array.isArray(value) && value.length > 0 ? value.join(',') : fallback;
+}
+
+function numberValue(value: unknown, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 function sceneText(value: string) {
   return visibleSceneTypes.value.find((item) => item.code === value)?.label || value;
 }
 
 function templateUsageText(value?: string) {
-  return TEMPLATE_USAGE_OPTIONS.find((item) => item.code === value)?.label || value || '普通造数模板';
+  return visibleTemplateUsages.value.find((item) => item.code === value)?.label || value || '普通造数模板';
 }
 
 function statusClass(status?: string) {
@@ -698,14 +776,29 @@ function statusClass(status?: string) {
           <span>只读模板</span><strong>{{ selectedTemplate.readonlyFlag ? '是' : '否' }}</strong>
           <span>状态</span><strong>{{ selectedTemplate.status || '-' }}</strong>
           <span>更新时间</span><strong>{{ selectedTemplate.updateTime || '-' }}</strong>
-          <span>初始数据配置</span><strong>{{ selectedTemplate.configJson || '-' }}</strong>
-          <span>初始数据结构</span><strong>{{ selectedTemplate.dataSchemaJson || '-' }}</strong>
-          <span>单位角色要求</span><strong>{{ selectedTemplate.requiredOrgRoleJson || '-' }}</strong>
-          <span>结果校验</span><strong>{{ selectedTemplate.resultCheckSchemaJson || '-' }}</strong>
         </div>
+        <details class="json-preview-block detail-preview">
+          <summary>接口参数预览</summary>
+          <label>
+            <span>初始数据配置</span>
+            <textarea :value="selectedTemplate?.configJson || ''" rows="3" readonly />
+          </label>
+          <label>
+            <span>初始数据结构</span>
+            <textarea :value="selectedTemplate?.dataSchemaJson || ''" rows="3" readonly />
+          </label>
+          <label>
+            <span>单位角色要求</span>
+            <textarea :value="selectedTemplate?.requiredOrgRoleJson || ''" rows="3" readonly />
+          </label>
+          <label>
+            <span>结果校验</span>
+            <textarea :value="selectedTemplate?.resultCheckSchemaJson || ''" rows="3" readonly />
+          </label>
+        </details>
 
         <form
-          v-else
+          v-if="dialogMode !== 'detail'"
           class="edit-form"
           @submit.prevent="dialogMode === 'create' ? createLocalTemplate() : updateTemplate()"
         >
@@ -755,7 +848,7 @@ function statusClass(status?: string) {
             <span>模板用途</span>
             <select v-model="templateForm.templateUsage">
               <option
-                v-for="usage in TEMPLATE_USAGE_OPTIONS"
+                v-for="usage in visibleTemplateUsages"
                 :key="usage.code"
                 :value="usage.code"
               >
@@ -783,12 +876,9 @@ function statusClass(status?: string) {
             <header>
               <div>
                 <strong>常用配置表单</strong>
-                <span>填写后可自动生成下方 JSON，复杂场景仍可继续手动微调。</span>
+                <span>填写业务字段后系统自动生成接口参数，运维不需要手动编辑技术配置。</span>
                 <em>启用要求：适配器、单位要求和角色要求不能为空；结果状态校验填写后必须包含状态值。</em>
               </div>
-              <button type="button" class="secondary" @click="applyTemplateJsonBuilder">
-                生成 JSON
-              </button>
             </header>
             <div class="readiness-checklist">
               <article
@@ -835,34 +925,75 @@ function statusClass(status?: string) {
               </label>
             </div>
           </section>
-          <label class="wide">
-            <span>初始数据配置 JSON</span>
-            <textarea v-model="templateForm.configJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>初始数据结构 JSON</span>
-            <textarea v-model="templateForm.dataSchemaJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>初始数据模拟规则 JSON</span>
-            <textarea v-model="templateForm.mockRuleJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>请求结构 JSON</span>
-            <textarea v-model="templateForm.requestSchemaJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>单位角色要求 JSON</span>
-            <textarea v-model="templateForm.requiredOrgRoleJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>结果校验 JSON</span>
-            <textarea v-model="templateForm.resultCheckSchemaJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>敏感字段策略 JSON</span>
-            <textarea v-model="templateForm.sensitiveFieldPolicyJson" rows="3" />
-          </label>
+          <details class="advanced-json-editor wide">
+            <summary>高级数据结构</summary>
+            <div class="json-builder-grid">
+              <label>
+                <span>数据字段</span>
+                <input
+                  v-model="templateStructureForm.dataFields"
+                  placeholder="businessId,status"
+                />
+              </label>
+              <label>
+                <span>数据必填字段</span>
+                <input
+                  v-model="templateStructureForm.dataRequiredFields"
+                  placeholder="businessId,status"
+                />
+              </label>
+              <label>
+                <span>模拟模式</span>
+                <input v-model="templateStructureForm.mockMode" placeholder="demo" />
+              </label>
+              <label>
+                <span>模拟条数</span>
+                <input v-model.number="templateStructureForm.mockCount" type="number" min="1" />
+              </label>
+              <label>
+                <span>差异字段</span>
+                <input v-model="templateStructureForm.mockVaryFields" placeholder="businessId" />
+              </label>
+              <label>
+                <span>请求必填字段</span>
+                <input
+                  v-model="templateStructureForm.requestRequiredFields"
+                  placeholder="requestBatchId,items"
+                />
+              </label>
+            </div>
+          </details>
+          <details class="json-preview-block wide">
+            <summary>接口参数预览</summary>
+            <label>
+              <span>初始数据配置</span>
+              <textarea :value="templateForm.configJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>单位角色要求</span>
+              <textarea :value="templateForm.requiredOrgRoleJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>结果校验</span>
+              <textarea :value="templateForm.resultCheckSchemaJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>敏感字段策略</span>
+              <textarea :value="templateForm.sensitiveFieldPolicyJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>初始数据结构</span>
+              <textarea :value="templateForm.dataSchemaJson" rows="4" readonly />
+            </label>
+            <label>
+              <span>初始数据模拟规则</span>
+              <textarea :value="templateForm.mockRuleJson" rows="4" readonly />
+            </label>
+            <label>
+              <span>请求结构</span>
+              <textarea :value="templateForm.requestSchemaJson" rows="4" readonly />
+            </label>
+          </details>
           <footer class="dialog-actions">
             <button type="button" class="secondary" @click="closeDialog">取消</button>
             <button type="submit" :disabled="loading">
@@ -1113,6 +1244,52 @@ function statusClass(status?: string) {
   gap: 12px;
 }
 
+.json-preview-block,
+.advanced-json-editor {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.json-preview-block strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.json-preview-block summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.json-preview-block[open] summary {
+  margin-bottom: 10px;
+}
+
+.json-preview-block label,
+.advanced-json-editor label {
+  display: grid;
+  gap: 7px;
+}
+
+.json-preview-block textarea[readonly] {
+  background: #ffffff;
+  color: #475569;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.advanced-json-editor summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .edit-form textarea {
   width: 100%;
   max-width: 100%;
@@ -1151,7 +1328,8 @@ function statusClass(status?: string) {
   .detail-grid,
   .edit-form,
   .readiness-checklist,
-  .json-builder-grid {
+  .json-builder-grid,
+  .json-preview-block {
     grid-template-columns: 1fr;
   }
 

@@ -35,6 +35,7 @@ const props = defineProps<{
 }>();
 
 const PAGE_SIZE = 10;
+const DEFAULT_INITIAL_PASSWORD = 'Sxpt@123456';
 
 const runtimeContextStore = useRuntimeContextStore();
 const session = authApi.getSession();
@@ -82,6 +83,7 @@ const removePermissionBySection: Partial<Record<SectionKey, string>> = {
 
 const userActionPermission = {
   edit: 'system:user:edit',
+  resetPassword: 'system:user:edit',
   enable: 'system:user:enable',
   disable: 'system:user:disable'
 };
@@ -140,7 +142,7 @@ const userForm = reactive({
   realName: '',
   userType: 'TEACHER',
   sourceType: 'LOCAL',
-  initialPassword: '123456',
+  initialPassword: DEFAULT_INITIAL_PASSWORD,
   studentNo: '',
   employeeNo: '',
   phone: '',
@@ -586,6 +588,22 @@ async function toggleUserStatus(row: TeachUser) {
     await loadPageData();
     await refreshRuntimeContextAfterConfigChange();
   }, nextStatus === 'ACTIVE' ? '用户已启用' : '用户已停用');
+}
+
+async function resetUserPassword(row: TeachUser) {
+  if (!hasRuntimePermission(userActionPermission.resetPassword)) {
+    notify('error', '当前角色暂无该操作入口');
+    return;
+  }
+  const confirmed = window.confirm(`确认将 ${row.realName || row.username} 的密码重置为 ${DEFAULT_INITIAL_PASSWORD} 吗？`);
+  if (!confirmed) return;
+  await run(async () => {
+    await usersApi.resetUserPassword({
+      tenantId: tenantId.value,
+      id: row.id
+    });
+    await loadPageData();
+  }, `密码已重置为 ${DEFAULT_INITIAL_PASSWORD}`);
 }
 
 async function toggleRoleStatus(row: TeachRole) {
@@ -1285,7 +1303,7 @@ function resetUserForm() {
   userForm.realName = '';
   userForm.userType = 'TEACHER';
   userForm.sourceType = 'LOCAL';
-  userForm.initialPassword = '123456';
+  userForm.initialPassword = DEFAULT_INITIAL_PASSWORD;
   userForm.studentNo = '';
   userForm.employeeNo = '';
   userForm.phone = '';
@@ -1534,6 +1552,15 @@ function fillDictForm(item: SysDictItem) {
                     @click="openEditUserDialog(row as TeachUser)"
                   >
                     编辑
+                  </button>
+                  <button
+                    v-if="hasRuntimePermission(userActionPermission.resetPassword)"
+                    type="button"
+                    class="text-action"
+                    :disabled="loading"
+                    @click="resetUserPassword(row as TeachUser)"
+                  >
+                    重置密码
                   </button>
                   <button
                     v-if="

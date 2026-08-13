@@ -212,6 +212,14 @@ export const systemConfigApi = {
     });
   },
 
+  listActiveDictItemsByCode(tenantId: string, dictCode: string) {
+    return apiRequest<SysDictItem[]>({
+      method: 'GET',
+      url: '/system-config/dict-items/active',
+      params: { tenantId, dictCode }
+    });
+  },
+
   getDictItemDetail(tenantId: string, id: string) {
     return apiRequest<SysDictItem>({
       method: 'GET',

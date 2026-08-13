@@ -181,6 +181,14 @@ public class TeachingDataTemplateController {
         template.setSupportMode(request.getSupportMode());
         template.setTemplateUsage(request.getTemplateUsage());
         template.setConfigJson(request.getConfigJson());
+        template.setDataSchemaJson(request.getDataSchemaJson());
+        template.setMockRuleJson(request.getMockRuleJson());
+        template.setReadonlyFlag(request.getReadonlyFlag());
+        template.setRequestSchemaJson(request.getRequestSchemaJson());
+        template.setRequiredOrgRoleJson(request.getRequiredOrgRoleJson());
+        template.setResultCheckSchemaJson(request.getResultCheckSchemaJson());
+        template.setSensitiveFieldPolicyJson(request.getSensitiveFieldPolicyJson());
+        template.setUpdateBy(request.getUpdateBy());
         return template;
     }
 

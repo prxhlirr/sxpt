@@ -120,6 +120,17 @@ export const usersApi = {
     });
   },
 
+  resetUserPassword(request: {
+    tenantId: string;
+    id: string;
+  }) {
+    return apiRequest<TeachUser>({
+      method: 'POST',
+      url: '/user/reset-password',
+      data: request
+    });
+  },
+
   createRole(request: {
     tenantId: string;
     roleCode: string;

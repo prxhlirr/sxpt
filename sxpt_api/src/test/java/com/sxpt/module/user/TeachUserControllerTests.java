@@ -41,7 +41,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(classes = SxptApiApplication.class)
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@TestPropertySource(properties = "sxpt.user.controller.enabled=true")
+@TestPropertySource(properties = {
+        "sxpt.user.controller.enabled=true",
+        "sxpt.connector.classic-case-controller.enabled=false",
+        "sxpt.connector.external-classic-case-controller.enabled=false"
+})
 class TeachUserControllerTests {
 
     @Autowired
@@ -115,14 +119,47 @@ class TeachUserControllerTests {
      * @throws Exception MockMvc 请求异常由测试框架处理。
      */
     @Test
-    void createShouldRejectLocalUserWithoutInitialPassword() throws Exception {
+    void createShouldUseDefaultPasswordWhenInitialPasswordMissing() throws Exception {
+        TeachUser saved = buildSavedTeachUser();
+        when(teachUserService.createTeachUser(any(TeachUser.class))).thenReturn(saved);
+
         mockMvc.perform(post("/api/v1/user/create")
                         .header("Authorization", bearerToken())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tenantId\":\"tenant_001\",\"username\":\"teacher001\",\"realName\":\"教师一\",\"userType\":\"TEACHER\",\"sourceType\":\"LOCAL\"}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success", is(false)))
-                .andExpect(jsonPath("$.code", is(400)));
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.code", is(200)));
+
+        ArgumentCaptor<TeachUser> captor = ArgumentCaptor.forClass(TeachUser.class);
+        verify(teachUserService).createTeachUser(captor.capture());
+        TeachUser requestEntity = captor.getValue();
+        org.junit.jupiter.api.Assertions.assertNotNull(requestEntity.getPasswordSalt());
+        org.junit.jupiter.api.Assertions.assertNotNull(requestEntity.getPasswordHash());
+        org.junit.jupiter.api.Assertions.assertEquals("NORMAL", requestEntity.getPasswordStatus());
+    }
+
+    /**
+     * 验证管理员可以将用户密码重置为平台统一初始密码。
+     *
+     * @throws Exception MockMvc 请求异常由测试框架处理。
+     */
+    @Test
+    void resetPasswordShouldReturnTeachUserVo() throws Exception {
+        TeachUser saved = buildSavedTeachUser();
+        when(teachUserService.resetTeachUserPassword("tenant_001", "user_001", "Sxpt@123456"))
+                .thenReturn(saved);
+
+        mockMvc.perform(post("/api/v1/user/reset-password")
+                        .header("Authorization", bearerToken())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"tenantId\":\"tenant_001\",\"id\":\"user_001\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.code", is(200)))
+                .andExpect(jsonPath("$.result.id", is("user_001")));
+
+        verify(teachUserService).resetTeachUserPassword("tenant_001", "user_001", "Sxpt@123456");
     }
 
     /**

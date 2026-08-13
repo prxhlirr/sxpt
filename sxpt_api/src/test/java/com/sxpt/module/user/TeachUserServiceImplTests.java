@@ -1,6 +1,7 @@
 package com.sxpt.module.user;
 
 import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.PasswordHashService;
 import com.sxpt.module.user.entity.TeachUser;
 import com.sxpt.module.user.mapper.TeachUserMapper;
 import com.sxpt.module.user.service.impl.TeachUserServiceImpl;
@@ -100,6 +101,41 @@ class TeachUserServiceImplTests {
                 service.updateTeachUserStatus("tenant_001", "user_001", "LOCKED"));
         verify(mapper, times(0)).selectOne(any());
         verify(mapper, times(0)).updateById(any());
+    }
+
+    /**
+     * 验证重置密码会生成新的凭据并清理锁定状态。
+     */
+    @Test
+    void resetTeachUserPasswordShouldRefreshCredentialAndUnlockUser() {
+        TeachUserMapper mapper = mock(TeachUserMapper.class);
+        PasswordHashService passwordHashService = new PasswordHashService();
+        TeachUserServiceImpl service = new TeachUserServiceImpl(mapper, passwordHashService);
+        TeachUser existing = buildValidTeachUser();
+        existing.setPasswordSalt("old-salt");
+        existing.setPasswordHash("old-hash");
+        existing.setPasswordStatus("LOCKED");
+        existing.setFailedLoginCount(5);
+        existing.setLockedUntil(java.time.LocalDateTime.now().plusHours(1));
+        when(mapper.selectOne(any())).thenReturn(existing);
+
+        TeachUser saved = service.resetTeachUserPassword("tenant_001", "user_001", "Sxpt@123456");
+
+        assertEquals("NORMAL", saved.getPasswordStatus());
+        assertEquals(0, saved.getFailedLoginCount());
+        assertEquals(PasswordHashService.ALGORITHM, saved.getPasswordAlgorithm());
+        assertEquals(PasswordHashService.DEFAULT_ITERATIONS, saved.getPasswordIterations());
+        assertNotNull(saved.getPasswordUpdatedTime());
+        org.junit.jupiter.api.Assertions.assertNull(saved.getLockedUntil());
+        org.junit.jupiter.api.Assertions.assertNotEquals("old-salt", saved.getPasswordSalt());
+        org.junit.jupiter.api.Assertions.assertNotEquals("old-hash", saved.getPasswordHash());
+        org.junit.jupiter.api.Assertions.assertTrue(passwordHashService.matches(
+                "Sxpt@123456",
+                saved.getPasswordSalt(),
+                saved.getPasswordHash(),
+                saved.getPasswordIterations()));
+        verify(mapper, times(1)).selectOne(any());
+        verify(mapper, times(1)).updateById(saved);
     }
 
     /**

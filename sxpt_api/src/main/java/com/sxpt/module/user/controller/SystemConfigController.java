@@ -175,6 +175,17 @@ public class SystemConfigController {
     }
 
     /**
+     * 业务功能：按字典编码查询启用字典项。
+     * 关键流程：只暴露 ACTIVE 且未删除的字典项，供业务页面下拉和元数据接口复用，避免页面各自硬编码选项。
+     */
+    @GetMapping("/dict-items/active")
+    public ApiResult<List<SysDictItem>> listActiveDictItems(
+            @RequestParam String tenantId,
+            @RequestParam String dictCode) {
+        return ApiResult.success(systemConfigService.listActiveDictItemsByCode(tenantId, dictCode));
+    }
+
+    /**
      * 业务功能：查询单个字典项配置详情。
      * 关键流程：Service 校验租户和软删除边界，避免管理页面跨租户读取字典项。
      */

@@ -269,6 +269,19 @@ public class SystemConfigServiceImpl implements SystemConfigService {
     }
 
     @Override
+    public List<SysDictItem> listActiveDictItemsByCode(String tenantId, String dictCode) {
+        requireText(tenantId);
+        requireText(dictCode);
+        return dictItemMapper.selectList(new QueryWrapper<SysDictItem>()
+                .eq("tenant_id", tenantId)
+                .eq("dict_code", dictCode)
+                .eq("status", DEFAULT_STATUS)
+                .eq("deleted", Boolean.FALSE)
+                .orderByAsc("sort_no")
+                .orderByAsc("item_code"));
+    }
+
+    @Override
     @Transactional(rollbackFor = Exception.class)
     public SysRolePermission grantRolePermission(SysRolePermission rolePermission) {
         requireText(rolePermission.getTenantId());

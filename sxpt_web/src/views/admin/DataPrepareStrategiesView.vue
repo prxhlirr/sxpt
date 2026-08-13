@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import TimedToast from '../../components/ui/TimedToast.vue';
 import {
@@ -69,6 +69,56 @@ const strategyJsonBuilder = reactive({
   archiveMode: 'MANUAL'
 });
 
+const sceneLabelFallback: Record<string, string> = {
+  RECORD: '\u5907\u6848',
+  LEARN: '\u5b66\u4e60',
+  PRACTICE: '\u7ec3\u4e60',
+  EXAM: '\u8003\u8bd5'
+};
+
+const dataSourceStrategyLabels: Record<string, string> = {
+  MOCK_GENERATE: '\u7cfb\u7edf\u751f\u6210',
+  THIRD_PARTY_CREATE: '\u539f\u5e73\u53f0\u751f\u6210',
+  TEMPLATE_CREATE: '\u6309\u6a21\u677f\u751f\u6210',
+  CLASSIC_CASE_CREATE: '\u6309\u7ecf\u5178\u6848\u4f8b\u751f\u6210'
+};
+
+const sharePolicyLabels: Record<string, string> = {
+  ATTEMPT_EXCLUSIVE: '\u6bcf\u6b21\u4f5c\u4e1a\u72ec\u5360',
+  STUDENT_EXCLUSIVE: '\u5b66\u751f\u72ec\u5360',
+  SHARED_READONLY: '\u5171\u4eab\u53ea\u8bfb'
+};
+
+const regeneratePolicyLabels: Record<string, string> = {
+  ON_ATTEMPT: '\u6bcf\u6b21\u8fdb\u5165\u91cd\u65b0\u751f\u6210',
+  ON_FAILURE: '\u5931\u8d25\u540e\u91cd\u65b0\u751f\u6210',
+  NEVER: '\u4e0d\u81ea\u52a8\u91cd\u5efa'
+};
+
+const lockPolicyLabels: Record<string, string> = {
+  NONE: '\u4e0d\u9501\u5b9a',
+  LOCK_ON_ASSIGN: '\u5206\u914d\u540e\u9501\u5b9a',
+  LOCK_ON_START: '\u5f00\u59cb\u540e\u9501\u5b9a'
+};
+
+const prepareTimingLabels: Record<string, string> = {
+  ON_PUBLISH: '\u53d1\u5e03\u65f6\u51c6\u5907',
+  BEFORE_START: '\u5f00\u59cb\u524d\u51c6\u5907',
+  ON_DEMAND: '\u6309\u9700\u51c6\u5907'
+};
+
+const requirementLabels: Record<string, string> = {
+  required: '\u5fc5\u586b',
+  optional: '\u53ef\u9009',
+  none: '\u4e0d\u6821\u9a8c'
+};
+
+const archiveModeLabels: Record<string, string> = {
+  MANUAL: '\u624b\u52a8\u5f52\u6863',
+  AFTER_EXPIRE: '\u8fc7\u671f\u540e\u5f52\u6863',
+  AFTER_TASK_END: '\u4efb\u52a1\u7ed3\u675f\u540e\u5f52\u6863'
+};
+
 function getDefaultStrategyForm(): ModuleDataStrategyRequest {
   return {
     strategyCode: `LOCAL_STRATEGY_${Date.now()}`,
@@ -117,14 +167,14 @@ const pagedStrategies = computed(() => {
 });
 const visibleSceneTypes = computed(() =>
   (metadata.value?.sceneTypes ?? [
-    { code: 'RECORD', label: '备课', visible: true },
+    { code: 'RECORD', label: '备案', visible: true },
     { code: 'LEARN', label: '学习', visible: true },
     { code: 'PRACTICE', label: '练习', visible: true },
     { code: 'EXAM', label: '考试', visible: true }
   ]).filter((item) => item.visible)
 );
 const visibleDataSourceStrategies = computed(() =>
-  (metadata.value?.dataSourceStrategies ?? [{ code: 'MOCK_GENERATE', label: '本系统生成', visible: true }])
+  (metadata.value?.dataSourceStrategies ?? [{ code: 'MOCK_GENERATE', label: '系统生成', visible: true }])
     .filter((item) => item.visible)
 );
 const visiblePrepareTimings = computed(() =>
@@ -132,11 +182,11 @@ const visiblePrepareTimings = computed(() =>
     .filter((item) => item.visible)
 );
 const visibleSharePolicies = computed(() =>
-  (metadata.value?.sharePolicies ?? [{ code: 'ATTEMPT_EXCLUSIVE', label: '练习独占', visible: true }])
+  (metadata.value?.sharePolicies ?? [{ code: 'ATTEMPT_EXCLUSIVE', label: '作业独占', visible: true }])
     .filter((item) => item.visible)
 );
 const visibleRegeneratePolicies = computed(() =>
-  (metadata.value?.regeneratePolicies ?? [{ code: 'ON_ATTEMPT', label: '每次练习重建', visible: true }])
+  (metadata.value?.regeneratePolicies ?? [{ code: 'ON_ATTEMPT', label: '每次进入重新生成', visible: true }])
     .filter((item) => item.visible)
 );
 const visibleLockPolicies = computed(() =>
@@ -156,15 +206,15 @@ const strategyEnableChecklist = computed(() => {
       done: Boolean(strategyForm.templateId && templates.value.some((template) => template.id === strategyForm.templateId))
     },
     {
-      label: '初始身份策略包含单位和角色要求',
+      label: '已配置单位和角色要求',
       done: hasText(orgRole.org) && hasText(orgRole.role)
     },
     {
-      label: '初始数据校验包含 requiredStatus',
+      label: '已配置初始状态校验',
       done: hasText(validation.requiredStatus)
     },
     {
-      label: '策略池水位有效且最小值不大于最大值',
+      label: '数据池容量有效且最小值不大于最大值',
       done: hasPoolBounds && minReadyCount >= 0 && maxReadyCount >= 0 && minReadyCount <= maxReadyCount
     }
   ];
@@ -196,9 +246,11 @@ watch([businessModuleId, sceneType], async () => {
   }
 });
 
+watch(strategyJsonBuilder, () => syncStrategyJsonFieldsFromBuilder(), { deep: true });
+
 /**
- * 业务功能：初始化策略管理页面的上下文数据，确保策略始终挂在真实平台、模块和模板之下。
- * 关键流程：按平台、模块、场景逐层加载，避免用户编辑策略时引用已经失效的业务边界。
+ * 业务功能：初始化策略管理页面上下文，确保策略始终挂在真实平台、模块和模板之下。
+ * 关键流程：按平台、模块、场景逐层加载，避免编辑策略时引用已经失效的业务边界。
  */
 async function initialize() {
   await run(async () => {
@@ -208,7 +260,7 @@ async function initialize() {
     await loadModules();
     await loadTemplates();
     await loadStrategies();
-  }, '策略列表已加载');
+  }, '\u7b56\u7565\u5217\u8868\u5df2\u52a0\u8f7d');
 }
 
 async function loadMetadata() {
@@ -239,8 +291,8 @@ async function loadModules() {
 }
 
 /**
- * 业务功能：读取当前模块和场景下可绑定的初始数据模板，保证启用策略时具备原平台初始数据创建结构。
- * 关键流程：策略启用依赖模板，因此没有模板时只允许查看和编辑已有策略，不建议新增策略。
+ * 业务功能：读取当前模块和场景下可绑定的初始数据模板。
+ * 关键流程：策略启用依赖模板，因此没有模板时只允许查看和编辑已有策略。
  */
 async function loadTemplates() {
   templates.value = [];
@@ -255,8 +307,8 @@ async function loadTemplates() {
 }
 
 /**
- * 业务功能：读取当前模块下的策略列表，供管理员核对老师可消费的准备规则。
- * 关键流程：管理页必须展示草稿和启用策略，避免新建停用策略刷新后从列表消失。
+ * 业务功能：读取当前模块下的策略列表，供管理员核对可发布的准备规则。
+ * 关键流程：管理页展示草稿和启用策略，避免新建未启用策略刷新后从列表消失。
  */
 async function loadStrategies() {
   strategies.value = [];
@@ -270,19 +322,20 @@ async function loadStrategies() {
 }
 
 /**
- * 业务功能：创建本地联调策略草稿，管理员确认配置完整后再手动启用。
- * 关键流程：创建前固定当前模块和模板快照，避免异步过程中选择变化造成错配。
+ * 业务功能：创建初始数据策略草稿，管理员确认配置完整后再手动启用。
+ * 关键流程：创建前固定当前模块和模板快照，避免异步选择变化造成错配。
  */
 function openCreateStrategyDialog() {
   fillStrategyForm(getDefaultStrategyForm());
-  applyStrategyJsonBuilder();
+  syncStrategyJsonFieldsFromBuilder();
   dialogMode.value = 'create';
 }
 
 async function createLocalStrategy() {
   const module = selectedModule.value;
+  syncStrategyJsonFieldsFromBuilder();
   if (!connectorSystemId.value || !module || !strategyForm.templateId) {
-    notify('error', '请先选择原平台、业务模块和数据模板');
+    notify('error', '\u8bf7\u5148\u9009\u62e9\u539f\u5e73\u53f0\u3001\u4e1a\u52a1\u6a21\u5757\u548c\u6570\u636e\u6a21\u677f');
     return;
   }
   await run(async () => {
@@ -301,23 +354,23 @@ async function createLocalStrategy() {
     strategies.value = [created, ...strategies.value];
     currentPage.value = 1;
     closeDialog();
-  }, '已创建初始数据策略，请确认配置完整后手动启用');
+  }, '\u5df2\u521b\u5efa\u521d\u59cb\u6570\u636e\u7b56\u7565\uff0c\u8bf7\u786e\u8ba4\u914d\u7f6e\u5b8c\u6574\u540e\u624b\u52a8\u542f\u7528');
 }
 
 /**
  * 业务功能：打开策略详情弹窗，展示后端真实详情而不是列表缓存。
- * 关键流程：按 ID 重新查询详情，确保版本、模板和策略 JSON 字段与数据库一致。
+ * 关键流程：按 ID 重新查询详情，确保版本、模板和策略参数与数据库一致。
  */
 async function showStrategyDetail(strategy: ModuleDataStrategy) {
   await run(async () => {
     selectedStrategy.value = await dataPrepareApi.getModuleDataStrategy(strategy.id);
     dialogMode.value = 'detail';
-  }, '策略详情已加载');
+  }, '\u7b56\u7565\u8be6\u60c5\u5df2\u52a0\u8f7d');
 }
 
 /**
- * 业务功能：打开策略编辑弹窗，允许管理员维护影响学生实例分配的核心规则。
- * 关键流程：先读取详情再回填表单，避免用列表简略字段覆盖完整策略配置。
+ * 业务功能：打开策略编辑弹窗，维护影响实例分配的核心规则。
+ * 关键流程：先读取详情再回填表单，避免列表简略字段覆盖完整策略配置。
  */
 async function editStrategy(strategy: ModuleDataStrategy) {
   await run(async () => {
@@ -325,17 +378,18 @@ async function editStrategy(strategy: ModuleDataStrategy) {
     selectedStrategy.value = detail;
     fillStrategyForm(detail);
     dialogMode.value = 'edit';
-  }, '策略编辑信息已加载');
+  }, '\u7b56\u7565\u7f16\u8f91\u4fe1\u606f\u5df2\u52a0\u8f7d');
 }
 
 /**
- * 业务功能：提交策略编辑，更新初始数据生成、分配、重练、锁定、模板和组织角色策略。
- * 关键流程：只提交后端允许更新的策略字段，并在本地替换对应列表行。
+ * 业务功能：提交策略编辑，更新初始数据生成、分配、重建、锁定、模板和组织角色策略。
+ * 关键流程：只提交后端允许更新的字段，并在本地替换对应列表行。
  */
 async function updateStrategy() {
   if (!selectedStrategy.value) return;
+  syncStrategyJsonFieldsFromBuilder();
   if (!strategyForm.moduleName?.trim() || !strategyForm.templateId?.trim()) {
-    notify('error', '请填写模块名称并选择模板');
+    notify('error', '\u8bf7\u586b\u5199\u6a21\u5757\u540d\u79f0\u5e76\u9009\u62e9\u6a21\u677f');
     return;
   }
   await run(async () => {
@@ -346,12 +400,12 @@ async function updateStrategy() {
     strategies.value = strategies.value.map((item) => (item.id === updated.id ? updated : item));
     selectedStrategy.value = updated;
     closeDialog();
-  }, '策略已更新');
+  }, '\u7b56\u7565\u5df2\u66f4\u65b0');
 }
 
 /**
  * 业务功能：启用或停用模块数据策略。
- * 关键流程：启用由后端校验模板、模块和平台能力，前端只负责同步当前行状态。
+ * 关键流程：启用由后端校验模板、模块和平台能力，前端只同步当前行状态。
  */
 async function toggleStrategyStatus(strategy: ModuleDataStrategy) {
   if (strategy.status !== 'ACTIVE') {
@@ -360,7 +414,7 @@ async function toggleStrategyStatus(strategy: ModuleDataStrategy) {
     try {
       const updated = await dataPrepareApi.enableModuleDataStrategy(strategy.id);
       strategies.value = strategies.value.map((item) => (item.id === updated.id ? updated : item));
-      notify('success', '策略已启用');
+      notify('success', '\u7b56\u7565\u5df2\u542f\u7528');
     } catch (err) {
       notify('error', strategyEnableErrorMessage(err));
       await openStrategyEditorAfterEnableFailure(strategy);
@@ -372,11 +426,11 @@ async function toggleStrategyStatus(strategy: ModuleDataStrategy) {
   await run(async () => {
     const updated = await dataPrepareApi.disableModuleDataStrategy(strategy.id);
     strategies.value = strategies.value.map((item) => (item.id === updated.id ? updated : item));
-  }, '策略已停用');
+  }, '\u7b56\u7565\u5df2\u505c\u7528');
 }
 
 /**
- * 业务功能：策略启用失败后打开编辑弹窗，方便管理员立即补齐学生数据分配规则。
+ * 业务功能：策略启用失败后打开编辑弹窗，方便管理员立即补齐数据分配规则。
  * 关键流程：不复用通用 run，避免清空刚刚展示的启用失败提示。
  */
 async function openStrategyEditorAfterEnableFailure(strategy: ModuleDataStrategy) {
@@ -392,12 +446,12 @@ async function openStrategyEditorAfterEnableFailure(strategy: ModuleDataStrategy
 
 /**
  * 业务功能：把后端策略启用参数错误翻译成维护人员可执行的配置要求。
- * 关键流程：策略启用依赖模板、准备时机、单位角色策略、状态校验和平台能力，提示要直达常用策略表单。
+ * 关键流程：策略启用依赖模板、准备时机、单位角色策略、状态校验和平台能力。
  */
 function strategyEnableErrorMessage(err: unknown) {
-  const rawMessage = err instanceof Error ? err.message : '操作失败';
+  const rawMessage = err instanceof Error ? err.message : '\u64cd\u4f5c\u5931\u8d25';
   const normalized = rawMessage.trim();
-  const guide = '下一步：如缺模板或策略 JSON，请在当前编辑弹窗补齐；如缺平台能力，请到“原平台系统维护 -> 能力”补齐能力声明。';
+  const guide = '\u4e0b\u4e00\u6b65\uff1a\u5982\u7f3a\u6a21\u677f\u6216\u7b56\u7565\u914d\u7f6e\uff0c\u8bf7\u5728\u5f53\u524d\u7f16\u8f91\u5f39\u7a97\u8865\u9f50\uff1b\u5982\u7f3a\u5e73\u53f0\u80fd\u529b\uff0c\u8bf7\u5230\u201c\u539f\u5e73\u53f0\u7cfb\u7edf\u7ef4\u62a4 -> \u80fd\u529b\u201d\u8865\u9f50\u80fd\u529b\u58f0\u660e\u3002';
   if (isDataPrepareConfigIncompleteError(err)) {
     return `策略启用失败：${normalized}。${guide}`;
   }
@@ -406,7 +460,7 @@ function strategyEnableErrorMessage(err: unknown) {
 
 /**
  * 业务功能：将策略详情转换为表单字段。
- * 关键流程：保留后端已有 JSON 配置，避免编辑非 JSON 字段时丢失组织角色、校验和归档策略。
+ * 关键流程：保留后端已有参数配置，避免编辑非参数字段时丢失组织角色、校验和归档策略。
  */
 function fillStrategyForm(strategy: ModuleDataStrategy | ModuleDataStrategyRequest) {
   strategyForm.strategyCode = strategy.strategyCode || '';
@@ -431,10 +485,10 @@ function fillStrategyForm(strategy: ModuleDataStrategy | ModuleDataStrategyReque
 }
 
 /**
- * 业务功能：用结构化表单生成策略 JSON，避免管理员直接猜测 JSON 结构。
- * 关键流程：把身份、池容量、校验、过期和归档策略转换为后端兼容 JSON 字段。
+ * 业务功能：用结构化表单生成策略参数，避免管理员直接维护 JSON。
+ * 关键流程：把身份、池容量、校验、过期和归档策略转换为后端兼容字段。
  */
-function applyStrategyJsonBuilder() {
+function syncStrategyJsonFieldsFromBuilder() {
   strategyForm.defaultOrgRolePolicyJson = stringifyJson({
     org: strategyJsonBuilder.requiredOrg,
     role: strategyJsonBuilder.requiredRole
@@ -452,12 +506,16 @@ function applyStrategyJsonBuilder() {
   strategyForm.archivePolicyJson = stringifyJson({
     mode: strategyJsonBuilder.archiveMode
   });
-  notify('success', '已根据表单生成策略 JSON');
+}
+
+function applyStrategyJsonBuilder() {
+  syncStrategyJsonFieldsFromBuilder();
+  notify('success', '\u5df2\u6839\u636e\u8868\u5355\u751f\u6210\u7b56\u7565\u53c2\u6570');
 }
 
 /**
- * 业务功能：编辑已有策略时反向读取 JSON，尽量回填到结构化表单。
- * 关键流程：能识别的字段回填，不能识别的自定义 JSON 继续保留在原文本框。
+ * 业务功能：编辑已有策略时反向读取参数字段，尽量回填到结构化表单。
+ * 关键流程：能识别的字段回填，不能识别的自定义配置仍保留在原始参数里。
  */
 function syncStrategyJsonBuilderFromForm() {
   const orgRole = parseJsonObject(strategyForm.defaultOrgRolePolicyJson);
@@ -476,7 +534,7 @@ function syncStrategyJsonBuilderFromForm() {
 
 /**
  * 业务功能：构造策略更新请求。
- * 关键流程：后端更新接口按 null 覆盖字段，因此前端显式携带表单中的全部可编辑字段。
+ * 关键流程：后端更新接口按 null 覆盖字段，因此前端显式携带全部可编辑字段。
  */
 function buildStrategyUpdateRequest(): ModuleDataStrategyRequest {
   return {
@@ -508,7 +566,7 @@ async function run(action: () => Promise<void>, successMessage: string) {
     await action();
     notify('success', successMessage);
   } catch (err) {
-    notify('error', err instanceof Error ? err.message : '操作失败');
+    notify('error', err instanceof Error ? err.message : '\u64cd\u4f5c\u5931\u8d25');
   } finally {
     loading.value = false;
   }
@@ -578,8 +636,52 @@ function numberValue(value: unknown, fallback: number) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function optionText(value: string | undefined, labels: Record<string, string>) {
+  if (!value) return '-';
+  return labels[value] || value;
+}
+
+function jsonText(value: unknown, labels?: Record<string, string>) {
+  if (typeof value !== 'string' || !value.trim()) return '-';
+  return labels?.[value] || value;
+}
+
+/**
+ * 业务功能：把策略 JSON 存储字段翻译为运维可读摘要。
+ * 关键流程：只解析已知字段并保留原始值兜底，避免老数据或自定义策略在详情页丢失语义。
+ */
+function buildStrategySummary(strategy: ModuleDataStrategy | ModuleDataStrategyRequest) {
+  const orgRole = parseJsonObject(strategy.defaultOrgRolePolicyJson);
+  const poolSize = parseJsonObject(strategy.poolSizePolicyJson);
+  const validation = parseJsonObject(strategy.validationPolicyJson);
+  const expire = parseJsonObject(strategy.expirePolicyJson);
+  const archive = parseJsonObject(strategy.archivePolicyJson);
+  return [
+    { label: '单位要求', value: jsonText(orgRole.org, requirementLabels) },
+    { label: '角色要求', value: jsonText(orgRole.role, requirementLabels) },
+    { label: '最小可用数', value: String(numberValue(poolSize.minReadyCount, 0)) },
+    { label: '最大可用数', value: String(numberValue(poolSize.maxReadyCount, 0)) },
+    { label: '初始状态校验', value: jsonText(validation.requiredStatus) },
+    { label: '过期时间', value: `${numberValue(expire.expireHours, 0)} 小时` },
+    { label: '归档方式', value: jsonText(archive.mode, archiveModeLabels) }
+  ];
+}
+
+function policyText(value: string | undefined, labels: Record<string, string>) {
+  return optionText(value, labels);
+}
+
+function metadataOptionText(
+  value: string | undefined,
+  options: Array<{ code: string; label: string }>,
+  labels: Record<string, string>
+) {
+  if (!value) return '-';
+  return options.find((item) => item.code === value)?.label || optionText(value, labels);
+}
+
 function sceneText(value: string) {
-  return visibleSceneTypes.value.find((item) => item.code === value)?.label || value;
+  return visibleSceneTypes.value.find((item) => item.code === value)?.label || sceneLabelFallback[value] || value;
 }
 
 function statusClass(status?: string) {
@@ -600,7 +702,7 @@ function statusClass(status?: string) {
       <div>
         <p>数据准备 / 初始数据策略</p>
         <h1>模块初始数据准备策略</h1>
-        <p>定义练习和考试从初始状态开始时的数据生成、分配、重练和锁定规则。</p>
+        <p>定义练习、学习和考试进入原平台学习环境前的数据生成、分配、重建和锁定规则。</p>
       </div>
       <button type="button" :disabled="loading || systems.length === 0" @click="openCreateStrategyDialog">
         创建初始数据策略
@@ -684,7 +786,7 @@ function statusClass(status?: string) {
               <th>模板</th>
               <th>来源</th>
               <th>分配</th>
-              <th>重练</th>
+              <th>重建</th>
               <th>锁定</th>
               <th>时机</th>
               <th>状态</th>
@@ -697,14 +799,14 @@ function statusClass(status?: string) {
               <td>{{ strategy.moduleName }} / {{ strategy.moduleCode }}</td>
               <td>{{ sceneText(strategy.sceneType) }}</td>
               <td>{{ strategy.templateId }}</td>
-              <td>{{ strategy.dataSourceStrategy }}</td>
-              <td>{{ strategy.sharePolicy }}</td>
-              <td>{{ strategy.regeneratePolicy }}</td>
-              <td>{{ strategy.lockPolicy }}</td>
-              <td>{{ strategy.prepareTiming || '-' }}</td>
+              <td>{{ metadataOptionText(strategy.dataSourceStrategy, visibleDataSourceStrategies, dataSourceStrategyLabels) }}</td>
+              <td>{{ metadataOptionText(strategy.sharePolicy, visibleSharePolicies, sharePolicyLabels) }}</td>
+              <td>{{ metadataOptionText(strategy.regeneratePolicy, visibleRegeneratePolicies, regeneratePolicyLabels) }}</td>
+              <td>{{ metadataOptionText(strategy.lockPolicy, visibleLockPolicies, lockPolicyLabels) }}</td>
+              <td>{{ metadataOptionText(strategy.prepareTiming, visiblePrepareTimings, prepareTimingLabels) }}</td>
               <td>
                 <span class="status-badge" :class="statusClass(strategy.status)">
-                  {{ strategy.status || '未设置' }}
+                  {{ strategy.status === 'ACTIVE' ? '已启用' : '未启用' }}
                 </span>
               </td>
               <td>
@@ -721,7 +823,7 @@ function statusClass(status?: string) {
         </table>
         <div v-if="strategies.length === 0" class="empty-state">
           <strong>暂无策略</strong>
-          <p>缺少启用策略时，老师无法为该模块和场景创建初始数据准备批次；草稿策略需要启用后才会进入发布链路。</p>
+          <p>当前模块和场景还没有初始数据准备策略，创建并启用后才能进入发布和造数链路。</p>
         </div>
       </div>
       <footer v-if="strategies.length > PAGE_SIZE" class="pagination-bar">
@@ -743,22 +845,60 @@ function statusClass(status?: string) {
           <button type="button" class="icon-button" @click="closeDialog">×</button>
         </header>
 
-        <div v-if="dialogMode === 'detail' && selectedStrategy" class="detail-grid">
-          <span>模块</span><strong>{{ selectedStrategy.moduleName }}</strong>
-          <span>模块编码</span><strong>{{ selectedStrategy.moduleCode }}</strong>
-          <span>场景</span><strong>{{ sceneText(selectedStrategy.sceneType) }}</strong>
-          <span>模板 ID</span><strong>{{ selectedStrategy.templateId || '-' }}</strong>
-          <span>初始数据来源</span><strong>{{ selectedStrategy.dataSourceStrategy }}</strong>
-          <span>分配策略</span><strong>{{ selectedStrategy.sharePolicy }}</strong>
-          <span>重练策略</span><strong>{{ selectedStrategy.regeneratePolicy }}</strong>
-          <span>锁定策略</span><strong>{{ selectedStrategy.lockPolicy }}</strong>
-          <span>准备时机</span><strong>{{ selectedStrategy.prepareTiming || '-' }}</strong>
-          <span>进入前创建初始数据</span><strong>{{ selectedStrategy.needPreData ? '是' : '否' }}</strong>
-          <span>策略版本</span><strong>{{ selectedStrategy.strategyVersion || 0 }}</strong>
-          <span>状态</span><strong>{{ selectedStrategy.status || '-' }}</strong>
-          <span>初始身份策略</span><strong>{{ selectedStrategy.defaultOrgRolePolicyJson || '-' }}</strong>
-          <span>初始数据校验</span><strong>{{ selectedStrategy.validationPolicyJson || '-' }}</strong>
-          <span>结果校验策略</span><strong>{{ selectedStrategy.resultCheckPolicyJson || '-' }}</strong>
+        <div v-if="dialogMode === 'detail' && selectedStrategy" class="detail-content">
+          <div class="detail-grid">
+            <span>模块</span><strong>{{ selectedStrategy.moduleName }}</strong>
+            <span>模块编码</span><strong>{{ selectedStrategy.moduleCode }}</strong>
+            <span>场景</span><strong>{{ sceneText(selectedStrategy.sceneType) }}</strong>
+            <span>模板 ID</span><strong>{{ selectedStrategy.templateId || '-' }}</strong>
+            <span>数据来源</span><strong>{{ metadataOptionText(selectedStrategy.dataSourceStrategy, visibleDataSourceStrategies, dataSourceStrategyLabels) }}</strong>
+            <span>分配策略</span><strong>{{ metadataOptionText(selectedStrategy.sharePolicy, visibleSharePolicies, sharePolicyLabels) }}</strong>
+            <span>重建策略</span><strong>{{ metadataOptionText(selectedStrategy.regeneratePolicy, visibleRegeneratePolicies, regeneratePolicyLabels) }}</strong>
+            <span>锁定策略</span><strong>{{ metadataOptionText(selectedStrategy.lockPolicy, visibleLockPolicies, lockPolicyLabels) }}</strong>
+            <span>准备时机</span><strong>{{ metadataOptionText(selectedStrategy.prepareTiming, visiblePrepareTimings, prepareTimingLabels) }}</strong>
+            <span>进入前造数</span><strong>{{ selectedStrategy.needPreData ? '需要' : '不需要' }}</strong>
+            <span>策略版本</span><strong>{{ selectedStrategy.strategyVersion || 0 }}</strong>
+            <span>状态</span><strong>{{ selectedStrategy.status === 'ACTIVE' ? '已启用' : '未启用' }}</strong>
+          </div>
+          <section class="policy-summary wide">
+            <header>
+              <strong>策略摘要</strong>
+              <span>面向运维的业务化说明，原始接口参数保留在下方预览中。</span>
+            </header>
+            <div class="summary-grid">
+              <article v-for="item in buildStrategySummary(selectedStrategy)" :key="item.label">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.value }}</strong>
+              </article>
+            </div>
+          </section>
+          <details class="json-preview-block wide">
+            <summary>接口参数预览</summary>
+            <label>
+              <span>初始身份策略</span>
+              <textarea :value="selectedStrategy.defaultOrgRolePolicyJson || ''" rows="3" readonly />
+            </label>
+            <label>
+              <span>初始数据池容量策略</span>
+              <textarea :value="selectedStrategy.poolSizePolicyJson || ''" rows="3" readonly />
+            </label>
+            <label>
+              <span>初始数据校验策略</span>
+              <textarea :value="selectedStrategy.validationPolicyJson || ''" rows="3" readonly />
+            </label>
+            <label>
+              <span>过期策略</span>
+              <textarea :value="selectedStrategy.expirePolicyJson || ''" rows="3" readonly />
+            </label>
+            <label>
+              <span>结果校验策略</span>
+              <textarea :value="selectedStrategy.resultCheckPolicyJson || ''" rows="3" readonly />
+            </label>
+            <label>
+              <span>归档策略</span>
+              <textarea :value="selectedStrategy.archivePolicyJson || ''" rows="3" readonly />
+            </label>
+          </details>
         </div>
 
         <form
@@ -830,7 +970,7 @@ function statusClass(status?: string) {
                 :key="strategy.code"
                 :value="strategy.code"
               >
-                {{ strategy.code }}
+                {{ strategy.label }}
               </option>
             </select>
           </label>
@@ -846,15 +986,15 @@ function statusClass(status?: string) {
             <span>分配策略</span>
             <select v-model="strategyForm.sharePolicy">
               <option v-for="policy in visibleSharePolicies" :key="policy.code" :value="policy.code">
-                {{ policy.code }}
+                {{ policy.label }}
               </option>
             </select>
           </label>
           <label>
-            <span>重练策略</span>
+            <span>重建策略</span>
             <select v-model="strategyForm.regeneratePolicy">
               <option v-for="policy in visibleRegeneratePolicies" :key="policy.code" :value="policy.code">
-                {{ policy.code }}
+                {{ policy.label }}
               </option>
             </select>
           </label>
@@ -862,7 +1002,7 @@ function statusClass(status?: string) {
             <span>锁定策略</span>
             <select v-model="strategyForm.lockPolicy">
               <option v-for="policy in visibleLockPolicies" :key="policy.code" :value="policy.code">
-                {{ policy.code }}
+                {{ policy.label }}
               </option>
             </select>
           </label>
@@ -870,24 +1010,21 @@ function statusClass(status?: string) {
             <span>准备时机</span>
             <select v-model="strategyForm.prepareTiming">
               <option v-for="timing in visiblePrepareTimings" :key="timing.code" :value="timing.code">
-                {{ timing.code }}
+                {{ timing.label }}
               </option>
             </select>
           </label>
           <label class="check-line">
             <input v-model="strategyForm.needPreData" type="checkbox" />
-            <span>进入练习或考试前需要创建初始数据</span>
+            <span>进入练习、学习或考试前需要创建初始数据</span>
           </label>
           <section class="json-builder wide">
             <header>
               <div>
                 <strong>常用策略表单</strong>
-                <span>填写后可自动生成下方 JSON，复杂策略仍可继续手动微调。</span>
-                <em>启用要求：绑定启用模板，补齐单位要求、角色要求和状态校验；策略池最小值不能大于最大值。</em>
+                <span>填写业务规则后，系统自动转换为接口需要的参数。</span>
+                <em>启用要求：绑定模板，补齐单位要求、角色要求、状态校验；数据池最小值不能大于最大值。</em>
               </div>
-              <button type="button" class="secondary" @click="applyStrategyJsonBuilder">
-                生成 JSON
-              </button>
             </header>
             <div class="readiness-checklist">
               <article
@@ -942,30 +1079,33 @@ function statusClass(status?: string) {
               </label>
             </div>
           </section>
-          <label class="wide">
-            <span>初始身份策略 JSON</span>
-            <textarea v-model="strategyForm.defaultOrgRolePolicyJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>初始数据池容量策略 JSON</span>
-            <textarea v-model="strategyForm.poolSizePolicyJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>初始数据校验策略 JSON</span>
-            <textarea v-model="strategyForm.validationPolicyJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>过期策略 JSON</span>
-            <textarea v-model="strategyForm.expirePolicyJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>结果校验策略 JSON</span>
-            <textarea v-model="strategyForm.resultCheckPolicyJson" rows="3" />
-          </label>
-          <label class="wide">
-            <span>归档策略 JSON</span>
-            <textarea v-model="strategyForm.archivePolicyJson" rows="3" />
-          </label>
+          <details class="json-preview-block wide">
+            <summary>接口参数预览</summary>
+            <label>
+              <span>初始身份策略</span>
+              <textarea :value="strategyForm.defaultOrgRolePolicyJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>初始数据池容量策略</span>
+              <textarea :value="strategyForm.poolSizePolicyJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>初始数据校验策略</span>
+              <textarea :value="strategyForm.validationPolicyJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>过期策略</span>
+              <textarea :value="strategyForm.expirePolicyJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>结果校验策略</span>
+              <textarea :value="strategyForm.resultCheckPolicyJson" rows="3" readonly />
+            </label>
+            <label>
+              <span>归档策略</span>
+              <textarea :value="strategyForm.archivePolicyJson" rows="3" readonly />
+            </label>
+          </details>
           <footer class="dialog-actions">
             <button type="button" class="secondary" @click="closeDialog">取消</button>
             <button type="submit" :disabled="loading">
@@ -1102,6 +1242,12 @@ function statusClass(status?: string) {
   padding: 18px 22px 20px;
 }
 
+.detail-content {
+  display: grid;
+  gap: 14px;
+  padding-bottom: 20px;
+}
+
 .edit-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1133,6 +1279,58 @@ function statusClass(status?: string) {
 
 .wide {
   grid-column: 1 / -1;
+}
+
+.policy-summary {
+  display: grid;
+  gap: 12px;
+  margin: 0 22px;
+  border: 1px solid #dbeafe;
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 14px;
+}
+
+.policy-summary header {
+  display: grid;
+  gap: 4px;
+}
+
+.policy-summary header strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.policy-summary header span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.summary-grid article {
+  display: grid;
+  gap: 5px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.summary-grid span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.summary-grid strong {
+  color: #172033;
+  font-size: 13px;
+  overflow-wrap: anywhere;
 }
 
 .json-builder {
@@ -1216,6 +1414,47 @@ function statusClass(status?: string) {
   gap: 12px;
 }
 
+.json-preview-block {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #dbe3ef;
+  border-radius: 8px;
+  background: #f8fafc;
+  padding: 14px;
+}
+
+.detail-content .json-preview-block {
+  margin: 0 22px;
+}
+
+.json-preview-block strong {
+  color: #172033;
+  font-size: 14px;
+}
+
+.json-preview-block summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.json-preview-block[open] summary {
+  margin-bottom: 10px;
+}
+
+.json-preview-block label {
+  display: grid;
+  gap: 7px;
+}
+
+.json-preview-block textarea[readonly] {
+  background: #ffffff;
+  color: #475569;
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
 .edit-form textarea {
   width: 100%;
   max-width: 100%;
@@ -1260,7 +1499,9 @@ function statusClass(status?: string) {
   .detail-grid,
   .edit-form,
   .readiness-checklist,
-  .json-builder-grid {
+  .json-builder-grid,
+  .summary-grid,
+  .json-preview-block {
     grid-template-columns: 1fr;
   }
 

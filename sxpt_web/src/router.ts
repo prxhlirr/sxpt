@@ -146,37 +146,37 @@ export const router = createRouter({
           path: 'admin/data-prepare',
           name: 'data-prepare',
           component: () => import('./views/admin/DataPrepareView.vue'),
-          meta: { title: '批次准备', roles: ['admin', 'teacher'] }
+          meta: { title: '批次准备', roles: ['admin', 'teacher', 'expert'] }
         },
         {
           path: 'admin/data-prepare/systems',
           name: 'data-prepare-systems',
           component: () => import('./views/admin/DataPrepareSystemsView.vue'),
-          meta: { title: '平台接入', roles: ['admin', 'teacher'] }
+          meta: { title: '平台接入', roles: ['admin', 'teacher', 'expert'] }
         },
         {
           path: 'admin/data-prepare/modules',
           name: 'data-prepare-modules',
           component: () => import('./views/admin/DataPrepareModulesView.vue'),
-          meta: { title: '业务模块', roles: ['admin', 'teacher'] }
+          meta: { title: '业务模块', roles: ['admin', 'teacher', 'expert'] }
         },
         {
           path: 'admin/data-prepare/templates',
           name: 'data-prepare-templates',
           component: () => import('./views/admin/DataPrepareTemplatesView.vue'),
-          meta: { title: '模板管理', roles: ['admin', 'teacher'] }
+          meta: { title: '模板管理', roles: ['admin', 'teacher', 'expert'] }
         },
         {
           path: 'admin/data-prepare/strategies',
           name: 'data-prepare-strategies',
           component: () => import('./views/admin/DataPrepareStrategiesView.vue'),
-          meta: { title: '策略管理', roles: ['admin', 'teacher'] }
+          meta: { title: '策略管理', roles: ['admin', 'teacher', 'expert'] }
         },
         {
           path: 'admin/data-prepare/classic-cases',
           name: 'data-prepare-classic-cases',
           component: () => import('./views/admin/DataPrepareClassicCasesView.vue'),
-          meta: { title: '经典案例', roles: ['admin', 'teacher'] }
+          meta: { title: '经典案例', roles: ['admin', 'teacher', 'expert'] }
         },
         {
           path: 'admin/lessons/:lessonId/publish',

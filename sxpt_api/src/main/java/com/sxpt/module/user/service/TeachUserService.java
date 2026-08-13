@@ -45,6 +45,19 @@ public interface TeachUserService {
     TeachUser updateTeachUserStatus(String tenantId, String id, String status);
 
     /**
+     * 重置教学平台本地登录密码。
+     *
+     * 业务功能：管理员在账号维护页面将用户密码恢复为平台统一初始密码，解决教师、专家、学生忘记密码后无法进入教学平台的问题。
+     * 关键流程：按租户和用户 ID 找到未删除账号，写入新的密码 salt/hash，恢复正常密码状态，清空登录失败次数和锁定时间。
+     *
+     * @param tenantId 租户 ID。
+     * @param id 用户 ID。
+     * @param rawPassword 重置后的明文密码，由 Controller 统一传入平台初始密码。
+     * @return 已重置密码的用户实体。
+     */
+    TeachUser resetTeachUserPassword(String tenantId, String id, String rawPassword);
+
+    /**
      * 查询租户下的教学平台用户列表。
      *
      * 业务功能：为后台基础配置页面提供用户可视化维护入口，避免管理员只能通过初始化脚本确认老师、学生和管理员账号。

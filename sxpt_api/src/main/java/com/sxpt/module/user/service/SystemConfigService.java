@@ -51,6 +51,12 @@ public interface SystemConfigService {
 
     List<SysDictItem> listDictItems(String tenantId);
 
+    /**
+     * 业务功能：按字典编码查询当前租户启用的字典项。
+     * 关键流程：只返回 ACTIVE 且未删除的数据，供运行时元数据和前端下拉读取稳定配置来源。
+     */
+    List<SysDictItem> listActiveDictItemsByCode(String tenantId, String dictCode);
+
     SysRolePermission grantRolePermission(SysRolePermission rolePermission);
 
     SysRolePermission getRolePermission(String tenantId, String id);
