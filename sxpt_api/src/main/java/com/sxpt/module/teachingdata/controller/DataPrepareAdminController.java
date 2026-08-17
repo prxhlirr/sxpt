@@ -2,11 +2,13 @@ package com.sxpt.module.teachingdata.controller;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sxpt.common.api.ApiResult;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
 import com.sxpt.common.security.CurrentUserContext;
+import com.sxpt.module.connector.ClassicCaseRuntimeConstants;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
 import com.sxpt.module.connector.entity.BusinessModuleProcessStep;
@@ -71,6 +73,8 @@ public class DataPrepareAdminController {
     private static final TypeReference<LinkedHashMap<String, Object>> REQUEST_JSON_TYPE =
             new TypeReference<LinkedHashMap<String, Object>>() {
             };
+
+    private static final String NODE_CLASSIC_CASE_STRATEGY_CONFIG = "CLASSIC_CASE_STRATEGY_CONFIG";
 
     private final DataRequirementService dataRequirementService;
 
@@ -497,7 +501,83 @@ public class DataPrepareAdminController {
         result.addPass("MODULE_DATA_STRATEGY", "当前模块和场景存在启用的数据准备策略", evidence(
                 "strategyId", matched.getId(),
                 "strategyCode", matched.getStrategyCode(),
-                "templateId", matched.getTemplateId()));
+                "templateId", matched.getTemplateId(),
+                "dataSourceStrategy", matched.getDataSourceStrategy()));
+        addClassicCaseStrategyConfigCheck(result, matched);
+    }
+
+    /**
+     * 业务功能：校验经典案例数据源策略是否绑定可追溯的案例资产。
+     * 关键流程：仅在策略 dataSourceStrategy 为经典案例类型时执行；第一批不扩表，先读取 validationPolicyJson 中的案例资产配置，避免学习/练习入口拿不到稳定案例源。
+     */
+    private void addClassicCaseStrategyConfigCheck(DataPreparePreflightResult result, ModuleDataStrategy strategy) {
+        if (!isClassicCaseDataSourceStrategy(strategy.getDataSourceStrategy())) {
+            return;
+        }
+        JsonNode policy = parseObjectPolicyJson(strategy.getValidationPolicyJson());
+        if (policy == null) {
+            result.addFail(NODE_CLASSIC_CASE_STRATEGY_CONFIG, "经典案例策略缺少可解析的 validationPolicyJson 配置", evidence(
+                    "strategyId", strategy.getId(),
+                    "dataSourceStrategy", strategy.getDataSourceStrategy(),
+                    "requiredField", "validationPolicyJson."
+                            + ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID));
+            return;
+        }
+        String classicCaseAssetId = textValue(policy, ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID);
+        if (!StringUtils.hasText(classicCaseAssetId)) {
+            result.addFail(NODE_CLASSIC_CASE_STRATEGY_CONFIG, "经典案例策略未绑定案例资产，无法保证学生学习和练习使用同一案例源", evidence(
+                    "strategyId", strategy.getId(),
+                    "dataSourceStrategy", strategy.getDataSourceStrategy(),
+                    "requiredField", "validationPolicyJson."
+                            + ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID));
+            return;
+        }
+        String classicCaseVersionId = textValue(policy, ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_VERSION_ID);
+        result.addPass(NODE_CLASSIC_CASE_STRATEGY_CONFIG, "经典案例策略已绑定案例资产", evidence(
+                "strategyId", strategy.getId(),
+                "dataSourceStrategy", strategy.getDataSourceStrategy(),
+                "classicCaseAssetId", classicCaseAssetId,
+                "classicCaseVersionId", StringUtils.hasText(classicCaseVersionId) ? classicCaseVersionId : "CURRENT"));
+    }
+
+    /**
+     * 业务功能：判断数据来源策略是否属于经典案例链路。
+     * 关键流程：集中维护经典案例策略编码，避免控制器、测试和后续学生端分配逻辑各自写魔法值。
+     */
+    private boolean isClassicCaseDataSourceStrategy(String dataSourceStrategy) {
+        return ClassicCaseRuntimeConstants.DATA_SOURCE_STRATEGY_CLASSIC_CASE_REPLAY.equals(dataSourceStrategy)
+                || ClassicCaseRuntimeConstants.DATA_SOURCE_STRATEGY_CLASSIC_CASE_DEMO.equals(dataSourceStrategy);
+    }
+
+    /**
+     * 业务功能：把策略 JSON 解析为对象节点。
+     * 关键流程：配置为空、JSON 非法或不是对象时统一返回 null，让自检节点给出业务化失败原因而不是抛出底层解析异常。
+     */
+    private JsonNode parseObjectPolicyJson(String policyJson) {
+        if (!StringUtils.hasText(policyJson)) {
+            return null;
+        }
+        try {
+            JsonNode node = JSON_MAPPER.readTree(policyJson);
+            if (node == null || !node.isObject()) {
+                return null;
+            }
+            return node;
+        } catch (JsonProcessingException ex) {
+            return null;
+        }
+    }
+
+    /**
+     * 业务功能：从策略 JSON 对象中读取文本配置。
+     * 关键流程：只接受非空文本值，避免数组、对象或空字符串被误判为有效案例绑定。
+     */
+    private String textValue(JsonNode node, String fieldName) {
+        JsonNode value = node.get(fieldName);
+        if (value == null || !value.isTextual()) {
+            return null;
+        }
+        return value.asText();
     }
 
     private void addProcessStepCheck(DataPreparePreflightResult result, List<BusinessModuleProcessStep> steps) {

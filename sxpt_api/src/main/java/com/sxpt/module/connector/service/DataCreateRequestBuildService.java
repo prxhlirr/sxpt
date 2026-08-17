@@ -102,8 +102,8 @@ public class DataCreateRequestBuildService {
         root.put("initState", context.getInitState());
         root.put("usageScene", context.getUsageScene());
         root.put("sceneType", context.getSceneType());
-        root.put("classicCaseAssetId", context.getCaseAssetId());
-        root.put("classicCaseVersionId", context.getCaseVersionId());
+        root.put(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID, context.getCaseAssetId());
+        root.put(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_VERSION_ID, context.getCaseVersionId());
         root.put("payloadSchemaVersion", context.getPayloadSchemaVersion());
         root.put("traceId", context.getTraceId());
         ObjectNode template = root.putObject("template");
@@ -117,8 +117,10 @@ public class DataCreateRequestBuildService {
         root.set("resolvedActors", buildResolvedActors(context.getItems()));
 
         ObjectNode bizParams = root.putObject("bizParams");
-        bizParams.put("generationSource", ClassicCaseRuntimeConstants.GENERATION_SOURCE_CLASSIC_CASE);
-        bizParams.put("generationMode", resolveGenerationMode(context.getUsageScene()));
+        bizParams.put(
+                ClassicCaseRuntimeConstants.FIELD_GENERATION_SOURCE,
+                ClassicCaseRuntimeConstants.GENERATION_SOURCE_CLASSIC_CASE);
+        bizParams.put(ClassicCaseRuntimeConstants.FIELD_GENERATION_MODE, resolveGenerationMode(context.getUsageScene()));
         ObjectNode classicCase = bizParams.putObject("classicCase");
         classicCase.put("caseCode", context.getCaseCode());
         classicCase.put("caseVersionId", context.getCaseVersionId());

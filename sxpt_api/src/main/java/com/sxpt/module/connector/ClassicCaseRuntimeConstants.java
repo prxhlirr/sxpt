@@ -15,6 +15,10 @@ public final class ClassicCaseRuntimeConstants {
 
     public static final String REQUEST_MODE_CLASSIC_CASE = "CLASSIC_CASE";
 
+    public static final String DATA_SOURCE_STRATEGY_CLASSIC_CASE_REPLAY = "CLASSIC_CASE_REPLAY";
+
+    public static final String DATA_SOURCE_STRATEGY_CLASSIC_CASE_DEMO = "CLASSIC_CASE_DEMO";
+
     public static final String GENERATION_SOURCE_CLASSIC_CASE = "CLASSIC_CASE";
 
     public static final String GENERATION_MODE_REPLAY_CASE = "REPLAY_CASE";
@@ -28,6 +32,18 @@ public final class ClassicCaseRuntimeConstants {
     public static final String STATUS_SUCCESS = "SUCCESS";
 
     public static final String TEMPLATE_ID_PREFIX = "classic-case:";
+
+    public static final String FIELD_CLASSIC_CASE_ASSET_ID = "classicCaseAssetId";
+
+    public static final String FIELD_CLASSIC_CASE_VERSION_ID = "classicCaseVersionId";
+
+    public static final String FIELD_GENERATION_SOURCE = "generationSource";
+
+    public static final String FIELD_GENERATION_MODE = "generationMode";
+
+    public static final String FIELD_REQUIREMENT_SNAPSHOT_JSON = "requirementSnapshotJson";
+
+    public static final String FIELD_INSTANCE_METADATA_JSON = "instanceMetadataJson";
 
     private ClassicCaseRuntimeConstants() {
     }

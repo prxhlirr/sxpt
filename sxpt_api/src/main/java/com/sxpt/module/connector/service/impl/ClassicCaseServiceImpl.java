@@ -996,85 +996,6 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         return item;
     }
 
-    private String buildClassicCaseCreateRequestJson(ClassicCaseGenerateRequest request,
-                                                     ClassicCaseAsset asset,
-                                                     ClassicCaseVersion version,
-                                                     String traceId) {
-        ObjectNode root = JSON_MAPPER.createObjectNode();
-        root.put("requestMode", ClassicCaseRuntimeConstants.REQUEST_MODE_CLASSIC_CASE);
-        root.put("usageScene", request.getUsageScene().trim());
-        root.put("sceneType", request.getSceneType().trim());
-        root.put("classicCaseAssetId", asset.getId());
-        root.put("classicCaseVersionId", version.getId());
-        root.put("payloadSchemaVersion", version.getPayloadSchemaVersion());
-        root.put("traceId", traceId);
-        root.set("identityBinding", parseJsonNode(version.getIdentityBindingJson(), false));
-        if (StringUtils.hasText(request.getParticipantContextJson())) {
-            root.set("participantContext", parseJsonNode(request.getParticipantContextJson(), false));
-        }
-        ObjectNode bizParams = root.putObject("bizParams");
-        bizParams.put("generationSource", ClassicCaseRuntimeConstants.GENERATION_SOURCE_CLASSIC_CASE);
-        bizParams.put("generationMode", resolveGenerationMode(request.getUsageScene()));
-        ObjectNode classicCase = bizParams.putObject("classicCase");
-        classicCase.put("caseCode", asset.getCaseCode());
-        classicCase.put("caseVersionId", version.getId());
-        classicCase.put("payloadSchemaVersion", version.getPayloadSchemaVersion());
-        classicCase.set("identityBinding", parseJsonNode(version.getIdentityBindingJson(), false));
-        if (ClassicCaseRuntimeConstants.USAGE_SCENE_TEACHING_REPLICA.equals(request.getUsageScene().trim())) {
-            JsonNode desensitizedCasePayload = parseJsonNode(version.getDesensitizedCasePayloadJson(), false);
-            root.set("desensitizedCasePayload", desensitizedCasePayload);
-            classicCase.set("desensitizedCasePayload", desensitizedCasePayload);
-        } else {
-            JsonNode caseDataFormat = parseJsonNode(version.getCaseDataFormatJson(), false);
-            root.set("caseDataFormat", caseDataFormat);
-            classicCase.set("caseDataFormat", caseDataFormat);
-        }
-        return root.toString();
-    }
-
-    /**
-     * 构造批量学生 demo 生成请求快照。
-     *
-     * @param request 批量生成请求。
-     * @param asset 经典案例资产。
-     * @param version 经典案例版本。
-     * @param traceId 链路追踪 ID。
-     * @return 请求快照 JSON。
-     */
-    private String buildClassicCaseBatchCreateRequestJson(ClassicCaseBatchGenerateRequest request,
-                                                          ClassicCaseAsset asset,
-                                                          ClassicCaseVersion version,
-                                                          String traceId) {
-        ObjectNode root = JSON_MAPPER.createObjectNode();
-        root.put("requestMode", ClassicCaseRuntimeConstants.REQUEST_MODE_CLASSIC_CASE);
-        root.put("usageScene", request.getUsageScene().trim());
-        root.put("sceneType", request.getSceneType().trim());
-        root.put("classicCaseAssetId", asset.getId());
-        root.put("classicCaseVersionId", version.getId());
-        root.put("payloadSchemaVersion", version.getPayloadSchemaVersion());
-        root.put("traceId", traceId);
-        root.set("identityBinding", parseJsonNode(version.getIdentityBindingJson(), false));
-        JsonNode caseDataFormat = parseJsonNode(version.getCaseDataFormatJson(), false);
-        root.set("caseDataFormat", caseDataFormat);
-        ObjectNode bizParams = root.putObject("bizParams");
-        bizParams.put("generationSource", ClassicCaseRuntimeConstants.GENERATION_SOURCE_CLASSIC_CASE);
-        bizParams.put("generationMode", ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO);
-        ObjectNode classicCase = bizParams.putObject("classicCase");
-        classicCase.put("caseCode", asset.getCaseCode());
-        classicCase.put("caseVersionId", version.getId());
-        classicCase.put("payloadSchemaVersion", version.getPayloadSchemaVersion());
-        classicCase.set("identityBinding", parseJsonNode(version.getIdentityBindingJson(), false));
-        classicCase.set("caseDataFormat", caseDataFormat);
-        return root.toString();
-    }
-
-    /**
-     * 构造单条造数请求项，后续批量学生生成时可以扩展为多条 items。
-     *
-     * @param request 生成请求。
-     * @param requestItemId 请求项 ID。
-     * @return 造数请求项。
-     */
     /**
      * 将教学平台内部使用场景翻译为第三方造数协议中的经典案例生成模式。
      *
@@ -1086,19 +1007,6 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
             return ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE;
         }
         return ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO;
-    }
-
-    private OriginDataPrepareAdapter.RequestItem buildRequestItem(ClassicCaseGenerateRequest request,
-                                                                  String requestItemId) {
-        OriginDataPrepareAdapter.RequestItem item = new OriginDataPrepareAdapter.RequestItem();
-        item.setRequestItemId(requestItemId);
-        item.setStudentId(request.getOwnerUserId());
-        item.setQuestionId(trimToNull(request.getQuestionId()));
-        item.setRequiredExternalOrgId(trimToNull(request.getRequiredExternalOrgId()));
-        item.setRequiredExternalRoleId(trimToNull(request.getRequiredExternalRoleId()));
-        item.setActorType(trimToNull(request.getActorType()));
-        item.setDataScopeJson(trimToNull(request.getParticipantContextJson()));
-        return item;
     }
 
     /**
@@ -1399,8 +1307,8 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                                                       String usageId) {
         ObjectNode root = JSON_MAPPER.createObjectNode();
         root.put("source", ClassicCaseRuntimeConstants.REQUEST_MODE_CLASSIC_CASE);
-        root.put("classicCaseAssetId", asset.getId());
-        root.put("classicCaseVersionId", version.getId());
+        root.put(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID, asset.getId());
+        root.put(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_VERSION_ID, version.getId());
         root.put("classicCaseUsageId", usageId);
         root.put("validationStatus", ValidationStatus.PASSED.getValue());
         return root.toString();
@@ -1422,8 +1330,8 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         ObjectNode root = JSON_MAPPER.createObjectNode();
         root.put("requestMode", ClassicCaseRuntimeConstants.REQUEST_MODE_CLASSIC_CASE);
         root.put("usageScene", request.getUsageScene().trim());
-        root.put("classicCaseAssetId", asset.getId());
-        root.put("classicCaseVersionId", version.getId());
+        root.put(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID, asset.getId());
+        root.put(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_VERSION_ID, version.getId());
         root.put("classicCaseUsageId", usageId);
         return root.toString();
     }

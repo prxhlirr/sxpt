@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.sxpt.common.api.ApiResultCode;
 import com.sxpt.common.exception.BusinessException;
+import com.sxpt.module.connector.ClassicCaseRuntimeConstants;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.teachingdata.entity.DataInstanceAllocation;
@@ -297,7 +298,7 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
         allocation.setRequiredExternalRoleId(instance.getRequiredExternalRoleId());
         allocation.setRequiredExternalRoleName(instance.getRequiredExternalRoleName());
         allocation.setActorType(instance.getActorType());
-        allocation.setRequirementSnapshotJson(instance.getRequirementSnapshotJson());
+        allocation.setRequirementSnapshotJson(buildAllocationRequirementSnapshotJson(instance));
         applyProcessSnapshot(allocation, instance);
         allocation.setCreateBy(request.getCreateBy());
         allocation.setUpdateBy(request.getUpdateBy());
@@ -305,10 +306,32 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
     }
 
     /**
-     * 将数据准备明细中的步骤参与方快照写入分配记录。
-     * <p>
-     * 分配表需要固化“学生本次用哪条数据、从哪个步骤、以哪个参与方身份进入”，因此不能只保存数据实例 ID。
-     * 这里通过实例绑定的 requirementItemId 回查造数明细，把数据准备阶段已经生成的链路快照沉淀到领取记录中。
+     * 业务功能：固化学生领取数据时的来源快照。
+     * 关键流程：普通造数只有 requirementSnapshotJson 时保持原样；经典案例造数会把案例资产、版本和生成模式放在 metadataJson 中，这里把两类快照合并为同一个 allocation 字段，保证学习、练习和考试启动时都走同一套 allocation 上下文。
+     *
+     * @param instance 已被当前学生抢占的教学数据实例。
+     * @return 可持久化到分配记录的来源快照 JSON。
+     */
+    private String buildAllocationRequirementSnapshotJson(TeachingDataInstance instance) {
+        String requirementSnapshotJson = instance.getRequirementSnapshotJson();
+        String metadataJson = instance.getMetadataJson();
+        if (!StringUtils.hasText(metadataJson)) {
+            return requirementSnapshotJson;
+        }
+        if (!StringUtils.hasText(requirementSnapshotJson)) {
+            return "{\"" + ClassicCaseRuntimeConstants.FIELD_INSTANCE_METADATA_JSON + "\":"
+                    + jsonValue(metadataJson) + "}";
+        }
+        return "{"
+                + "\"" + ClassicCaseRuntimeConstants.FIELD_REQUIREMENT_SNAPSHOT_JSON + "\":"
+                + jsonValue(requirementSnapshotJson) + ","
+                + "\"" + ClassicCaseRuntimeConstants.FIELD_INSTANCE_METADATA_JSON + "\":" + jsonValue(metadataJson)
+                + "}";
+    }
+
+    /**
+     * 业务功能：把数据准备明细里的办理链路快照写入分配记录。
+     * 关键流程：通过实例绑定的 requirementItemId 回查造数明细，把步骤、参与方、单位和角色沉淀到 allocation，避免学生启动原平台时只拿到数据实例 ID。
      *
      * @param allocation 分配记录。
      * @param instance 教学数据实例。
@@ -438,6 +461,24 @@ public class DataInstanceAllocationServiceImpl implements DataInstanceAllocation
      */
     private String firstText(String first, String second) {
         return StringUtils.hasText(first) ? first : second;
+    }
+
+    /**
+     * 业务功能：把来源快照作为 JSON 字符串字段安全写入组合快照。
+     * 关键流程：只做字符串转义，不解析业务 JSON，避免经典案例和普通造数快照结构不一致时互相污染。
+     *
+     * @param value 原始 JSON 文本或普通文本。
+     * @return 可拼接进 JSON 对象的字符串值。
+     */
+    private String jsonValue(String value) {
+        if (value == null) {
+            return "null";
+        }
+        return "\"" + value
+                .replace("\\", "\\\\")
+                .replace("\"", "\\\"")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n") + "\"";
     }
 
     /**

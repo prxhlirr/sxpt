@@ -1,6 +1,7 @@
 package com.sxpt.module.teachingdata;
 
 import com.sxpt.common.exception.BusinessException;
+import com.sxpt.module.connector.ClassicCaseRuntimeConstants;
 import com.sxpt.module.connector.entity.TeachingDataInstance;
 import com.sxpt.module.connector.mapper.TeachingDataInstanceMapper;
 import com.sxpt.module.teachingdata.entity.DataInstanceAllocation;
@@ -24,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -155,6 +157,44 @@ class DataInstanceAllocationServiceImplTests {
         verify(instanceMapper).update(any(), any());
         verify(mapper).insert(saved);
         verify(poolMapper).updateById(pool);
+    }
+
+    /**
+     * 业务功能：验证经典案例实例被领取后，案例来源元数据会随分配记录一起固化。
+     * 关键流程：实例同时携带普通需求快照和 classic case metadataJson，领取后 allocation.requirementSnapshotJson 必须保留两类证据，保证学习、练习和考试启动共用同一套上下文。
+     */
+    @Test
+    void acquireReadyInstanceShouldKeepClassicCaseMetadataInAllocationSnapshot() {
+        TeachingDataPool pool = buildReadyPool();
+        TeachingDataInstance instance = buildReadyInstance();
+        instance.setRequirementSnapshotJson("{\"studentId\":\"student_001\",\"sceneType\":\"PRACTICE\"}");
+        instance.setMetadataJson("{\""
+                + ClassicCaseRuntimeConstants.FIELD_GENERATION_SOURCE + "\":\""
+                + ClassicCaseRuntimeConstants.GENERATION_SOURCE_CLASSIC_CASE + "\",\""
+                + ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID
+                + "\":\"case_001\",\""
+                + ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_VERSION_ID
+                + "\":\"version_001\",\""
+                + ClassicCaseRuntimeConstants.FIELD_GENERATION_MODE + "\":\""
+                + ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO + "\"}");
+        when(poolMapper.selectOne(any())).thenReturn(pool);
+        when(instanceMapper.selectList(any())).thenReturn(Collections.singletonList(instance));
+        when(mapper.selectCount(any())).thenReturn(0);
+        when(instanceMapper.update(any(), any())).thenReturn(1);
+        when(instanceMapper.selectCount(any())).thenReturn(0, 1);
+
+        DataInstanceAllocation saved = service.acquireReadyInstance(buildAcquireRequest());
+
+        assertTrue(saved.getRequirementSnapshotJson()
+                .contains(ClassicCaseRuntimeConstants.FIELD_REQUIREMENT_SNAPSHOT_JSON));
+        assertTrue(saved.getRequirementSnapshotJson()
+                .contains(ClassicCaseRuntimeConstants.FIELD_INSTANCE_METADATA_JSON));
+        assertTrue(saved.getRequirementSnapshotJson().contains(ClassicCaseRuntimeConstants.FIELD_CLASSIC_CASE_ASSET_ID));
+        assertTrue(saved.getRequirementSnapshotJson().contains("case_001"));
+        assertTrue(saved.getRequirementSnapshotJson().contains(ClassicCaseRuntimeConstants.FIELD_GENERATION_MODE));
+        assertTrue(saved.getRequirementSnapshotJson()
+                .contains(ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO));
+        verify(mapper).insert(saved);
     }
 
     /**

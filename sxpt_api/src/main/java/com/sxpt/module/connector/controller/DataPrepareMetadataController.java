@@ -2,6 +2,8 @@ package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
 import com.sxpt.common.security.CurrentUserContext;
+import com.sxpt.module.connector.ClassicCaseRuntimeConstants;
+import com.sxpt.module.connector.TeachingDataTemplateUsageConstants;
 import com.sxpt.module.connector.vo.DataPrepareMetadataVO;
 import com.sxpt.module.user.entity.SysDictItem;
 import com.sxpt.module.user.service.SystemConfigService;
@@ -65,6 +67,10 @@ public class DataPrepareMetadataController {
     private static final String STATUS_SUBMITTED = "SUBMITTED";
 
     private static final String SCENE_PRACTICE = "PRACTICE";
+
+    private static final String DATA_SOURCE_MOCK_GENERATE = "MOCK_GENERATE";
+
+    private static final String DATA_SOURCE_PULL_ORIGIN = "PULL_ORIGIN";
 
     private final SystemConfigService systemConfigService;
 
@@ -140,8 +146,10 @@ public class DataPrepareMetadataController {
         ));
         metadata.setTemplateUsages(defaultTemplateUsages());
         metadata.setDataSourceStrategies(Arrays.asList(
-                option("MOCK_GENERATE", "本系统生成", true),
-                option("PULL_ORIGIN", "原平台拉取", true)
+                option(DATA_SOURCE_MOCK_GENERATE, "本系统生成", true),
+                option(DATA_SOURCE_PULL_ORIGIN, "原平台拉取", true),
+                option(ClassicCaseRuntimeConstants.DATA_SOURCE_STRATEGY_CLASSIC_CASE_REPLAY, "经典案例复现", true),
+                option(ClassicCaseRuntimeConstants.DATA_SOURCE_STRATEGY_CLASSIC_CASE_DEMO, "经典案例演练", true)
         ));
         metadata.setPrepareTimings(Arrays.asList(
                 option("ON_DEMAND", "按需准备", true),
@@ -218,9 +226,9 @@ public class DataPrepareMetadataController {
 
     private List<DataPrepareMetadataVO.OptionVO> defaultTemplateUsages() {
         return Arrays.asList(
-                option("NORMAL", "普通造数模板", true),
-                option("CLASSIC_CASE_REPLAY", "经典案例还原模板", true),
-                option("CLASSIC_CASE_DEMO", "经典案例练习模板", true)
+                option(TeachingDataTemplateUsageConstants.NORMAL, "普通造数模板", true),
+                option(TeachingDataTemplateUsageConstants.CLASSIC_CASE_REPLAY, "经典案例还原模板", true),
+                option(TeachingDataTemplateUsageConstants.CLASSIC_CASE_DEMO, "经典案例练习模板", true)
         );
     }
 
@@ -259,7 +267,7 @@ public class DataPrepareMetadataController {
     private DataPrepareMetadataVO.StrategyDefaultsVO buildStrategyDefaults() {
         DataPrepareMetadataVO.StrategyDefaultsVO defaults = new DataPrepareMetadataVO.StrategyDefaultsVO();
         defaults.setSceneType(SCENE_PRACTICE);
-        defaults.setDataSourceStrategy("MOCK_GENERATE");
+        defaults.setDataSourceStrategy(DATA_SOURCE_MOCK_GENERATE);
         defaults.setInitExternalStatus(STATUS_DRAFT);
         defaults.setTargetExternalStatus(STATUS_SUBMITTED);
         defaults.setPrepareTiming("ON_DEMAND");
