@@ -1,6 +1,9 @@
 package com.sxpt.module.practice.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.practice.dto.ReportPracticeStepResultRequest;
 import com.sxpt.module.practice.entity.PracticeStepResult;
 import com.sxpt.module.practice.service.PracticeStepResultService;
@@ -63,7 +66,18 @@ public class PracticeStepResultController {
     @GetMapping
     public ApiResult<List<PracticeStepResultVO>> listByAttempt(@RequestParam String tenantId,
                                                                @RequestParam String attemptId) {
-        return ApiResult.success(toVOList(practiceStepResultService.listByAttempt(tenantId, attemptId)));
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        List<PracticeStepResult> results = practiceStepResultService.listByAttempt(user.getTenantId(), attemptId);
+        if (user.hasAnyRole("STUDENT")) {
+            for (PracticeStepResult result : results) {
+                if (!user.getUserId().equals(result.getStudentId())) {
+                    throw new BusinessException(ApiResultCode.FORBIDDEN);
+                }
+            }
+        } else if (!user.hasAnyRole("ADMIN", "TEACHER")) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
+        return ApiResult.success(toVOList(results));
     }
 
     /**
@@ -80,6 +94,7 @@ public class PracticeStepResultController {
         stepResult.setExecutionId(request.getExecutionId());
         stepResult.setStudentId(request.getStudentId());
         stepResult.setTaskId(request.getTaskId());
+        stepResult.setTeachingPointId(request.getTeachingPointId());
         stepResult.setTaskStepId(request.getTaskStepId());
         stepResult.setStepCode(request.getStepCode());
         stepResult.setSequenceNo(request.getSequenceNo());
@@ -126,6 +141,7 @@ public class PracticeStepResultController {
         vo.setExecutionId(stepResult.getExecutionId());
         vo.setStudentId(stepResult.getStudentId());
         vo.setTaskId(stepResult.getTaskId());
+        vo.setTeachingPointId(stepResult.getTeachingPointId());
         vo.setTaskStepId(stepResult.getTaskStepId());
         vo.setStepCode(stepResult.getStepCode());
         vo.setSequenceNo(stepResult.getSequenceNo());

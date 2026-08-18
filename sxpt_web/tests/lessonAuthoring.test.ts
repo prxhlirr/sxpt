@@ -26,12 +26,15 @@ describe('后台教案编排页面', () => {
     expect(list).toContain('状态筛选');
   });
 
-  it('教案列表直接进入发布中心并提供删除操作', () => {
+  it('教案列表直接进入发布中心并提供编辑、撤回发布和删除操作', () => {
     const list = source('src/views/admin/LessonListView.vue');
 
     expect(list).toContain('发布中心');
     expect(list).toContain("name: 'publish-center'");
     expect(list).toContain('store.deleteLessonRemote');
+    expect(list).toContain('store.withdrawLessonRemote');
+    expect(list).toContain('撤回发布');
+    expect(list).toContain("name: 'lesson-editor'");
     expect(list).toContain('确认删除教案');
     expect(list).not.toContain('业务配置');
   });
@@ -65,16 +68,31 @@ describe('后台教案编排页面', () => {
     expect(preview).toContain("'返回编辑'");
   });
 
-  it('录制时使用可收起抽屉和边缘工具坞，元素选择提示可换角落', () => {
+  it('录制时以业务系统为全屏底座，左右抽屉按上下文展示并支持目录拖拽', () => {
     const editor = source('src/views/admin/LessonEditorView.vue');
 
-    expect(editor).toContain('const showStagePanel = ref(false)');
-    expect(editor).toContain('toggleStagePanel');
-    expect(editor).toContain('toggleConfigPanel');
+    expect(editor).toContain('const showStagePanel = ref(true)');
+    expect(editor).toContain('class="business-layer"');
+    expect(editor).toContain('authoring-left-drawer');
+    expect(editor).toContain('authoring-right-drawer');
     expect(editor).toContain('closeAuthoringDrawers();');
-    expect(editor).toContain('aria-label="编排快捷工具坞"');
+    expect(editor).toContain('beginDirectoryDrag');
+    expect(editor).toContain('dropDirectoryItem');
+    expect(editor).toContain('startAddingStep(stage.id)');
+    expect(editor).toContain('＋ 添加节点');
     expect(editor).toContain('cyclePickerToolbarPosition');
     expect(editor).toContain('换个角落');
+    expect(editor).not.toContain('aria-label="编排快捷工具坞"');
+  });
+
+  it('编排操作层使用不小于 16px 的统一字号和一致的控件尺寸', () => {
+    const editor = source('src/views/admin/LessonEditorView.vue');
+
+    expect(editor).toContain('--authoring-font-size: 16px');
+    expect(editor).toContain('--authoring-control-height: 44px');
+    expect(editor).toContain('--authoring-primary-height: 48px');
+    expect(editor).toContain('--authoring-control-radius: 10px');
+    expect(editor).toContain('.config-content input:focus');
   });
 
   it('发布中心可直接进入教师讲解并返回发布中心', () => {
@@ -99,14 +117,14 @@ describe('后台教案编排页面', () => {
     expect(preview).not.toContain(':action-disabled="Boolean(lesson.lectureCompletedAt)"');
   });
 
-  it('编排页调用基础信息保存和发布，并提供明显的考试设置入口', () => {
+  it('编排页调用基础信息保存和发布，发布弹框只保留发布操作', () => {
     const editor = source('src/views/admin/LessonEditorView.vue');
 
     expect(editor).toContain('store.updateLesson');
     expect(editor).toContain('store.publishLesson');
     expect(editor).toContain('发布校验');
-    expect(editor).toContain('下一步：考试设置');
-    expect(editor).toContain("name: 'exam-setup'");
+    expect(editor).toContain('确认无误后即可发布教案');
+    expect(editor).not.toContain('下一步：考试设置');
   });
 
   it('直接进入编排页时同步后端平台和业务模块', () => {

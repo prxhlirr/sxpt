@@ -34,6 +34,18 @@ interface PlaybackStep {
   stepIndex: number;
 }
 
+interface PlaybackLauncherPosition {
+  left: number;
+  top: number;
+}
+
+interface PlaybackLauncherDragState extends PlaybackLauncherPosition {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+}
+
 const props = withDefaults(
   defineProps<{
     lesson: LessonPlan;
@@ -72,9 +84,9 @@ const emit = defineEmits<{
   selectStage: [stageId: string];
 }>();
 
-const navigationOpen = ref(false);
+const navigationOpen = ref(true);
 const promptCollapsed = ref(false);
-const promptPosition = ref<'left' | 'right' | 'bottom'>('left');
+const promptPosition = ref<'left' | 'right' | 'bottom'>('right');
 const playerElement = ref<HTMLElement | null>(null);
 const promptElement = ref<HTMLElement | null>(null);
 const manualPromptPosition = ref<OverlayPosition | null>(null);
@@ -82,6 +94,12 @@ const promptDragging = ref(false);
 const dragState = ref<OverlayDragSession | null>(null);
 const previewAttachment = ref<TrainingAttachment | null>(null);
 const attachmentPreviewMinimized = ref(false);
+const launcherPosition = ref<PlaybackLauncherPosition | null>(null);
+const launcherDragging = ref(false);
+let launcherDragState: PlaybackLauncherDragState | null = null;
+let suppressLauncherClick = false;
+const PLAYBACK_LAUNCHER_SIZE = 58;
+const PLAYBACK_LAUNCHER_GAP = 10;
 
 const steps = computed<PlaybackStep[]>(() =>
   props.lesson.stages.flatMap((stage, stageIndex) =>
@@ -149,6 +167,14 @@ const promptStyle = computed(() =>
       }
     : undefined
 );
+const launcherStyle = computed<Record<string, string>>(() => {
+  if (!launcherPosition.value) return {} as Record<string, string>;
+  return {
+    left: `${launcherPosition.value.left}px`,
+    top: `${launcherPosition.value.top}px`,
+    transform: 'none'
+  };
+});
 
 function formatDuration(seconds: number) {
   const minutes = Math.floor(seconds / 60);
@@ -158,9 +184,130 @@ function formatDuration(seconds: number) {
 
 function toggleNavigation() {
   navigationOpen.value = !navigationOpen.value;
-  if (navigationOpen.value && promptPosition.value === 'right') {
-    promptPosition.value = 'left';
+  if (navigationOpen.value && promptPosition.value === 'left') {
+    promptPosition.value = 'right';
   }
+}
+
+function playbackLauncherStorageKey() {
+  return `sxpt:lesson-playback-launcher:${props.lesson.id}`;
+}
+
+function clampLauncherPosition(left: number, top: number) {
+  const maxLeft = Math.max(
+    PLAYBACK_LAUNCHER_GAP,
+    window.innerWidth - PLAYBACK_LAUNCHER_SIZE - PLAYBACK_LAUNCHER_GAP
+  );
+  const maxTop = Math.max(
+    PLAYBACK_LAUNCHER_GAP,
+    window.innerHeight - PLAYBACK_LAUNCHER_SIZE - PLAYBACK_LAUNCHER_GAP
+  );
+  return {
+    left: Math.min(Math.max(left, PLAYBACK_LAUNCHER_GAP), maxLeft),
+    top: Math.min(Math.max(top, PLAYBACK_LAUNCHER_GAP), maxTop)
+  };
+}
+
+function persistLauncherPosition() {
+  if (!launcherPosition.value) return;
+  try {
+    window.localStorage.setItem(
+      playbackLauncherStorageKey(),
+      JSON.stringify(launcherPosition.value)
+    );
+  } catch {
+    // 浏览器禁用本地存储时仍允许使用默认位置。
+  }
+}
+
+function restoreLauncherPosition() {
+  try {
+    const raw = window.localStorage.getItem(playbackLauncherStorageKey());
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<PlaybackLauncherPosition>;
+    if (
+      typeof parsed.left !== 'number' ||
+      typeof parsed.top !== 'number' ||
+      !Number.isFinite(parsed.left) ||
+      !Number.isFinite(parsed.top)
+    ) {
+      return;
+    }
+    launcherPosition.value = clampLauncherPosition(parsed.left, parsed.top);
+  } catch {
+    launcherPosition.value = null;
+  }
+}
+
+function constrainLauncherPosition() {
+  if (!launcherPosition.value) return;
+  launcherPosition.value = clampLauncherPosition(
+    launcherPosition.value.left,
+    launcherPosition.value.top
+  );
+  persistLauncherPosition();
+}
+
+function startLauncherDrag(event: PointerEvent) {
+  if (event.button !== 0) return;
+  const button = event.currentTarget as HTMLButtonElement;
+  const rect = button.getBoundingClientRect();
+  launcherDragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    left: rect.left,
+    top: rect.top,
+    moved: false
+  };
+  try {
+    button.setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is optional.
+  }
+}
+
+function moveLauncherDrag(event: PointerEvent) {
+  const drag = launcherDragState;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const deltaX = event.clientX - drag.startX;
+  const deltaY = event.clientY - drag.startY;
+  if (!drag.moved && Math.hypot(deltaX, deltaY) < 4) return;
+  drag.moved = true;
+  launcherDragging.value = true;
+  launcherPosition.value = clampLauncherPosition(
+    drag.left + deltaX,
+    drag.top + deltaY
+  );
+  event.preventDefault();
+}
+
+function finishLauncherDrag(event: PointerEvent) {
+  const drag = launcherDragState;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const button = event.currentTarget as HTMLButtonElement;
+  try {
+    if (button.hasPointerCapture(event.pointerId)) {
+      button.releasePointerCapture(event.pointerId);
+    }
+  } catch {
+    // Ignore browsers without pointer capture state.
+  }
+  if (drag.moved) {
+    suppressLauncherClick = true;
+    persistLauncherPosition();
+  }
+  launcherDragState = null;
+  launcherDragging.value = false;
+}
+
+function openMenuFromLauncher(event: MouseEvent) {
+  if (suppressLauncherClick) {
+    suppressLauncherClick = false;
+    event.preventDefault();
+    return;
+  }
+  toggleNavigation();
 }
 
 function cyclePromptPosition() {
@@ -274,9 +421,17 @@ watch(
   }
 );
 
-onMounted(() => window.addEventListener('resize', schedulePromptConstraint));
+function handleViewportResize() {
+  schedulePromptConstraint();
+  constrainLauncherPosition();
+}
+
+onMounted(() => {
+  restoreLauncherPosition();
+  window.addEventListener('resize', handleViewportResize);
+});
 onBeforeUnmount(() =>
-  window.removeEventListener('resize', schedulePromptConstraint)
+  window.removeEventListener('resize', handleViewportResize)
 );
 
 function openAttachmentPreview(attachment: TrainingAttachment) {
@@ -318,59 +473,94 @@ function restoreAttachmentPreview() {
     />
     <div v-else class="playback-empty">当前教案还没有可回放的录制节点</div>
 
-    <nav class="playback-edge-toolbar" aria-label="讲解与学习控制">
-      <RouterLink :to="returnTo" :title="returnLabel" aria-label="返回">
-        ←
-      </RouterLink>
-      <button
-        type="button"
-        :class="{ active: navigationOpen }"
-        :aria-expanded="navigationOpen"
-        title="教学点与节点目录"
-        @click="toggleNavigation"
-      >
-        目录
-      </button>
-      <button
-        type="button"
-        :aria-expanded="!promptCollapsed"
-        title="收起或展开当前说明"
-        @click="promptCollapsed = !promptCollapsed"
-      >
-        {{ promptCollapsed ? '说明' : '收起' }}
-      </button>
-    </nav>
-
-    <aside
+    <section
       v-if="navigationOpen"
-      class="playback-navigation-drawer"
-      aria-label="教学点与节点目录"
+      class="playback-menu-shell"
+      aria-label="讲解与学习菜单"
     >
-      <header>
-        <div>
-          <small>流程讲解</small>
-          <strong>{{ lesson.title }}</strong>
+      <nav class="playback-menu-rail" aria-label="讲解与学习操作">
+        <div class="playback-menu-mark" aria-hidden="true">导</div>
+        <RouterLink class="playback-rail-action" :to="returnTo" :title="returnLabel">
+          <span>←</span>
+          <small>返回</small>
+        </RouterLink>
+        <button
+          class="playback-rail-action active"
+          type="button"
+          title="收起教学目录"
+          @click="toggleNavigation"
+        >
+          <span>☰</span>
+          <small>目录</small>
+        </button>
+        <button
+          class="playback-rail-action"
+          :class="{ active: !promptCollapsed }"
+          type="button"
+          :aria-expanded="!promptCollapsed"
+          title="收起或展开当前说明"
+          @click="promptCollapsed = !promptCollapsed"
+        >
+          <span>i</span>
+          <small>说明</small>
+        </button>
+        <button
+          class="playback-rail-action playback-rail-collapse"
+          type="button"
+          title="收起全部菜单"
+          @click="navigationOpen = false"
+        >
+          <span>‹</span>
+          <small>收起</small>
+        </button>
+      </nav>
+
+      <aside class="playback-directory-panel" aria-label="教学点与节点目录">
+        <header>
+          <div>
+            <small>LESSON GUIDE</small>
+            <strong>{{ lesson.title }}</strong>
+            <span>{{ teachingPoints.length }} 个教学点 · {{ steps.length }} 个节点</span>
+          </div>
+          <em>{{ progress }}%</em>
+        </header>
+        <div class="playback-directory-progress">
+          <i :style="{ width: `${progress}%` }"></i>
         </div>
-        <button type="button" aria-label="关闭目录" @click="navigationOpen = false">×</button>
-      </header>
-      <div class="playback-metrics">
-        <span><small>教学点</small><strong>{{ teachingPoints.length }}</strong></span>
-        <span><small>节点</small><strong>{{ steps.length }}</strong></span>
-        <span><small>时长</small><strong>{{ formatDuration(totalDuration) }}</strong></span>
-        <span><small>进度</small><strong>{{ progress }}%</strong></span>
-      </div>
-      <div class="playback-drawer-progress"><i :style="{ width: `${progress}%` }"></i></div>
-      <PlaybackNavigationTree
-        :teaching-points="teachingPoints"
-        :steps="steps"
-        :current-stage-id="current?.stage.id"
-        :current-index="currentIndex"
-        :show-stage-introduction="showStageIntroduction"
-        :disabled="playerState !== 'PLAYING'"
-        @select-stage="emit('selectStage', $event)"
-        @select-step="emit('selectStep', $event)"
-      />
-    </aside>
+        <PlaybackNavigationTree
+          :teaching-points="teachingPoints"
+          :steps="steps"
+          :current-stage-id="current?.stage.id"
+          :current-index="currentIndex"
+          :show-stage-introduction="showStageIntroduction"
+          :disabled="playerState !== 'PLAYING'"
+          @select-stage="emit('selectStage', $event)"
+          @select-step="emit('selectStep', $event)"
+        />
+        <footer v-if="current">
+          <span>{{ showStageIntroduction ? '当前教学点' : '当前节点' }}</span>
+          <strong>{{ showStageIntroduction ? current.stage.name : current.step.title }}</strong>
+          <small>{{ formatDuration(elapsedDuration) }} / {{ formatDuration(totalDuration) }}</small>
+        </footer>
+      </aside>
+    </section>
+
+    <button
+      v-else
+      class="playback-floating-launcher"
+      :class="{ dragging: launcherDragging }"
+      :style="launcherStyle"
+      type="button"
+      title="拖动调整位置，点击展开讲解菜单"
+      aria-label="展开讲解菜单"
+      @pointerdown="startLauncherDrag"
+      @pointermove="moveLauncherDrag"
+      @pointerup="finishLauncherDrag"
+      @pointercancel="finishLauncherDrag"
+      @click="openMenuFromLauncher"
+    >
+      导
+    </button>
 
     <aside
       ref="promptElement"
@@ -415,12 +605,12 @@ function restoreAttachmentPreview() {
       <div v-if="!promptCollapsed" class="playback-prompt-content">
         <template v-if="playerState === 'READY'">
           <div class="playback-heading">
-            <span>流程讲解</span>
+            <span>教学流程</span>
             <strong>{{ lesson.title }}</strong>
-            <small>学习内容与教师讲解使用同一界面</small>
+            <small>{{ teachingPoints.length }} 个教学点 · {{ steps.length }} 个操作节点</small>
           </div>
           <div class="playback-instruction">
-            <span>开始说明</span>
+            <span>学习说明</span>
             <p>开始后可按教学点和操作节点逐步查看完整业务系统流程。</p>
           </div>
           <button
@@ -435,12 +625,12 @@ function restoreAttachmentPreview() {
 
         <template v-else-if="playerState === 'COMPLETED'">
           <div class="playback-heading">
-            <span>流程讲解</span>
+            <span>教学流程</span>
             <strong>本次流程已经完成</strong>
             <small>{{ lesson.title }}</small>
           </div>
           <div class="playback-instruction">
-            <span>完成说明</span>
+            <span>完成情况</span>
             <p>完整学习轨迹已保存，可返回任务中心或从第一步重新开始。</p>
           </div>
           <button
@@ -456,15 +646,11 @@ function restoreAttachmentPreview() {
         <template v-else-if="current && currentStep">
           <template v-if="showStageIntroduction">
             <div class="playback-heading">
-              <span>
-                本教学点说明 · 教学点 {{ current.stageIndex + 1 }} /
-                {{ teachingPoints.length }}
-              </span>
+              <span>教学点 {{ current.stageIndex + 1 }} / {{ teachingPoints.length }}</span>
               <strong>{{ current.stage.name }}</strong>
-              <small>{{ current.stage.groupKey || '未指定业务角色' }}</small>
             </div>
             <div class="playback-instruction">
-              <span>教学点目标与注意事项</span>
+              <span>教学说明</span>
               <p>
                 {{
                   current.stage.description ||
@@ -477,21 +663,31 @@ function restoreAttachmentPreview() {
               title="教学点附件"
               @preview="openAttachmentPreview"
             />
-            <dl>
-              <div><dt>教学点节点</dt><dd>{{ current.stage.recordedSteps.length }} 个</dd></div>
-              <div><dt>负责角色</dt><dd>{{ current.stage.groupKey || '未指定' }}</dd></div>
-              <div><dt>教学点分值</dt><dd>{{ current.stage.score }} 分</dd></div>
-              <div><dt>完成依据</dt><dd>{{ current.stage.completionMethod }}</dd></div>
-            </dl>
+            <div class="playback-essential-meta">
+              <span><b>{{ current.stage.recordedSteps.length }}</b> 个操作节点</span>
+              <span>
+                参考时长
+                <b>
+                  {{
+                    formatDuration(
+                      current.stage.recordedSteps.reduce(
+                        (total, step) => total + step.durationSeconds,
+                        0
+                      )
+                    )
+                  }}
+                </b>
+              </span>
+            </div>
           </template>
           <template v-else>
             <div class="playback-heading">
-              <span>本节点说明 · 步骤 {{ currentIndex + 1 }} / {{ steps.length }}</span>
+              <span>操作节点 {{ currentIndex + 1 }} / {{ steps.length }}</span>
               <strong>{{ currentStep.title }}</strong>
-              <small>{{ current.stage.name }} · {{ current.stage.groupKey }}</small>
+              <small>{{ current.stage.name }}</small>
             </div>
             <div class="playback-instruction">
-              <span>逐步讲解</span>
+              <span>操作说明</span>
               <p>
                 {{
                   currentStep.teachingText ||
@@ -505,13 +701,10 @@ function restoreAttachmentPreview() {
               title="节点附件"
               @preview="openAttachmentPreview"
             />
-            <dl>
-              <div><dt>pageTitle</dt><dd>{{ currentStep.pageTitle }}</dd></div>
-              <div><dt>actionLabel</dt><dd>{{ currentStep.actionLabel }}</dd></div>
-              <div><dt>selector</dt><dd><code>{{ currentStep.selector }}</code></dd></div>
-              <div><dt>durationSeconds</dt><dd>{{ currentStep.durationSeconds }} 秒</dd></div>
-              <div><dt>完成依据</dt><dd>{{ current.stage.completionMethod }}</dd></div>
-            </dl>
+            <div class="playback-essential-meta">
+              <span>操作 <b>{{ currentStep.actionLabel || currentStep.title }}</b></span>
+              <span>参考时长 <b>{{ currentStep.durationSeconds }} 秒</b></span>
+            </div>
           </template>
           <div class="playback-step-controls">
             <button
@@ -557,18 +750,12 @@ function restoreAttachmentPreview() {
       </div>
     </aside>
 
-    <footer class="playback-progress-strip" aria-label="流程进度">
-      <span>{{ formatDuration(elapsedDuration) }}</span>
-      <div><i :style="{ width: `${progress}%` }"></i></div>
-      <span>{{ formatDuration(totalDuration) }}</span>
-    </footer>
-
     <AttachmentPreviewLayer
       :attachment="previewAttachment"
       :attachments="current?.stage.attachments ?? []"
       :context-key="current?.stage.id ?? ''"
       :minimized="attachmentPreviewMinimized"
-      :avoid-right="navigationOpen"
+      :avoid-right="false"
       @close="closeAttachmentPreview"
       @minimize="minimizeAttachmentPreview"
       @preview="openAttachmentPreview"
@@ -1094,6 +1281,387 @@ function restoreAttachmentPreview() {
     right: 8px;
     bottom: 6px;
     left: 8px;
+  }
+}
+
+/* 与教案编排一致：业务系统全屏铺底，菜单作为可收起的左侧浮层。 */
+.playback-menu-shell {
+  position: absolute;
+  z-index: 50;
+  top: 14px;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  max-height: calc(100vh - 28px);
+  overflow: hidden;
+  border: 1px solid rgb(222 226 236 / 92%);
+  border-radius: 20px;
+  background: transparent;
+  box-shadow: 0 22px 60px rgb(27 36 54 / 24%);
+}
+
+.playback-menu-rail {
+  display: flex;
+  width: 88px;
+  flex: 0 0 88px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 14px 8px 12px;
+  color: #dce3f1;
+  background:
+    radial-gradient(circle at 50% 0%, rgb(104 88 229 / 30%), transparent 31%),
+    linear-gradient(180deg, #252b3a 0%, #1b202d 100%);
+  box-sizing: border-box;
+}
+
+.playback-menu-mark,
+.playback-floating-launcher {
+  display: grid;
+  place-items: center;
+  border: 0;
+  color: #fff;
+  background: linear-gradient(145deg, #7c6cf2, #5b4bd2);
+  box-shadow: 0 9px 24px rgb(91 75 210 / 38%);
+  font-weight: 900;
+}
+
+.playback-menu-mark {
+  width: 50px;
+  height: 50px;
+  flex: 0 0 50px;
+  align-self: center;
+  margin-bottom: 4px;
+  border-radius: 16px;
+  font-size: 21px;
+}
+
+.playback-rail-action {
+  display: flex;
+  min-height: 58px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  border-radius: 13px;
+  padding: 6px 3px;
+  color: #bac4d5;
+  background: transparent;
+  box-shadow: none;
+  font: inherit;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.playback-rail-action:hover,
+.playback-rail-action.active {
+  color: #fff;
+  background: rgb(255 255 255 / 11%);
+  box-shadow: none;
+  transform: none;
+}
+
+.playback-rail-action > span {
+  display: grid;
+  width: 28px;
+  height: 25px;
+  place-items: center;
+  font-size: 22px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.playback-rail-action > small {
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.playback-rail-collapse {
+  margin-top: auto;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 0 0 13px 13px;
+}
+
+.playback-directory-panel {
+  display: flex;
+  width: 348px;
+  min-width: 0;
+  flex-direction: column;
+  color: #202735;
+  background: rgb(250 251 253 / 97%);
+  backdrop-filter: blur(18px);
+}
+
+.playback-directory-panel > header {
+  display: grid;
+  min-height: 104px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e5e8ef;
+  padding: 17px 18px 14px;
+  box-sizing: border-box;
+}
+
+.playback-directory-panel > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.playback-directory-panel > header small {
+  color: #6e5ce2;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.playback-directory-panel > header strong {
+  overflow: hidden;
+  color: #273041;
+  font-size: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playback-directory-panel > header span {
+  color: #7d8797;
+  font-size: 14px;
+}
+
+.playback-directory-panel > header em {
+  display: grid;
+  width: 50px;
+  height: 50px;
+  place-items: center;
+  border-radius: 15px;
+  color: #5e4fd0;
+  background: #ebe8ff;
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.playback-directory-progress {
+  overflow: hidden;
+  height: 5px;
+  background: #e8ebf1;
+}
+
+.playback-directory-progress i {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #6b5dd3, #19a77b);
+  transition: width 180ms ease;
+}
+
+.playback-directory-panel > :deep(.playback-navigation-tree) {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.playback-directory-panel > footer {
+  display: grid;
+  gap: 3px;
+  border-top: 1px solid #e5e8ef;
+  padding: 12px 16px;
+  background: #fff;
+}
+
+.playback-directory-panel > footer span,
+.playback-directory-panel > footer small {
+  color: #858e9d;
+  font-size: 13px;
+}
+
+.playback-directory-panel > footer strong {
+  overflow: hidden;
+  color: #313a4a;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playback-floating-launcher {
+  position: fixed;
+  z-index: 60;
+  top: 50%;
+  left: 14px;
+  width: 58px;
+  height: 58px;
+  min-height: 58px;
+  border-radius: 18px;
+  padding: 0;
+  font-size: 22px;
+  cursor: grab;
+  touch-action: none;
+  transform: translateY(-50%);
+  user-select: none;
+}
+
+.playback-floating-launcher:hover {
+  box-shadow: 0 12px 28px rgb(91 75 210 / 48%);
+  transform: translateY(-50%) scale(1.03);
+}
+
+.playback-floating-launcher.dragging {
+  cursor: grabbing;
+  box-shadow: 0 16px 34px rgb(91 75 210 / 52%);
+}
+
+/* 讲解卡片只保留标题、说明、附件、操作与时长。 */
+.playback-prompt {
+  z-index: 45;
+  width: min(390px, calc(100vw - 36px));
+  max-height: calc(100vh - 32px);
+  border-radius: 18px;
+  box-shadow: 0 22px 60px rgb(23 29 55 / 24%);
+}
+
+.playback-prompt.stage-prompt {
+  width: min(450px, calc(100vw - 36px));
+}
+
+.playback-prompt-toolbar {
+  min-height: 50px;
+  padding: 7px 8px 7px 16px;
+}
+
+.playback-prompt-toolbar strong {
+  font-size: 16px;
+}
+
+.playback-prompt-toolbar button {
+  min-height: 34px;
+  padding: 0 10px;
+  font-size: 14px;
+}
+
+.playback-heading {
+  gap: 6px;
+  padding: 18px 20px 12px;
+}
+
+.playback-heading span,
+.playback-instruction span {
+  font-size: 13px;
+}
+
+.playback-heading strong {
+  font-size: 20px;
+}
+
+.playback-heading small {
+  font-size: 14px;
+}
+
+.playback-instruction {
+  margin: 0 18px 14px;
+  border-radius: 12px;
+  padding: 13px 14px;
+}
+
+.playback-instruction p {
+  margin-top: 7px;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.playback-prompt :deep(.attachment-panel) {
+  margin: 0 18px 14px;
+}
+
+.playback-essential-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0 18px 4px;
+}
+
+.playback-essential-meta span {
+  border: 1px solid #e2e5ec;
+  border-radius: 999px;
+  padding: 7px 11px;
+  color: #747e8f;
+  background: #f8f9fb;
+  font-size: 14px;
+}
+
+.playback-essential-meta b {
+  color: #4f43b5;
+}
+
+.playback-step-controls {
+  gap: 10px;
+  padding: 14px 18px 18px;
+}
+
+.playback-step-controls button,
+.playback-state-action {
+  min-height: 44px;
+  border-radius: 10px;
+  font-size: 16px;
+}
+
+.playback-state-action {
+  width: calc(100% - 36px);
+  margin: 0 18px 18px;
+}
+
+.playback-feedback {
+  margin: 0 18px 16px;
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 15px;
+}
+
+@media (max-height: 680px) {
+  .playback-prompt :deep(.attachment-panel) {
+    display: block;
+  }
+
+  .playback-directory-panel > header {
+    min-height: 86px;
+    padding-block: 12px;
+  }
+}
+
+@media (max-width: 720px) {
+  .playback-menu-shell {
+    top: 8px;
+    bottom: 8px;
+    left: 8px;
+    max-height: calc(100vh - 16px);
+  }
+
+  .playback-menu-rail {
+    width: 82px;
+    flex-basis: 82px;
+    padding-inline: 6px;
+  }
+
+  .playback-directory-panel {
+    width: min(320px, calc(100vw - 98px));
+  }
+
+  .playback-directory-panel > header em,
+  .playback-directory-panel > footer {
+    display: none;
+  }
+
+  .playback-prompt,
+  .playback-prompt.stage-prompt,
+  .playback-prompt.node-prompt.prompt-left,
+  .playback-prompt.node-prompt.prompt-right,
+  .playback-prompt.node-prompt.prompt-bottom {
+    max-height: 58vh;
+  }
+
+  .playback-instruction,
+  .playback-prompt :deep(.attachment-panel) {
+    display: block;
   }
 }
 </style>

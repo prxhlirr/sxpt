@@ -26,6 +26,16 @@ public interface TeachingPointService {
     TeachingPoint createTeachingPoint(TeachingPoint teachingPoint);
 
     /**
+     * 撤回已发布教学点，使其不能再用于发布新任务。
+     *
+     * @param id 教学点 ID。
+     * @param tenantId 当前登录用户所属租户 ID。
+     * @param updateBy 当前登录用户 ID。
+     * @return 已撤回的教学点。
+     */
+    TeachingPoint withdrawTeachingPoint(String id, String tenantId, String updateBy);
+
+    /**
      * 按原平台查询教学点。
      *
      * @param tenantId 租户 ID。

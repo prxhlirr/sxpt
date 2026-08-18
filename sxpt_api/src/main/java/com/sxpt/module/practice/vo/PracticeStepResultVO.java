@@ -28,6 +28,8 @@ public class PracticeStepResultVO {
 
     private String taskId;
 
+    private String teachingPointId;
+
     private String taskStepId;
 
     private String stepCode;
@@ -108,6 +110,14 @@ public class PracticeStepResultVO {
 
     public void setTaskId(String taskId) {
         this.taskId = taskId;
+    }
+
+    public String getTeachingPointId() {
+        return teachingPointId;
+    }
+
+    public void setTeachingPointId(String teachingPointId) {
+        this.teachingPointId = teachingPointId;
     }
 
     public String getTaskStepId() {

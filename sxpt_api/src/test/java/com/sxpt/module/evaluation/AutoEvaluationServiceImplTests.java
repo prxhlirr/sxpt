@@ -12,6 +12,8 @@ import com.sxpt.module.evaluation.service.AutoEvaluationService;
 import com.sxpt.module.evaluation.service.EvaluationConfigService;
 import com.sxpt.module.evaluation.service.impl.AutoEvaluationServiceImpl;
 import com.sxpt.module.execution.entity.ExecutionTrace;
+import com.sxpt.module.execution.entity.TaskExecution;
+import com.sxpt.module.execution.mapper.TaskExecutionMapper;
 import com.sxpt.module.execution.service.ExecutionTraceService;
 import org.junit.jupiter.api.Test;
 
@@ -50,10 +52,13 @@ class AutoEvaluationServiceImplTests {
 
     private final ExecutionTraceService executionTraceService = mock(ExecutionTraceService.class);
 
+    private final TaskExecutionMapper taskExecutionMapper = mock(TaskExecutionMapper.class);
+
     private final AutoEvaluationService service = new AutoEvaluationServiceImpl(
             resultMapper,
             evaluationConfigService,
             executionTraceService,
+            taskExecutionMapper,
             Arrays.asList(new TraceExistsAssertionStrategy(),
                     new FieldEqualsAssertionStrategy(new ObjectMapper()),
                     new ExternalApiResultAssertionStrategy()),
@@ -208,6 +213,8 @@ class AutoEvaluationServiceImplTests {
         when(executionTraceService.listByExecution("tenant_001", "execution_001"))
                 .thenReturn(Collections.singletonList(buildTrace()));
         when(resultMapper.selectOne(any())).thenReturn(existed);
+        when(resultMapper.selectList(any())).thenReturn(Collections.singletonList(existed));
+        when(taskExecutionMapper.selectOne(any())).thenReturn(buildExecution());
 
         EvaluationResult result = service.generateAutoEvaluation(buildScope());
 
@@ -248,17 +255,22 @@ class AutoEvaluationServiceImplTests {
         existed.setFinalScore(new BigDecimal("10.00"));
         existed.setEvaluationStatus("AUTO_EVALUATED");
         when(resultMapper.selectOne(any())).thenReturn(existed);
+        when(resultMapper.selectList(any())).thenReturn(Collections.singletonList(existed));
+        when(taskExecutionMapper.selectOne(any())).thenReturn(buildExecution());
         EvaluationResult review = buildReviewScope(new BigDecimal("8.50"));
 
         EvaluationResult result = service.reviewEvaluationResult(review);
 
         assertSame(existed, result);
         assertEquals(new BigDecimal("8.50"), result.getManualScore());
-        assertEquals(new BigDecimal("8.50"), result.getFinalScore());
+        assertEquals(new BigDecimal("18.50"), result.getFinalScore());
         assertEquals("teacher_001", result.getReviewedBy());
         assertEquals("REVIEWED", result.getEvaluationStatus());
+        assertEquals("ADJUSTED", result.getReviewStatus());
+        assertEquals("流程规范", result.getReviewReason());
         assertNotNull(result.getReviewedTime());
         verify(resultMapper).updateById(existed);
+        verify(taskExecutionMapper).updateById(any(TaskExecution.class));
     }
 
     /**
@@ -310,7 +322,17 @@ class AutoEvaluationServiceImplTests {
         result.setEvaluationRuleId("rule_001");
         result.setManualScore(manualScore);
         result.setReviewedBy("teacher_001");
+        result.setReviewReason("流程规范");
         return result;
+    }
+
+    private TaskExecution buildExecution() {
+        TaskExecution execution = new TaskExecution();
+        execution.setId("execution_001");
+        execution.setTenantId("tenant_001");
+        execution.setExecutionStatus("COMPLETED");
+        execution.setDeleted(Boolean.FALSE);
+        return execution;
     }
 
     /**

@@ -43,6 +43,10 @@ public class EvaluationResult {
 
     private LocalDateTime reviewedTime;
 
+    private String reviewStatus;
+
+    private String reviewReason;
+
     private String archiveStatus;
 
     private LocalDateTime archiveTime;
@@ -149,6 +153,22 @@ public class EvaluationResult {
 
     public void setReviewedTime(LocalDateTime reviewedTime) {
         this.reviewedTime = reviewedTime;
+    }
+
+    public String getReviewStatus() {
+        return reviewStatus;
+    }
+
+    public void setReviewStatus(String reviewStatus) {
+        this.reviewStatus = reviewStatus;
+    }
+
+    public String getReviewReason() {
+        return reviewReason;
+    }
+
+    public void setReviewReason(String reviewReason) {
+        this.reviewReason = reviewReason;
     }
 
     public String getArchiveStatus() {

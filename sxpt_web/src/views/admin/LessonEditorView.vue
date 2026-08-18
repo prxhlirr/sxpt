@@ -34,8 +34,20 @@ import {
 } from '../../utils/elementSelector';
 import { sanitizeRecordedBusinessUrl } from '../../utils/businessLaunch';
 
-type PanelTab = 'stage' | 'step' | 'lesson' | 'publish';
+type PanelTab = 'stage' | 'step';
 type PickerToolbarPosition = 'top-right' | 'bottom-right' | 'bottom-left' | 'top-left';
+type DirectoryDragType = 'stage' | 'step';
+type DirectoryDropPosition = 'before' | 'after';
+interface AuthoringLauncherPosition {
+  left: number;
+  top: number;
+}
+interface AuthoringLauncherDragState extends AuthoringLauncherPosition {
+  pointerId: number;
+  startX: number;
+  startY: number;
+  moved: boolean;
+}
 type TargetKey =
   | 'create'
   | 'subject'
@@ -166,10 +178,18 @@ const authoringLaunchContextKey = computed(() => {
 const selectedStageId = ref('');
 const selectedStepId = ref('');
 const recording = ref(false);
-const controlsCollapsed = ref(false);
-const showStagePanel = ref(false);
+const showStagePanel = ref(true);
 const showConfigPanel = ref(false);
 const panelTab = ref<PanelTab>('stage');
+const modalView = ref<'lesson' | 'publish' | ''>('');
+const showAuthoringMoreMenu = ref(false);
+const authoringLauncherRef = ref<HTMLButtonElement | null>(null);
+const authoringLauncherPosition = ref<AuthoringLauncherPosition | null>(null);
+const authoringLauncherDragging = ref(false);
+let authoringLauncherDragState: AuthoringLauncherDragState | null = null;
+let suppressAuthoringLauncherClick = false;
+const AUTHORING_LAUNCHER_SIZE = 58;
+const AUTHORING_LAUNCHER_GAP = 8;
 const pickerToolbarPosition = ref<PickerToolbarPosition>('top-right');
 const feedback = ref('');
 const feedbackTone = ref<'success' | 'danger'>('success');
@@ -181,10 +201,20 @@ const businessLayerRef = ref<HTMLElement | null>(null);
 const captureFrameRef = ref<BusinessCaptureFrameApi | null>(null);
 const elementPicking = ref(false);
 const pickTargetStepId = ref('');
+const pendingNewStepStageId = ref('');
 const pickedElementLabel = ref('');
 const elementPickerStyle = ref<Record<string, string>>({});
 const selectedStepPreviewStyle = ref<Record<string, string>>({});
-let continuousPickResumeToken = 0;
+const directoryDrag = ref<{
+  type: DirectoryDragType;
+  stageId: string;
+  stepId?: string;
+} | null>(null);
+const directoryDropTarget = ref<{
+  type: DirectoryDragType;
+  id: string;
+  position: DirectoryDropPosition;
+} | null>(null);
 
 const configurationLocked = computed(() =>
   store.state.publishedTasks.some((task) => task.lessonId === lessonId.value)
@@ -228,6 +258,18 @@ const selectedStage = computed(() =>
 const selectedStep = computed(() =>
   selectedStage.value?.recordedSteps.find((step) => step.id === selectedStepId.value)
 );
+const menuContextStep = computed(() =>
+  panelTab.value === 'step' ? selectedStep.value : undefined
+);
+const authoringLauncherStyle = computed<Record<string, string>>(() => {
+  const position = authoringLauncherPosition.value;
+  if (!position) return {} as Record<string, string>;
+  return {
+    left: `${position.left}px`,
+    top: `${position.top}px`,
+    transform: 'none'
+  };
+});
 
 const objectiveStageScore = computed(
   () => lesson.value?.stages.reduce((total, stage) => total + Number(stage.score), 0) ?? 0
@@ -473,7 +515,6 @@ watch(
 );
 
 watch(selectedStageId, () => {
-  continuousPickResumeToken += 1;
   if (elementPicking.value) cancelElementPick();
   loadStageDraft();
   selectedStepId.value = selectedStage.value?.recordedSteps[0]?.id ?? '';
@@ -489,9 +530,144 @@ watch(
   { immediate: true }
 );
 
+function authoringLauncherStorageKey() {
+  return `sxpt:lesson-authoring-launcher:${lessonId.value || 'default'}`;
+}
+
+function clampAuthoringLauncherPosition(left: number, top: number) {
+  const maxLeft = Math.max(
+    AUTHORING_LAUNCHER_GAP,
+    window.innerWidth - AUTHORING_LAUNCHER_SIZE - AUTHORING_LAUNCHER_GAP
+  );
+  const maxTop = Math.max(
+    AUTHORING_LAUNCHER_GAP,
+    window.innerHeight - AUTHORING_LAUNCHER_SIZE - AUTHORING_LAUNCHER_GAP
+  );
+  return {
+    left: Math.min(Math.max(left, AUTHORING_LAUNCHER_GAP), maxLeft),
+    top: Math.min(Math.max(top, AUTHORING_LAUNCHER_GAP), maxTop)
+  };
+}
+
+function persistAuthoringLauncherPosition() {
+  const position = authoringLauncherPosition.value;
+  if (!position) return;
+  try {
+    window.localStorage.setItem(
+      authoringLauncherStorageKey(),
+      JSON.stringify(position)
+    );
+  } catch {
+    // Local storage may be unavailable in privacy-restricted browsers.
+  }
+}
+
+function restoreAuthoringLauncherPosition() {
+  try {
+    const raw = window.localStorage.getItem(authoringLauncherStorageKey());
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Partial<AuthoringLauncherPosition>;
+    if (
+      typeof parsed.left !== 'number' ||
+      typeof parsed.top !== 'number' ||
+      !Number.isFinite(parsed.left) ||
+      !Number.isFinite(parsed.top)
+    ) {
+      return;
+    }
+    authoringLauncherPosition.value = clampAuthoringLauncherPosition(
+      Number(parsed.left),
+      Number(parsed.top)
+    );
+  } catch {
+    authoringLauncherPosition.value = null;
+  }
+}
+
+function handleAuthoringLauncherResize() {
+  const position = authoringLauncherPosition.value;
+  if (!position) return;
+  authoringLauncherPosition.value = clampAuthoringLauncherPosition(
+    position.left,
+    position.top
+  );
+  persistAuthoringLauncherPosition();
+}
+
+function handleAuthoringLauncherPointerDown(event: PointerEvent) {
+  if (event.button !== 0) return;
+  const button = event.currentTarget as HTMLButtonElement;
+  const rect = button.getBoundingClientRect();
+  authoringLauncherDragState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    left: rect.left,
+    top: rect.top,
+    moved: false
+  };
+  authoringLauncherDragging.value = false;
+  try {
+    button.setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is optional; document-level movement is not required here.
+  }
+}
+
+function handleAuthoringLauncherPointerMove(event: PointerEvent) {
+  const drag = authoringLauncherDragState;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const deltaX = event.clientX - drag.startX;
+  const deltaY = event.clientY - drag.startY;
+  if (!drag.moved && Math.hypot(deltaX, deltaY) < 4) return;
+  drag.moved = true;
+  authoringLauncherDragging.value = true;
+  authoringLauncherPosition.value = clampAuthoringLauncherPosition(
+    drag.left + deltaX,
+    drag.top + deltaY
+  );
+  event.preventDefault();
+}
+
+function finishAuthoringLauncherDrag(event: PointerEvent) {
+  const drag = authoringLauncherDragState;
+  if (!drag || drag.pointerId !== event.pointerId) return;
+  const button = event.currentTarget as HTMLButtonElement;
+  try {
+    if (button.hasPointerCapture(event.pointerId)) {
+      button.releasePointerCapture(event.pointerId);
+    }
+  } catch {
+    // Ignore browsers that do not expose pointer capture state.
+  }
+  if (drag.moved) {
+    suppressAuthoringLauncherClick = true;
+    persistAuthoringLauncherPosition();
+  }
+  authoringLauncherDragState = null;
+  authoringLauncherDragging.value = false;
+}
+
+function openAuthoringMenuFromLauncher(event: MouseEvent) {
+  if (suppressAuthoringLauncherClick) {
+    suppressAuthoringLauncherClick = false;
+    event.preventDefault();
+    return;
+  }
+  showStagePanel.value = true;
+  showAuthoringMoreMenu.value = false;
+}
+
+function collapseAuthoringMenu() {
+  showStagePanel.value = false;
+  showAuthoringMoreMenu.value = false;
+}
+
 onMounted(async () => {
   window.addEventListener('message', handleBusinessPlatformMessage);
   window.addEventListener('keydown', handleElementPickerKeydown);
+  window.addEventListener('resize', handleAuthoringLauncherResize);
+  restoreAuthoringLauncherPosition();
   if (!store.remote.enabled) return;
   try {
     await store.syncBusinessPlatforms();
@@ -507,10 +683,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
-  continuousPickResumeToken += 1;
   if (elementPicking.value) captureFrameRef.value?.cancelElementPick();
   window.removeEventListener('message', handleBusinessPlatformMessage);
   window.removeEventListener('keydown', handleElementPickerKeydown);
+  window.removeEventListener('resize', handleAuthoringLauncherResize);
 });
 
 function loadStageDraft() {
@@ -547,50 +723,44 @@ function startElementPick(targetStepId = '') {
   }
   activityText.value = targetStepId
     ? '正在重新绑定节点：移动鼠标预览，点击业务页面中的任意元素，按 Esc 取消。'
-    : '元素选择模式已开启：移动鼠标预览，点击任意元素后填写该元素的讲解说明。';
+    : pendingNewStepStageId.value
+      ? '正在添加节点：请先在业务页面中选择要绑定的元素，按 Esc 取消。'
+      : '元素选择模式已开启：移动鼠标预览，点击任意元素后填写该元素的讲解说明。';
 }
 
 function finishElementPickState() {
   elementPicking.value = false;
   pickTargetStepId.value = '';
+  pendingNewStepStageId.value = '';
   pickedElementLabel.value = '';
   elementPickerStyle.value = {};
 }
 
-function resumeContinuousElementPick(label: string) {
-  const resumeToken = ++continuousPickResumeToken;
-  void nextTick(() => {
-    if (
-      resumeToken !== continuousPickResumeToken ||
-      !recording.value ||
-      elementPicking.value ||
-      configurationLocked.value ||
-      !lesson.value ||
-      !selectedStage.value
-    ) {
-      return;
-    }
-    showConfigPanel.value = false;
-    startElementPick();
-    activityText.value = `已绑定“${label}”，连续选取已保持开启，请继续选择下一个业务元素。`;
-  });
-}
-
 function cancelElementPick() {
-  continuousPickResumeToken += 1;
   if (!elementPicking.value) return;
   if (!useEmbeddedBusinessSimulation.value) {
     captureFrameRef.value?.cancelElementPick();
   }
   finishElementPickState();
+  showStagePanel.value = true;
   activityText.value = '已取消元素选取，未修改教案节点。';
 }
 
 function handleElementPickCancelled() {
-  continuousPickResumeToken += 1;
   if (!elementPicking.value) return;
   finishElementPickState();
+  showStagePanel.value = true;
   activityText.value = '业务页面已取消元素选取，未修改教案节点。';
+}
+
+function startAddingStep(stageId: string) {
+  if (!lesson.value || configurationLocked.value) return;
+  const stage = lesson.value.stages.find((item) => item.id === stageId);
+  if (!stage) return;
+  selectedStageId.value = stage.id;
+  selectedStepId.value = '';
+  pendingNewStepStageId.value = stage.id;
+  void nextTick(() => startElementPick());
 }
 
 function handleElementPickerKeydown(event: KeyboardEvent) {
@@ -702,7 +872,6 @@ function handleElementPicked(payload: PickedElementPayload) {
   const targetStepId = pickTargetStepId.value;
 
   if (targetStepId) {
-    continuousPickResumeToken += 1;
     updateRecordedStep(targetStepId, {
       selector: payload.selector,
       selectorCandidates: payload.selectorCandidates,
@@ -714,6 +883,8 @@ function handleElementPicked(payload: PickedElementPayload) {
     });
     selectedStepId.value = targetStepId;
     finishElementPickState();
+    showStagePanel.value = true;
+    openPanel('step');
     showFeedback(`已将节点重新绑定到“${label}”。`);
     queueStepSync(selectedStage.value.id, targetStepId);
     return;
@@ -746,17 +917,11 @@ function handleElementPicked(payload: PickedElementPayload) {
     recordedSteps: [...selectedStage.value.recordedSteps, step]
   });
   selectedStepId.value = step.id;
-  const shouldContinuePicking = recording.value;
   finishElementPickState();
-  if (shouldContinuePicking) {
-    showConfigPanel.value = false;
-    showFeedback(`已绑定“${label}”，可继续选择下一个业务元素。`);
-  } else {
-    openPanel('step');
-    showFeedback(`已绑定“${label}”，请在节点配置中完善逐步讲解。`);
-  }
+  showStagePanel.value = true;
+  openPanel('step');
+  showFeedback(`已绑定“${label}”，节点已创建，请完善右侧节点属性。`);
   queueStepSync(selectedStage.value.id, step.id);
-  if (shouldContinuePicking) resumeContinuousElementPick(label);
 }
 
 function handleBusinessPlatformMessage(event: MessageEvent) {
@@ -859,11 +1024,13 @@ function handleBusinessFrameLoad() {
   if (!recording.value || !elementPicking.value) return;
   captureFrameRef.value?.setRecording(true);
   captureFrameRef.value?.startElementPick();
-  activityText.value = '业务页面已恢复，元素连续选取仍保持开启。';
+  activityText.value = '业务页面已恢复，请继续选择要绑定的目标元素。';
 }
 
 async function selectRecordedStep(step: RecordedStep) {
   selectedStepId.value = step.id;
+  panelTab.value = 'step';
+  showConfigPanel.value = true;
   selectedStepPreviewStyle.value = {};
   if (!step.selector) return;
   if (!useEmbeddedBusinessSimulation.value) {
@@ -906,25 +1073,53 @@ async function selectRecordedStep(step: RecordedStep) {
 function openPanel(tab: PanelTab) {
   panelTab.value = tab;
   showConfigPanel.value = true;
-  showStagePanel.value = false;
-}
-
-function toggleStagePanel() {
-  showStagePanel.value = !showStagePanel.value;
-  if (showStagePanel.value) showConfigPanel.value = false;
-}
-
-function toggleConfigPanel(tab: PanelTab = 'step') {
-  if (showConfigPanel.value && panelTab.value === tab) {
-    showConfigPanel.value = false;
-    return;
-  }
-  openPanel(tab);
 }
 
 function closeAuthoringDrawers() {
   showStagePanel.value = false;
   showConfigPanel.value = false;
+  showAuthoringMoreMenu.value = false;
+}
+
+function selectStageForEditing(stageId: string) {
+  selectedStageId.value = stageId;
+  panelTab.value = 'stage';
+  showConfigPanel.value = true;
+}
+
+function openLessonModal() {
+  showAuthoringMoreMenu.value = false;
+  modalView.value = 'lesson';
+}
+
+function openPublishModal() {
+  showAuthoringMoreMenu.value = false;
+  modalView.value = 'publish';
+}
+
+function addAuthoringStage() {
+  showAuthoringMoreMenu.value = false;
+  addStage();
+}
+
+function saveAuthoringChanges() {
+  showAuthoringMoreMenu.value = false;
+  if (configurationLocked.value) {
+    showFeedback('当前教案已发布任务，不能继续修改。', 'danger');
+    return;
+  }
+  if (panelTab.value === 'stage' && stageForm.value) {
+    saveStage();
+    return;
+  }
+  if (selectedStep.value && lesson.value && selectedStage.value) {
+    if (store.remote.enabled) {
+      queueStepSync(selectedStage.value.id, selectedStep.value.id);
+    }
+    showFeedback(`节点“${selectedStep.value.title}”已保存。`);
+    return;
+  }
+  showFeedback('当前教案改动已保存。');
 }
 
 function cyclePickerToolbarPosition() {
@@ -1117,6 +1312,103 @@ function moveSelectedStage(direction: 'up' | 'down') {
   }
 }
 
+function beginDirectoryDrag(
+  event: DragEvent,
+  type: DirectoryDragType,
+  stageId: string,
+  stepId?: string
+) {
+  if (configurationLocked.value) {
+    event.preventDefault();
+    return;
+  }
+  directoryDrag.value = { type, stageId, stepId };
+  event.dataTransfer?.setData('text/plain', `${type}:${stepId ?? stageId}`);
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move';
+}
+
+function markDirectoryDrop(
+  event: DragEvent,
+  type: DirectoryDragType,
+  id: string
+) {
+  const drag = directoryDrag.value;
+  if (!drag || drag.type !== type) return;
+  if (type === 'step') {
+    const targetStageId = (event.currentTarget as HTMLElement).dataset.stageId;
+    if (targetStageId !== drag.stageId) return;
+  }
+  event.preventDefault();
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+  directoryDropTarget.value = {
+    type,
+    id,
+    position: event.clientY >= rect.top + rect.height / 2 ? 'after' : 'before'
+  };
+  if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+}
+
+function clearDirectoryDrag() {
+  directoryDrag.value = null;
+  directoryDropTarget.value = null;
+}
+
+function dropDirectoryItem(
+  event: DragEvent,
+  type: DirectoryDragType,
+  targetStageId: string,
+  targetStepId?: string
+) {
+  event.preventDefault();
+  const drag = directoryDrag.value;
+  const position = directoryDropTarget.value?.position ?? 'before';
+  if (!lesson.value || !drag || drag.type !== type) {
+    clearDirectoryDrag();
+    return;
+  }
+  try {
+    if (type === 'stage') {
+      const from = lesson.value.stages.findIndex((stage) => stage.id === drag.stageId);
+      const target = lesson.value.stages.findIndex((stage) => stage.id === targetStageId);
+      if (from >= 0 && target >= 0 && from !== target) {
+        let destination = target + (position === 'after' ? 1 : 0);
+        if (from < destination) destination -= 1;
+        store.moveStage(lesson.value.id, drag.stageId, destination);
+        showFeedback('教学点顺序已调整。');
+      }
+    } else if (drag.stageId === targetStageId && drag.stepId && targetStepId) {
+      const stage = lesson.value.stages.find((item) => item.id === targetStageId);
+      if (stage) {
+        const steps = [...stage.recordedSteps];
+        const from = steps.findIndex((step) => step.id === drag.stepId);
+        const target = steps.findIndex((step) => step.id === targetStepId);
+        if (from >= 0 && target >= 0 && from !== target) {
+          const [moved] = steps.splice(from, 1);
+          let destination = target + (position === 'after' ? 1 : 0);
+          if (from < destination) destination -= 1;
+          steps.splice(Math.max(0, Math.min(steps.length, destination)), 0, moved);
+          store.updateStage(lesson.value.id, stage.id, { recordedSteps: steps });
+          showFeedback('节点顺序已调整。');
+        }
+      }
+    }
+  } finally {
+    clearDirectoryDrag();
+  }
+}
+
+function isDirectoryDropTarget(
+  type: DirectoryDragType,
+  id: string,
+  position: DirectoryDropPosition
+) {
+  return (
+    directoryDropTarget.value?.type === type &&
+    directoryDropTarget.value.id === id &&
+    directoryDropTarget.value.position === position
+  );
+}
+
 async function startRecording() {
   if (!selectedStage.value) {
     showFeedback('请先选择或添加一个教学点。', 'danger');
@@ -1135,7 +1427,6 @@ async function startRecording() {
   }
   try {
     if (!lesson.value) return;
-    continuousPickResumeToken += 1;
     await store.startCaptureSessionRemote(
       lesson.value.id,
       effectiveBusinessPlatformUrl.value
@@ -1145,7 +1436,7 @@ async function startRecording() {
     captureFrameRef.value?.setRecording(true);
     await nextTick();
     startElementPick();
-    activityText.value = `正在录制“${selectedStage.value.name}”：已进入连续元素选择模式，请依次点击需要绑定说明的业务元素。`;
+    activityText.value = `正在录制“${selectedStage.value.name}”：请选择需要绑定说明的业务元素。`;
   } catch (error) {
     showFeedback(
       error instanceof Error ? error.message : '后端采集会话创建失败',
@@ -1156,9 +1447,9 @@ async function startRecording() {
 
 function pauseRecording() {
   recording.value = false;
-  continuousPickResumeToken += 1;
   if (elementPicking.value) cancelElementPick();
   captureFrameRef.value?.setRecording(false);
+  showStagePanel.value = true;
   activityText.value = '录制已暂停，可编辑节点、调整顺序或保存当前教学点。';
 }
 
@@ -1277,6 +1568,12 @@ function removeRecordedStep(stepId: string) {
   showFeedback('录制步骤已移除。');
 }
 
+function confirmRemoveRecordedStep(step: RecordedStep) {
+  if (!window.confirm(`确认删除节点“${step.title}”吗？`)) return;
+  removeRecordedStep(step.id);
+  showConfigPanel.value = false;
+}
+
 function moveRecordedStep(direction: 'up' | 'down') {
   if (!lesson.value || !selectedStage.value || !selectedStep.value || configurationLocked.value) {
     return;
@@ -1311,11 +1608,12 @@ async function publishLesson() {
     showFeedback(
       store.remote.enabled
         ? '教案已发布到后端，正式资源、动作草稿和教学点均已完成关联。'
-        : '教案发布成功，现在可以进入考试设置。'
+        : '教案发布成功。'
     );
+    modalView.value = '';
   } catch (error) {
     showFeedback(error instanceof Error ? error.message : '发布校验未通过', 'danger');
-    openPanel('publish');
+    openPublishModal();
   }
 }
 
@@ -1599,153 +1897,243 @@ function numberValue(event: Event) {
     >
       <span>⌖ 元素选择模式</span>
       <strong>移动鼠标预览，点击任意业务元素进行绑定</strong>
-      <small>录制中绑定后会自动继续选取；按 Esc 可结束连续选取</small>
+      <small>选取完成后将创建节点并打开右侧属性配置；按 Esc 可取消</small>
       <button type="button" @click="cyclePickerToolbarPosition">换个角落</button>
       <button v-if="recording" type="button" @click="pauseRecording">暂停录制</button>
       <button type="button" @click="cancelElementPick">结束选取</button>
     </div>
 
-    <header
-      v-if="!controlsCollapsed && !recording && !elementPicking && !showStagePanel && !showConfigPanel"
-      class="authoring-commandbar"
+    <aside
+      v-if="showStagePanel && !elementPicking"
+      class="authoring-qq-shell"
+      aria-label="教案编排工具"
     >
-      <div class="authoring-heading">
-        <span class="recording-dot" :class="{ active: recording }" />
-        <div>
-          <small>教案编排 · 业务系统实时采集</small>
-          <strong>{{ lesson.title }}</strong>
-        </div>
-        <span class="version-badge">V{{ lesson.version }}</span>
-        <span v-if="businessPlatform" class="platform-context-badge">
-          {{ businessPlatform.name }}
-          <template v-if="businessPlatformModule">
-            / {{ businessPlatformModule.name }}
-          </template>
-        </span>
-      </div>
-      <div class="command-actions">
-        <RouterLink class="command-link" :to="{ name: 'lesson-list' }">返回教案</RouterLink>
+      <nav class="authoring-qq-rail" aria-label="关键操作">
         <button
-          v-if="!recording"
+          class="authoring-lesson-avatar"
           type="button"
-          :disabled="configurationLocked || !selectedStage"
-          @click="startRecording"
-        >
-          ● 开始录制并选取元素
-        </button>
-        <button v-else type="button" @click="pauseRecording">Ⅱ 暂停</button>
-        <button type="button" :disabled="configurationLocked" @click="undoLastStep">
-          ↶ 撤销节点
-        </button>
-        <button type="button" :disabled="configurationLocked" @click="addRecordedStep">
-          ＋ 插入说明
-        </button>
-        <button
-          type="button"
-          :class="{ active: elementPicking }"
-          :disabled="configurationLocked || !selectedStage"
-          @click="elementPicking ? cancelElementPick() : startElementPick()"
-        >
-          ⌖ {{ elementPicking ? '取消选取' : '选取元素' }}
-        </button>
-        <button type="button" :disabled="configurationLocked || !selectedStage" @click="saveCurrentStage">
-          保存本教学点
-        </button>
-        <button class="command-primary" type="button" :disabled="configurationLocked" @click="publishLesson">
-          发布教案
-        </button>
-        <RouterLink
-          class="command-link"
-          :to="{ name: 'lesson-recording', params: { lessonId: lesson.id } }"
-        >
-          录制回看
-        </RouterLink>
-        <a
-          v-if="businessPlatform && !useEmbeddedBusinessSimulation"
-          class="command-link"
-          :href="effectiveBusinessPlatformUrl"
-          target="_blank"
-          rel="noreferrer"
-        >
-          单独打开业务模块 ↗
-        </a>
-      </div>
-    </header>
+          title="收起编排工具"
+          aria-label="收起编排工具"
+          @click="collapseAuthoringMenu"
+        >编</button>
 
-    <aside v-if="!controlsCollapsed && showStagePanel" class="glass-panel stage-panel">
-      <div class="panel-header">
-        <div>
-          <small>FLOW & STEPS</small>
-          <h2>教学点与节点</h2>
-        </div>
-        <div class="panel-header-actions">
-          <button type="button" :disabled="configurationLocked" @click="addStage">＋ 教学点</button>
-          <button type="button" aria-label="关闭教学点目录" @click="showStagePanel = false">×</button>
-        </div>
-      </div>
-      <div class="stage-list">
-        <article
-          v-for="(stage, index) in lesson.stages"
-          :key="stage.id"
-          class="stage-item"
-          :class="{ active: stage.id === selectedStageId }"
-        >
-          <button type="button" @click="selectedStageId = stage.id">
-            <span>{{ index + 1 }}</span>
-            <span>
-              <strong>{{ stage.name }}</strong>
-              <small>{{ stage.groupKey || '未指定角色' }} · {{ stage.score }} 分</small>
-            </span>
-            <em>{{ stage.recordedSteps.length }}</em>
+        <div class="authoring-rail-stack authoring-rail-primary">
+          <button class="authoring-rail-action active" type="button" @click="showAuthoringMoreMenu = false">
+            <span class="authoring-rail-icon" aria-hidden="true">≡</span>
+            <span>目录</span>
           </button>
-          <div v-if="stage.id === selectedStageId" class="step-list">
-            <button
-              v-for="(step, stepIndex) in stage.recordedSteps"
-              :key="step.id"
-              type="button"
-              :class="{ active: step.id === selectedStepId }"
-              @click="selectRecordedStep(step)"
-              @dblclick="openPanel('step')"
-            >
-              <i>{{ stepIndex + 1 }}</i>
-              <span>
-                <strong>{{ step.title }}</strong>
-                <small>{{ step.kind === 'guide' ? '说明节点' : step.actionLabel }}</small>
-              </span>
-              <b v-if="step.id === selectedStepId">●</b>
-            </button>
-            <div v-if="!stage.recordedSteps.length" class="step-empty">
-              开始录制后会进入连续元素选择模式，可依次点击目标元素生成说明节点。
-            </div>
-          </div>
-        </article>
-        <div v-if="!lesson.stages.length" class="stage-empty">
-          暂无教学点，请先添加教学点。
+          <button
+            class="authoring-rail-action"
+            type="button"
+            :disabled="configurationLocked"
+            @click="addAuthoringStage"
+          >
+            <span class="authoring-rail-icon" aria-hidden="true">＋</span>
+            <span>教学点</span>
+          </button>
+          <button class="authoring-rail-action" type="button" @click="openLessonModal">
+            <span class="authoring-rail-icon" aria-hidden="true">⚙</span>
+            <span>教案设置</span>
+          </button>
+          <RouterLink
+            class="authoring-rail-action"
+            :to="{ name: 'lesson-recording', params: { lessonId: lesson.id } }"
+          >
+            <span class="authoring-rail-icon" aria-hidden="true">▷</span>
+            <span>预览</span>
+          </RouterLink>
         </div>
-      </div>
-      <div class="stage-panel-actions">
-        <button type="button" :disabled="activeStageIndex <= 0" @click="moveSelectedStage('up')">
-          ↑ 上移
-        </button>
+
+        <div class="authoring-rail-stack authoring-rail-bottom">
+          <button
+            class="authoring-rail-action"
+            type="button"
+            :disabled="configurationLocked"
+            @click="saveAuthoringChanges"
+          >
+            <span class="authoring-rail-icon" aria-hidden="true">✓</span>
+            <span>保存</span>
+          </button>
+          <button class="authoring-rail-action publish" type="button" @click="openPublishModal">
+            <span class="authoring-rail-icon" aria-hidden="true">↑</span>
+            <span>发布</span>
+          </button>
+          <button
+            class="authoring-rail-action"
+            :class="{ active: showAuthoringMoreMenu }"
+            type="button"
+            :aria-expanded="showAuthoringMoreMenu"
+            @click="showAuthoringMoreMenu = !showAuthoringMoreMenu"
+          >
+            <span class="authoring-rail-icon" aria-hidden="true">•••</span>
+            <span>更多</span>
+          </button>
+        </div>
+      </nav>
+
+      <section class="authoring-directory-panel">
+        <header class="authoring-directory-header">
+          <div>
+            <small>LESSON AUTHORING</small>
+            <h2>{{ lesson.title }}</h2>
+            <p>
+              <span>V{{ lesson.version }}</span>
+              <span>·</span>
+              <strong>{{ recording ? '● 录制中' : '✓ 当前改动已保存' }}</strong>
+            </p>
+          </div>
+          <button type="button" aria-label="收起编排工具" @click="collapseAuthoringMenu">‹</button>
+        </header>
+
+        <section class="authoring-current-context" aria-label="当前编辑对象">
+          <div>
+            <small>{{ menuContextStep ? '当前节点' : '当前教学点' }}</small>
+            <strong>{{ menuContextStep?.title ?? selectedStage?.name ?? '尚未选择教学点' }}</strong>
+            <span v-if="menuContextStep">所属教学点：{{ selectedStage?.name }}</span>
+            <span v-else>点击教学点或节点，可在右侧编辑属性</span>
+          </div>
+          <em v-if="menuContextStep">{{ menuContextStep.kind === 'guide' ? '说明' : menuContextStep.actionLabel }}</em>
+          <em v-else>{{ selectedStage?.recordedSteps.length ?? 0 }} 节点</em>
+        </section>
+
+        <div class="authoring-directory-heading">
+          <div><small>COURSE OUTLINE</small><strong>教学目录</strong></div>
+          <span>按住 ≡ 拖动排序</span>
+        </div>
+
+        <div class="stage-list">
+          <article
+            v-for="(stage, index) in lesson.stages"
+            :key="stage.id"
+            class="stage-item"
+            :class="{
+              active: stage.id === selectedStageId,
+              'drop-before': isDirectoryDropTarget('stage', stage.id, 'before'),
+              'drop-after': isDirectoryDropTarget('stage', stage.id, 'after')
+            }"
+            @dragover="markDirectoryDrop($event, 'stage', stage.id)"
+            @drop="dropDirectoryItem($event, 'stage', stage.id)"
+          >
+            <button type="button" @click="selectStageForEditing(stage.id)">
+              <span
+                class="directory-drag-handle"
+                draggable="true"
+                title="拖动教学点排序"
+                @dragstart.stop="beginDirectoryDrag($event, 'stage', stage.id)"
+                @dragend="clearDirectoryDrag"
+              >≡</span>
+              <span class="stage-index">{{ String(index + 1).padStart(2, '0') }}</span>
+              <span>
+                <strong>{{ stage.name }}</strong>
+                <small>{{ stage.groupKey || '未指定角色' }} · {{ stage.score }} 分</small>
+              </span>
+              <em>{{ stage.recordedSteps.length }}</em>
+            </button>
+            <div v-if="stage.id === selectedStageId" class="step-list">
+              <div
+                v-for="(step, stepIndex) in stage.recordedSteps"
+                :key="step.id"
+                class="directory-step-row"
+                :class="{
+                  active: panelTab === 'step' && step.id === selectedStepId,
+                  'drop-before': isDirectoryDropTarget('step', step.id, 'before'),
+                  'drop-after': isDirectoryDropTarget('step', step.id, 'after')
+                }"
+                :data-stage-id="stage.id"
+                @dragover="markDirectoryDrop($event, 'step', step.id)"
+                @drop="dropDirectoryItem($event, 'step', stage.id, step.id)"
+              >
+                <span
+                  class="directory-drag-handle"
+                  draggable="true"
+                  title="拖动节点排序"
+                  @dragstart.stop="beginDirectoryDrag($event, 'step', stage.id, step.id)"
+                  @dragend="clearDirectoryDrag"
+                >≡</span>
+                <button type="button" @click="selectRecordedStep(step)">
+                  <i>{{ stepIndex + 1 }}</i>
+                  <span>
+                    <strong>{{ step.title }}</strong>
+                    <small>{{ step.kind === 'guide' ? '说明节点' : step.actionLabel }}</small>
+                  </span>
+                  <b v-if="step.syncStatus === 'SYNCED'">●</b>
+                </button>
+                <button
+                  class="directory-step-delete"
+                  type="button"
+                  :disabled="configurationLocked"
+                  :aria-label="`删除节点：${step.title}`"
+                  @click.stop="confirmRemoveRecordedStep(step)"
+                >×</button>
+              </div>
+              <button
+                class="directory-add-step"
+                type="button"
+                :disabled="configurationLocked"
+                @click.stop="startAddingStep(stage.id)"
+              >＋ 添加节点</button>
+            </div>
+          </article>
+          <div v-if="!lesson.stages.length" class="stage-empty">暂无教学点，请先添加教学点。</div>
+        </div>
+
+        <footer class="authoring-directory-note">
+          <span>选择对象后在右侧配置属性</span>
+          <button type="button" @click="collapseAuthoringMenu">收起工具</button>
+        </footer>
+      </section>
+
+      <section v-if="showAuthoringMoreMenu" class="authoring-more-menu" aria-label="更多操作">
+        <header><strong>更多操作</strong><button type="button" @click="showAuthoringMoreMenu = false">×</button></header>
         <button
           type="button"
-          :disabled="activeStageIndex < 0 || activeStageIndex >= lesson.stages.length - 1"
-          @click="moveSelectedStage('down')"
-        >
-          ↓ 下移
-        </button>
-        <button type="button" @click="openPanel('stage')">教学点配置</button>
-      </div>
+          :disabled="configurationLocked || !selectedStage"
+          @click="addRecordedStep(); showAuthoringMoreMenu = false"
+        ><span>＋</span><span><strong>插入说明</strong><small>添加不绑定业务操作的讲解节点</small></span></button>
+        <button
+          type="button"
+          :disabled="configurationLocked || !selectedStage?.recordedSteps.length"
+          @click="undoLastStep(); showAuthoringMoreMenu = false"
+        ><span>↶</span><span><strong>撤销节点</strong><small>删除当前教学点最后一个节点</small></span></button>
+        <button
+          v-if="recording"
+          type="button"
+          @click="pauseRecording(); showAuthoringMoreMenu = false"
+        ><span>Ⅱ</span><span><strong>暂停录制</strong><small>保留当前进度，稍后继续选取</small></span></button>
+        <RouterLink :to="{ name: 'lesson-list' }">
+          <span>←</span><span><strong>返回教案列表</strong><small>离开当前教案编排页面</small></span>
+        </RouterLink>
+      </section>
     </aside>
 
-    <aside v-if="!controlsCollapsed && showConfigPanel" class="glass-panel config-panel">
-      <div class="config-tabs">
-        <button :class="{ active: panelTab === 'stage' }" type="button" @click="panelTab = 'stage'">教学点</button>
-        <button :class="{ active: panelTab === 'step' }" type="button" @click="panelTab = 'step'">节点</button>
-        <button :class="{ active: panelTab === 'lesson' }" type="button" @click="panelTab = 'lesson'">教案</button>
-        <button :class="{ active: panelTab === 'publish' }" type="button" @click="panelTab = 'publish'">校验</button>
-        <button class="config-close" type="button" aria-label="关闭配置" @click="showConfigPanel = false">×</button>
-      </div>
+    <button
+      v-if="!showStagePanel && !elementPicking"
+      ref="authoringLauncherRef"
+      class="authoring-floating-launcher"
+      :class="{ dragging: authoringLauncherDragging }"
+      :style="authoringLauncherStyle"
+      type="button"
+      title="拖动可调整位置，点击展开编排工具"
+      aria-label="展开教案编排工具；可拖动调整位置"
+      @pointerdown="handleAuthoringLauncherPointerDown"
+      @pointermove="handleAuthoringLauncherPointerMove"
+      @pointerup="finishAuthoringLauncherDrag"
+      @pointercancel="finishAuthoringLauncherDrag"
+      @click="openAuthoringMenuFromLauncher"
+    >编</button>
+
+    <aside
+      v-if="showConfigPanel && !elementPicking && (panelTab === 'stage' || panelTab === 'step')"
+      class="glass-panel config-panel authoring-right-drawer"
+    >
+      <header class="authoring-drawer-header property-header">
+        <div>
+          <small>CONTEXT PROPERTIES</small>
+          <h2>{{ panelTab === 'stage' ? '教学点属性' : '节点属性' }}</h2>
+          <p>{{ panelTab === 'stage' ? selectedStage?.name : selectedStep?.title }}</p>
+        </div>
+        <button type="button" aria-label="收起属性配置" @click="showConfigPanel = false">›</button>
+      </header>
 
       <div v-if="panelTab === 'stage' && stageForm" class="config-content">
         <div class="config-title">
@@ -1756,31 +2144,13 @@ function numberValue(event: Event) {
           <span>教学点名称</span>
           <input v-model="stageForm.name" :disabled="configurationLocked" />
         </label>
-        <div class="config-grid">
-          <label>
-            <span>教学点标识 stageKey</span>
-            <input v-model="stageForm.stageKey" :disabled="configurationLocked" />
-          </label>
-          <label>
-            <span>负责角色 groupKey</span>
-            <input v-model="stageForm.groupKey" :disabled="configurationLocked" />
-          </label>
-          <label>
-            <span>教学点分值</span>
-            <input v-model.number="stageForm.score" type="number" min="0" :disabled="configurationLocked" />
-          </label>
-          <label>
-            <span>完成方式 completionMethod</span>
-            <select v-model="stageForm.completionMethod" :disabled="configurationLocked">
-              <option v-for="method in completionMethods" :key="method.value" :value="method.value">
-                {{ method.label }}
-              </option>
-            </select>
-          </label>
-        </div>
         <label>
           <span>教学说明</span>
           <textarea v-model="stageForm.description" rows="4" :disabled="configurationLocked" />
+        </label>
+        <label>
+          <span>教学点分值</span>
+          <input v-model.number="stageForm.score" type="number" min="0" :disabled="configurationLocked" />
         </label>
         <section class="attachment-editor">
           <div class="attachment-editor__heading">
@@ -1816,6 +2186,27 @@ function numberValue(event: Event) {
           </div>
           <p v-else>尚未上传教学点附件。</p>
         </section>
+        <details class="advanced-settings">
+          <summary>高级设置</summary>
+          <div class="config-grid">
+            <label>
+              <span>教学点标识 stageKey</span>
+              <input v-model="stageForm.stageKey" :disabled="configurationLocked" />
+            </label>
+            <label>
+              <span>负责角色 groupKey</span>
+              <input v-model="stageForm.groupKey" :disabled="configurationLocked" />
+            </label>
+          </div>
+          <label>
+            <span>完成方式 completionMethod</span>
+            <select v-model="stageForm.completionMethod" :disabled="configurationLocked">
+              <option v-for="method in completionMethods" :key="method.value" :value="method.value">
+                {{ method.label }}
+              </option>
+            </select>
+          </label>
+        </details>
 <!--        <div class="visibility-editor">-->
 <!--          <span>模式可见性 visibility</span>-->
 <!--          <label v-for="mode in modes" :key="mode.key">-->
@@ -1844,33 +2235,6 @@ function numberValue(event: Event) {
               :value="selectedStep.title"
               :disabled="configurationLocked"
               @change="updateRecordedStep(selectedStep.id, { title: inputValue($event) })"
-            />
-          </label>
-          <div class="config-grid">
-            <label>
-              <span>页面 pageTitle</span>
-              <input
-                :value="selectedStep.pageTitle"
-                :disabled="configurationLocked"
-                @change="updateRecordedStep(selectedStep.id, { pageTitle: inputValue($event) })"
-              />
-            </label>
-            <label>
-              <span>动作 actionLabel</span>
-              <input
-                :value="selectedStep.actionLabel"
-                :disabled="configurationLocked"
-                @change="updateRecordedStep(selectedStep.id, { actionLabel: inputValue($event) })"
-              />
-            </label>
-          </div>
-          <label>
-            <span>元素选择器 selector</span>
-            <input
-              class="mono"
-              :value="selectedStep.selector"
-              :disabled="configurationLocked"
-              @change="updateRecordedStep(selectedStep.id, { selector: inputValue($event) })"
             />
           </label>
           <section class="element-binding-editor">
@@ -1902,34 +2266,64 @@ function numberValue(event: Event) {
               "
             />
           </label>
-          <div class="config-grid">
+          <details class="advanced-settings">
+            <summary>元素与执行设置</summary>
+            <div class="config-grid">
+              <label>
+                <span>页面 pageTitle</span>
+                <input
+                  :value="selectedStep.pageTitle"
+                  :disabled="configurationLocked"
+                  @change="updateRecordedStep(selectedStep.id, { pageTitle: inputValue($event) })"
+                />
+              </label>
+              <label>
+                <span>动作 actionLabel</span>
+                <input
+                  :value="selectedStep.actionLabel"
+                  :disabled="configurationLocked"
+                  @change="updateRecordedStep(selectedStep.id, { actionLabel: inputValue($event) })"
+                />
+              </label>
+            </div>
             <label>
-              <span>时长 durationSeconds</span>
+              <span>元素选择器 selector</span>
               <input
-                :value="selectedStep.durationSeconds"
-                type="number"
-                min="1"
+                class="mono"
+                :value="selectedStep.selector"
                 :disabled="configurationLocked"
-                @change="updateRecordedStep(selectedStep.id, { durationSeconds: numberValue($event) })"
+                @change="updateRecordedStep(selectedStep.id, { selector: inputValue($event) })"
               />
             </label>
-            <label>
-              <span>失败策略</span>
-              <select
-                :value="selectedStep.failurePolicy ?? 'stop'"
-                :disabled="configurationLocked"
-                @change="
-                  updateRecordedStep(selectedStep.id, {
-                    failurePolicy: inputValue($event) as 'stop' | 'retry' | 'skip'
-                  })
-                "
-              >
-                <option value="stop">停止并等待处理</option>
-                <option value="retry">允许重试</option>
-                <option value="skip">允许跳过</option>
-              </select>
-            </label>
-          </div>
+            <div class="config-grid">
+              <label>
+                <span>时长 durationSeconds</span>
+                <input
+                  :value="selectedStep.durationSeconds"
+                  type="number"
+                  min="1"
+                  :disabled="configurationLocked"
+                  @change="updateRecordedStep(selectedStep.id, { durationSeconds: numberValue($event) })"
+                />
+              </label>
+              <label>
+                <span>失败策略</span>
+                <select
+                  :value="selectedStep.failurePolicy ?? 'stop'"
+                  :disabled="configurationLocked"
+                  @change="
+                    updateRecordedStep(selectedStep.id, {
+                      failurePolicy: inputValue($event) as 'stop' | 'retry' | 'skip'
+                    })
+                  "
+                >
+                  <option value="stop">停止并等待处理</option>
+                  <option value="retry">允许重试</option>
+                  <option value="skip">允许跳过</option>
+                </select>
+              </label>
+            </div>
+          </details>
           <label class="checkbox-row">
             <input
               type="checkbox"
@@ -2000,130 +2394,93 @@ function numberValue(event: Event) {
         </div>
       </div>
 
-      <div v-else-if="panelTab === 'lesson'" class="config-content">
-        <div class="config-title">
-          <div><small>LESSON SETTINGS</small><h2>教案基础配置</h2></div>
-          <span>V{{ lesson.version }}</span>
-        </div>
-        <div class="config-grid">
-          <label><span>教案编号</span><input v-model="basicForm.code" :disabled="configurationLocked" /></label>
-          <label><span>教案名称</span><input v-model="basicForm.title" :disabled="configurationLocked" /></label>
-        </div>
-        <label>
-          <span>录制业务平台</span>
-          <select v-model="basicForm.businessPlatformId" :disabled="configurationLocked">
-            <option
-              v-for="platform in store.state.businessPlatforms.filter((item) => item.status === 'ENABLED' || item.id === basicForm.businessPlatformId)"
-              :key="platform.id"
-              :value="platform.id"
-            >
-              {{ platform.name }} · {{ platform.baseUrl }}
-            </option>
-          </select>
-        </label>
-        <label>
-          <span>录制平台模块</span>
-          <select
-            v-model="basicForm.businessPlatformModuleId"
-            :disabled="configurationLocked || !basicForm.businessPlatformId"
-          >
-            <option value="" disabled>
-              {{
-                basicForm.businessPlatformId
-                  ? '请选择业务平台下的模块'
-                  : '请先选择业务平台'
-              }}
-            </option>
-            <option
-              v-for="businessModule in availableBasicBusinessModules"
-              :key="businessModule.id"
-              :value="businessModule.id"
-            >
-              {{ businessModule.name }} · {{ businessModule.path }}
-            </option>
-          </select>
-          <small v-if="basicForm.businessPlatformId && !availableBasicBusinessModules.length">
-            当前平台没有可用模块，请先由管理员在业务平台管理中新增。
-          </small>
-        </label>
-        <label><span>教学简介</span><textarea v-model="basicForm.description" rows="4" :disabled="configurationLocked" /></label>
-        <div class="config-grid">
-          <label><span>客观分上限</span><input v-model.number="basicForm.objectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
-          <label><span>主观分上限</span><input v-model.number="basicForm.subjectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
-        </div>
-        <label><span>标签（逗号分隔）</span><input v-model="basicForm.tags" :disabled="configurationLocked" /></label>
-        <div class="score-strip">
-          <span><small>教案总分</small><strong>{{ totalScore }}</strong></span>
-          <span><small>教学点分合计</small><strong>{{ objectiveStageScore }}</strong></span>
-          <span><small>录制节点</small><strong>{{ recordedStepCount }}</strong></span>
-        </div>
-        <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveBasicInformation">
-          保存基础信息
-        </button>
-      </div>
-
-      <div v-else class="config-content">
-        <div class="config-title">
-          <div><small>PUBLISH CHECK</small><h2>发布校验</h2></div>
-          <span>{{ validationMessages.length ? `${validationMessages.length} 项待处理` : '校验通过' }}</span>
-        </div>
-        <p class="publish-description">
-          发布前检查基础信息、教学点分值、角色与录制步骤；通过后再进入考试设置。
-        </p>
-        <div v-if="validationMessages.length" class="validation-list">
-          <span v-for="message in validationMessages" :key="message">! {{ message }}</span>
-        </div>
-        <div v-else class="validation-ok">✓ 教案完整，可执行发布</div>
-        <button class="panel-primary" type="button" :disabled="configurationLocked" @click="publishLesson">
-          执行发布校验
-        </button>
-        <RouterLink
-          class="panel-next"
-          :to="{ name: 'exam-setup', params: { lessonId: lesson.id } }"
-        >
-          下一步：考试设置 →
-        </RouterLink>
-      </div>
     </aside>
 
     <div
-      v-if="!controlsCollapsed && !elementPicking && !showStagePanel && !showConfigPanel"
-      class="quick-controls"
-      aria-label="编排快捷工具坞"
+      v-if="modalView"
+      class="authoring-modal-backdrop"
+      role="presentation"
+      @click.self="modalView = ''"
     >
-      <button v-if="recording" type="button" class="recording-action" @click="startElementPick()">
-        ⌖ 继续选取
-      </button>
-      <button v-if="recording" type="button" @click="pauseRecording">Ⅱ 暂停录制</button>
-      <button type="button" @click="toggleStagePanel">
-        ☰ 教学点
-      </button>
-      <button type="button" @click="toggleConfigPanel('step')">
-        ◆ 节点配置
-      </button>
-      <button type="button" @click="toggleConfigPanel('lesson')">⚙ 教案设置</button>
-      <button type="button" @click="toggleConfigPanel('publish')">✓ 发布校验</button>
+      <section class="authoring-modal" role="dialog" aria-modal="true">
+        <header class="authoring-modal-header">
+          <div>
+            <small>{{ modalView === 'lesson' ? 'LESSON SETTINGS' : 'PUBLISH CHECK' }}</small>
+            <h2>{{ modalView === 'lesson' ? '教案基础设置' : '发布教案' }}</h2>
+          </div>
+          <button type="button" aria-label="关闭弹窗" @click="modalView = ''">×</button>
+        </header>
+
+        <div v-if="modalView === 'lesson'" class="authoring-modal-content config-content">
+          <div class="config-grid">
+            <label><span>教案编号</span><input v-model="basicForm.code" :disabled="configurationLocked" /></label>
+            <label><span>教案名称</span><input v-model="basicForm.title" :disabled="configurationLocked" /></label>
+          </div>
+          <label>
+            <span>录制业务平台</span>
+            <select v-model="basicForm.businessPlatformId" :disabled="configurationLocked">
+              <option
+                v-for="platform in store.state.businessPlatforms.filter((item) => item.status === 'ENABLED' || item.id === basicForm.businessPlatformId)"
+                :key="platform.id"
+                :value="platform.id"
+              >
+                {{ platform.name }} · {{ platform.baseUrl }}
+              </option>
+            </select>
+          </label>
+          <label>
+            <span>录制平台模块</span>
+            <select
+              v-model="basicForm.businessPlatformModuleId"
+              :disabled="configurationLocked || !basicForm.businessPlatformId"
+            >
+              <option value="" disabled>
+                {{ basicForm.businessPlatformId ? '请选择业务平台下的模块' : '请先选择业务平台' }}
+              </option>
+              <option
+                v-for="businessModule in availableBasicBusinessModules"
+                :key="businessModule.id"
+                :value="businessModule.id"
+              >
+                {{ businessModule.name }} · {{ businessModule.path }}
+              </option>
+            </select>
+            <small v-if="basicForm.businessPlatformId && !availableBasicBusinessModules.length">
+              当前平台没有可用模块，请先由管理员在业务平台管理中新增。
+            </small>
+          </label>
+          <label><span>教学简介</span><textarea v-model="basicForm.description" rows="4" :disabled="configurationLocked" /></label>
+          <div class="config-grid">
+            <label><span>客观分上限</span><input v-model.number="basicForm.objectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
+            <label><span>主观分上限</span><input v-model.number="basicForm.subjectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
+          </div>
+          <label><span>标签（逗号分隔）</span><input v-model="basicForm.tags" :disabled="configurationLocked" /></label>
+          <div class="score-strip">
+            <span><small>教案总分</small><strong>{{ totalScore }}</strong></span>
+            <span><small>教学点分合计</small><strong>{{ objectiveStageScore }}</strong></span>
+            <span><small>录制节点</small><strong>{{ recordedStepCount }}</strong></span>
+          </div>
+          <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveBasicInformation">
+            保存基础信息
+          </button>
+        </div>
+
+        <div v-else class="authoring-modal-content config-content">
+          <p class="publish-description">
+            发布前检查基础信息、教学点分值、角色与录制步骤；确认无误后即可发布教案。
+          </p>
+          <div v-if="validationMessages.length" class="validation-list">
+            <span v-for="message in validationMessages" :key="message">! {{ message }}</span>
+          </div>
+          <div v-else class="validation-ok">✓ 教案完整，可执行发布</div>
+          <button class="panel-primary" type="button" :disabled="configurationLocked" @click="publishLesson">
+            发布
+          </button>
+        </div>
+      </section>
     </div>
 
-    <footer
-      v-if="!controlsCollapsed && !recording && !elementPicking && !showStagePanel && !showConfigPanel"
-      class="authoring-status"
-      aria-live="polite"
-    >
-      <span>{{ activityText }}</span>
-      <strong>{{ statusSummary }}</strong>
-    </footer>
-
-    <button
-      v-if="!elementPicking && !showStagePanel && !showConfigPanel"
-      class="collapse-controls"
-      type="button"
-      @click="controlsCollapsed = !controlsCollapsed"
-    >
-      {{ controlsCollapsed ? '展开工具' : '隐藏工具' }}
-    </button>
-
-    <div v-if="feedback && !controlsCollapsed && !elementPicking" class="authoring-toast" :class="feedbackTone">
+    <div v-if="feedback && !elementPicking" class="authoring-toast" :class="feedbackTone">
       {{ feedback }}
       <button type="button" aria-label="关闭提示" @click="feedback = ''">×</button>
     </div>
@@ -3788,6 +4145,827 @@ function numberValue(event: Event) {
   line-height: 1.7;
 }
 
+/* Full-screen authoring shell: the business system remains the canvas while
+   the authoring controls live in two independently collapsible drawers. */
+.authoring-left-drawer,
+.authoring-right-drawer {
+  display: flex;
+  flex-direction: column;
+  border-color: rgb(255 255 255 / 86%);
+  border-radius: 18px;
+  background: rgb(250 252 255 / 96%);
+  box-shadow:
+    0 24px 70px rgb(22 34 52 / 22%),
+    0 3px 12px rgb(22 34 52 / 9%);
+  backdrop-filter: blur(18px);
+}
+
+.authoring-left-drawer {
+  width: 324px;
+}
+
+.authoring-right-drawer {
+  width: 382px;
+}
+
+.authoring-drawer-header {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e8edf4;
+  padding: 15px 15px 13px;
+}
+
+.authoring-drawer-header > div {
+  min-width: 0;
+}
+
+.authoring-drawer-header small {
+  display: block;
+  margin-bottom: 4px;
+  color: #8590a1;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 0.12em;
+}
+
+.authoring-drawer-header h2 {
+  overflow: hidden;
+  margin: 0;
+  color: #182230;
+  font-size: 15px;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authoring-drawer-header p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  overflow: hidden;
+  margin: 7px 0 0;
+  color: #667085;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authoring-drawer-header p strong {
+  color: #087f5b;
+  font-size: 9px;
+}
+
+.authoring-drawer-header > button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  padding: 0;
+  color: #5f6b7a;
+  background: #fff;
+  font-size: 17px;
+}
+
+.property-header h2 {
+  font-size: 14px;
+}
+
+.property-header p {
+  max-width: 285px;
+}
+
+.authoring-drawer-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 0 0 auto;
+  gap: 7px;
+  border-bottom: 1px solid #e8edf4;
+  padding: 11px 13px;
+}
+
+.authoring-drawer-actions button {
+  min-height: 34px;
+  border: 1px solid #dde4ed;
+  border-radius: 9px;
+  padding: 0 8px;
+  color: #465467;
+  background: #fff;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.authoring-drawer-actions .record-action {
+  grid-column: 1 / -1;
+  border-color: #d43c4d;
+  color: #fff;
+  background: linear-gradient(135deg, #e24959, #c8263a);
+  box-shadow: 0 6px 16px rgb(200 38 58 / 19%);
+}
+
+.directory-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 14px 4px;
+}
+
+.directory-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.directory-heading small {
+  color: #8590a1;
+  font-size: 7px;
+  font-weight: 850;
+  letter-spacing: 0.11em;
+}
+
+.directory-heading strong {
+  font-size: 11px;
+}
+
+.directory-heading > span {
+  color: #8b95a5;
+  font-size: 8px;
+}
+
+.authoring-left-drawer .stage-list {
+  min-height: 0;
+  height: auto;
+  flex: 1;
+  padding: 7px 9px 10px;
+}
+
+.authoring-left-drawer .stage-item {
+  position: relative;
+  border-radius: 11px;
+  background: rgb(255 255 255 / 62%);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.authoring-left-drawer .stage-item.active {
+  border-color: #d7d0ff;
+  background: #f5f3ff;
+}
+
+.authoring-left-drawer .stage-item.drop-before,
+.directory-step-row.drop-before {
+  box-shadow: 0 -3px 0 #6b5bd2;
+}
+
+.authoring-left-drawer .stage-item.drop-after,
+.directory-step-row.drop-after {
+  box-shadow: 0 3px 0 #6b5bd2;
+}
+
+.authoring-left-drawer .stage-item > button {
+  grid-template-columns: 12px 27px minmax(0, 1fr) auto;
+  gap: 8px;
+  padding: 8px 9px;
+}
+
+.authoring-left-drawer .stage-item > button > .directory-drag-handle,
+.directory-step-row > .directory-drag-handle {
+  display: grid;
+  width: 12px;
+  height: auto;
+  place-items: center;
+  border-radius: 0;
+  color: #a5adba;
+  background: transparent;
+  cursor: grab;
+  font-size: 12px;
+  font-weight: 900;
+  user-select: none;
+}
+
+.authoring-left-drawer .stage-item > button > .directory-drag-handle:active,
+.directory-step-row > .directory-drag-handle:active {
+  cursor: grabbing;
+}
+
+.authoring-left-drawer .stage-item > button > .stage-index {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 8px;
+  color: #6b5bd2;
+  background: #ebe8ff;
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.authoring-left-drawer .stage-item > button > span:nth-child(3) {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.authoring-left-drawer .step-list {
+  gap: 3px;
+  padding: 5px 7px 8px 17px;
+}
+
+.directory-step-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) 25px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 48%);
+}
+
+.directory-step-row.active {
+  border-color: #cfc7ff;
+  background: #fff;
+}
+
+.directory-step-row > button:not(.directory-step-delete) {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  min-height: 39px;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  padding: 4px 2px;
+  background: transparent;
+  text-align: left;
+}
+
+.directory-step-row > button:not(.directory-step-delete):hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.directory-step-row > button:not(.directory-step-delete) > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.directory-step-delete {
+  width: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0;
+  color: #a5adba;
+  background: transparent;
+  font-size: 12px;
+}
+
+.directory-step-delete:hover:not(:disabled) {
+  color: #c7434f;
+  background: #fff0f2;
+}
+
+.step-list > .directory-add-step {
+  display: block;
+  min-height: 32px;
+  border: 1px dashed #c9c1f7;
+  padding: 0 8px;
+  color: #5b4bca;
+  background: rgb(255 255 255 / 58%);
+  text-align: center;
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.authoring-left-drawer .stage-panel-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  height: auto;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 9px;
+}
+
+.stage-panel-actions a,
+.stage-panel-actions button {
+  display: flex;
+  min-height: 31px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #d5dbe4;
+  border-radius: 7px;
+  padding: 0 6px;
+  color: #536174;
+  background: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.stage-panel-actions .publish-entry {
+  border-color: #6552dd;
+  color: #fff;
+  background: #6552dd;
+}
+
+.authoring-left-trigger {
+  position: absolute;
+  z-index: 24;
+  top: 50%;
+  left: 0;
+  min-height: 94px;
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-left: 0;
+  border-radius: 0 10px 10px 0;
+  padding: 10px 7px;
+  color: #fff;
+  background: rgb(38 50 68 / 78%);
+  box-shadow: 0 12px 30px rgb(18 28 42 / 18%);
+  backdrop-filter: blur(12px);
+  font-size: 9px;
+  font-weight: 850;
+  line-height: 1.35;
+  writing-mode: vertical-rl;
+  transform: translateY(-50%);
+}
+
+.authoring-right-drawer .config-content {
+  min-height: 0;
+  max-height: none;
+  flex: 1;
+}
+
+.advanced-settings {
+  border: 1px solid #e2e7ee;
+  border-radius: 8px;
+  background: rgb(246 248 251 / 82%);
+}
+
+.advanced-settings summary {
+  padding: 9px 10px;
+  color: #596679;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 850;
+}
+
+.advanced-settings[open] {
+  display: grid;
+  gap: 9px;
+  padding: 0 9px 9px;
+}
+
+.advanced-settings[open] summary {
+  margin: 0 -9px;
+  border-bottom: 1px solid #e2e7ee;
+}
+
+.authoring-modal-backdrop {
+  position: absolute;
+  z-index: 70;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background: rgb(17 24 39 / 38%);
+  backdrop-filter: blur(4px);
+}
+
+.authoring-modal {
+  display: flex;
+  width: min(650px, 100%);
+  max-height: min(760px, calc(100vh - 56px));
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 86%);
+  border-radius: 18px;
+  background: #fbfcfe;
+  box-shadow: 0 28px 90px rgb(10 18 31 / 30%);
+}
+
+.authoring-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #e7ebf1;
+  padding: 15px 18px;
+}
+
+.authoring-modal-header small {
+  color: #6f5ce4;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+
+.authoring-modal-header h2 {
+  margin: 3px 0 0;
+  font-size: 17px;
+}
+
+.authoring-modal-header button {
+  width: 32px;
+  min-height: 32px;
+  border: 1px solid #dfe5ee;
+  border-radius: 8px;
+  padding: 0;
+  background: #fff;
+  font-size: 17px;
+}
+
+.authoring-modal-content.config-content {
+  min-height: 0;
+  max-height: none;
+  flex: 1;
+  padding: 18px;
+}
+
+.authoring-toast {
+  z-index: 65;
+  top: auto;
+  bottom: 16px;
+}
+
+/* Authoring control typography and component sizing. Keep these selectors
+   scoped to the teaching overlays so the embedded business system is not restyled. */
+.authoring-left-drawer,
+.authoring-right-drawer,
+.authoring-modal,
+.element-picker-toolbar,
+.authoring-toast,
+.authoring-left-trigger,
+.locked-shield,
+.authoring-launch-state,
+.teaching-bubble {
+  --authoring-font-size: 16px;
+  --authoring-control-height: 44px;
+  --authoring-primary-height: 48px;
+  --authoring-control-radius: 10px;
+  --authoring-panel-radius: 18px;
+  font-size: var(--authoring-font-size);
+}
+
+.authoring-left-drawer :is(a, button, input, select, textarea, label, span, small, strong, em, i, b, p, summary),
+.authoring-right-drawer :is(a, button, input, select, textarea, label, span, small, strong, em, i, b, p, summary),
+.authoring-modal :is(a, button, input, select, textarea, label, span, small, strong, em, i, b, p, summary),
+.element-picker-toolbar :is(button, span, small, strong),
+.authoring-toast :is(button, span, small, strong),
+.locked-shield :is(a, button, span, small, strong, p),
+.authoring-launch-state :is(button, span, small, strong, p),
+.teaching-bubble :is(button, span, small, strong, p),
+.element-picker-highlight > span,
+.selected-step-preview-highlight > span {
+  font-size: var(--authoring-font-size, 16px);
+}
+
+.authoring-left-drawer,
+.authoring-right-drawer,
+.authoring-modal {
+  border-radius: var(--authoring-panel-radius);
+}
+
+.authoring-left-drawer {
+  width: 390px;
+}
+
+.authoring-right-drawer {
+  width: 460px;
+}
+
+.authoring-drawer-header {
+  gap: 16px;
+  padding: 20px;
+}
+
+.authoring-drawer-header small,
+.directory-heading small,
+.authoring-modal-header small {
+  font-size: 16px;
+  letter-spacing: 0.06em;
+}
+
+.authoring-drawer-header h2,
+.property-header h2 {
+  font-size: 22px;
+}
+
+.authoring-drawer-header p,
+.authoring-drawer-header p strong {
+  margin-top: 10px;
+  font-size: 16px;
+}
+
+.authoring-drawer-header > button,
+.authoring-modal-header > button {
+  width: var(--authoring-control-height);
+  height: var(--authoring-control-height);
+  min-height: var(--authoring-control-height);
+  border-radius: var(--authoring-control-radius);
+  font-size: 22px;
+}
+
+.authoring-drawer-actions {
+  gap: 10px;
+  padding: 14px 16px;
+}
+
+.authoring-drawer-actions button,
+.stage-panel-actions a,
+.stage-panel-actions button,
+.node-actions button,
+.element-binding-editor button,
+.attachment-upload,
+.attachment-editor__list button,
+.panel-primary,
+.panel-next,
+.danger-text,
+.element-picker-toolbar button,
+.teaching-bubble button,
+.authoring-launch-state button {
+  min-height: var(--authoring-control-height);
+  border-radius: var(--authoring-control-radius);
+  padding: 0 16px;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.authoring-drawer-actions .record-action,
+.panel-primary,
+.panel-next {
+  min-height: var(--authoring-primary-height);
+}
+
+.directory-heading {
+  padding: 16px 18px 8px;
+}
+
+.directory-heading strong {
+  font-size: 18px;
+}
+
+.directory-heading > span {
+  font-size: 16px;
+}
+
+.authoring-left-drawer .stage-list {
+  padding: 10px 12px 14px;
+}
+
+.authoring-left-drawer .stage-item,
+.directory-step-row {
+  border-radius: 12px;
+}
+
+.authoring-left-drawer .stage-item + .stage-item {
+  margin-top: 8px;
+}
+
+.authoring-left-drawer .stage-item > button {
+  grid-template-columns: 20px 40px minmax(0, 1fr) auto;
+  min-height: 68px;
+  gap: 10px;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.authoring-left-drawer .stage-item > button > .directory-drag-handle,
+.directory-step-row > .directory-drag-handle {
+  width: 20px;
+  font-size: 18px;
+}
+
+.authoring-left-drawer .stage-item > button > .stage-index {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--authoring-control-radius);
+  font-size: 16px;
+}
+
+.authoring-left-drawer .stage-item > button strong,
+.authoring-left-drawer .stage-item > button small,
+.step-list strong,
+.step-list small,
+.step-list b {
+  font-size: 16px;
+}
+
+.authoring-left-drawer .step-list {
+  gap: 6px;
+  padding: 8px 10px 12px 22px;
+}
+
+.directory-step-row {
+  grid-template-columns: 20px minmax(0, 1fr) 40px;
+  gap: 8px;
+}
+
+.directory-step-row > button:not(.directory-step-delete) {
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  min-height: 60px;
+  gap: 10px;
+  border-radius: var(--authoring-control-radius);
+  padding: 7px 4px;
+}
+
+.step-list i {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+.directory-step-delete {
+  width: 40px;
+  min-height: 40px;
+  border-radius: var(--authoring-control-radius);
+  font-size: 18px;
+}
+
+.step-list > .directory-add-step {
+  min-height: var(--authoring-control-height);
+  border-radius: var(--authoring-control-radius);
+  padding: 8px 12px;
+  font-size: 16px;
+}
+
+.authoring-left-drawer .stage-panel-actions {
+  gap: 8px;
+  padding: 12px;
+}
+
+.authoring-left-trigger {
+  min-height: 116px;
+  border-radius: 0 var(--authoring-control-radius) var(--authoring-control-radius) 0;
+  padding: 14px 10px;
+  font-size: 16px;
+}
+
+.config-content {
+  gap: 16px;
+  padding: 18px;
+}
+
+.config-title small,
+.config-title > span,
+.config-content label,
+.attachment-editor > small,
+.attachment-editor > p,
+.attachment-editor__list strong,
+.attachment-editor__list small,
+.publish-description,
+.validation-list span,
+.validation-ok,
+.config-empty,
+.score-strip small {
+  font-size: 16px;
+}
+
+.config-title h2 {
+  font-size: 22px;
+}
+
+.config-content label {
+  gap: 8px;
+}
+
+.config-content input,
+.config-content select,
+.config-content textarea {
+  min-height: var(--authoring-control-height);
+  border: 1px solid #d5dce6;
+  border-radius: var(--authoring-control-radius);
+  padding: 10px 14px;
+  font-size: 16px;
+  line-height: 1.5;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.config-content textarea {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.config-content input:focus,
+.config-content select:focus,
+.config-content textarea:focus {
+  border-color: #7564e8;
+  outline: 0;
+  box-shadow: 0 0 0 3px rgb(101 82 221 / 14%);
+}
+
+.config-grid {
+  gap: 12px;
+}
+
+.element-binding-editor,
+.attachment-editor,
+.advanced-settings,
+.score-strip > span,
+.validation-list span,
+.validation-ok {
+  border-radius: 12px;
+}
+
+.element-binding-editor {
+  gap: 16px;
+  padding: 14px;
+}
+
+.element-binding-editor strong,
+.element-binding-editor small,
+.attachment-editor__heading > span,
+.attachment-editor__list article > span,
+.attachment-editor__list button,
+.advanced-settings summary {
+  font-size: 16px;
+}
+
+.attachment-editor {
+  gap: 12px;
+  padding: 14px;
+}
+
+.attachment-editor__list article {
+  gap: 12px;
+  border-radius: var(--authoring-control-radius);
+  padding: 10px;
+}
+
+.attachment-editor__list article > span {
+  border-radius: 8px;
+  padding: 9px 8px;
+}
+
+.advanced-settings summary {
+  min-height: var(--authoring-control-height);
+  padding: 11px 14px;
+}
+
+.checkbox-row input,
+.visibility-editor input {
+  width: 20px;
+  height: 20px;
+  min-height: 20px;
+}
+
+.score-strip > span,
+.validation-list span,
+.validation-ok {
+  padding: 12px;
+}
+
+.score-strip strong {
+  font-size: 22px;
+}
+
+.authoring-modal {
+  width: min(760px, 100%);
+}
+
+.authoring-modal-header {
+  padding: 20px 22px;
+}
+
+.authoring-modal-header h2 {
+  font-size: 24px;
+}
+
+.authoring-modal-content.config-content {
+  padding: 22px;
+}
+
+.element-picker-toolbar {
+  gap: 10px;
+  border-radius: var(--authoring-panel-radius);
+  padding: 12px 14px;
+}
+
+.element-picker-toolbar span,
+.element-picker-toolbar strong,
+.element-picker-toolbar small {
+  font-size: 16px;
+}
+
+.authoring-toast {
+  min-width: min(460px, calc(100% - 32px));
+  border-radius: var(--authoring-control-radius);
+  padding: 12px 14px;
+  font-size: 16px;
+}
+
+.authoring-toast button {
+  width: 36px;
+  min-height: 36px;
+  border-radius: 8px;
+  font-size: 20px;
+}
+
 @keyframes recording-pulse {
   50% {
     box-shadow: 0 0 0 7px rgb(227 83 96 / 4%);
@@ -3904,11 +5082,11 @@ function numberValue(event: Event) {
   }
 
   .stage-panel {
-    width: 280px;
+    width: 360px;
   }
 
   .config-panel {
-    width: 350px;
+    width: 420px;
   }
 
   .target-highlight {
@@ -3992,6 +5170,707 @@ function numberValue(event: Event) {
     top: 125px;
     left: 50%;
     transform: translateX(-50%);
+  }
+}
+
+/* QQ-style authoring menu: the business application remains the full-screen base layer. */
+.authoring-qq-shell {
+  position: absolute;
+  z-index: 24;
+  top: 14px;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  max-height: calc(100vh - 28px);
+  border: 1px solid rgb(222 226 236 / 90%);
+  border-radius: 20px;
+  box-shadow: 0 22px 60px rgb(27 36 54 / 24%);
+  font-size: 16px;
+  overflow: visible;
+}
+
+.authoring-qq-rail {
+  display: flex;
+  width: 98px;
+  flex: 0 0 98px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  border-radius: 19px 0 0 19px;
+  padding: 14px 9px 12px;
+  color: #dce3f1;
+  background:
+    radial-gradient(circle at 50% 0%, rgb(104 88 229 / 28%), transparent 31%),
+    linear-gradient(180deg, #252b3a 0%, #1b202d 100%);
+  box-sizing: border-box;
+}
+
+.authoring-lesson-avatar,
+.authoring-floating-launcher {
+  display: grid;
+  place-items: center;
+  border: 0;
+  color: #fff;
+  background: linear-gradient(145deg, #7c6cf2, #5b4bd2);
+  box-shadow: 0 9px 24px rgb(91 75 210 / 38%);
+  font-weight: 900;
+}
+
+.authoring-lesson-avatar {
+  width: 50px;
+  height: 50px;
+  min-height: 50px;
+  align-self: center;
+  border-radius: 16px;
+  padding: 0;
+  font-size: 21px;
+}
+
+.authoring-lesson-avatar:hover,
+.authoring-floating-launcher:hover {
+  box-shadow: 0 12px 28px rgb(91 75 210 / 48%);
+  transform: translateY(-1px);
+}
+
+.authoring-rail-stack {
+  display: grid;
+  gap: 5px;
+}
+
+.authoring-rail-primary {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.authoring-rail-primary::-webkit-scrollbar {
+  display: none;
+}
+
+.authoring-rail-bottom {
+  margin-top: auto;
+  padding-top: 9px;
+  border-top: 1px solid rgb(255 255 255 / 10%);
+}
+
+.authoring-rail-action {
+  display: flex;
+  min-width: 0;
+  min-height: 58px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 0;
+  border-radius: 13px;
+  padding: 6px 3px;
+  color: #bac4d5;
+  background: transparent;
+  box-shadow: none;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-align: center;
+  text-decoration: none;
+  box-sizing: border-box;
+}
+
+.authoring-rail-action:hover,
+.authoring-rail-action.active {
+  color: #fff;
+  background: rgb(255 255 255 / 11%);
+  box-shadow: none;
+  transform: none;
+}
+
+.authoring-rail-action.publish {
+  color: #fff;
+  background: rgb(48 183 131 / 18%);
+}
+
+.authoring-rail-action:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.authoring-rail-icon {
+  display: grid;
+  width: 28px;
+  height: 24px;
+  place-items: center;
+  color: currentColor;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.authoring-directory-panel {
+  display: flex;
+  width: 348px;
+  min-width: 0;
+  flex-direction: column;
+  border-radius: 0 19px 19px 0;
+  color: #202735;
+  background: rgb(250 251 253 / 97%);
+  backdrop-filter: blur(18px);
+  overflow: hidden;
+}
+
+.authoring-directory-header {
+  display: flex;
+  min-height: 100px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #e5e8ef;
+  padding: 19px 18px 16px;
+  box-sizing: border-box;
+}
+
+.authoring-directory-header > div {
+  min-width: 0;
+}
+
+.authoring-directory-header small,
+.authoring-directory-heading small,
+.authoring-current-context small {
+  color: #6e5ce2;
+  font-size: 16px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+}
+
+.authoring-directory-header h2 {
+  overflow: hidden;
+  margin: 5px 0 4px;
+  font-size: 19px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authoring-directory-header p {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: #7d8797;
+  font-size: 16px;
+}
+
+.authoring-directory-header p strong {
+  color: #24966d;
+  font-size: 16px;
+}
+
+.authoring-directory-header > button {
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  flex: 0 0 38px;
+  border: 1px solid #e0e4ec;
+  border-radius: 12px;
+  padding: 0;
+  color: #6e7786;
+  background: #fff;
+  font-size: 26px;
+}
+
+.authoring-current-context {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 14px 14px 0;
+  border: 1px solid #ded9ff;
+  border-radius: 14px;
+  padding: 12px 13px;
+  background: linear-gradient(135deg, #f7f5ff, #fff);
+}
+
+.authoring-current-context > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.authoring-current-context strong,
+.authoring-current-context span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authoring-current-context strong {
+  font-size: 17px;
+}
+
+.authoring-current-context span {
+  color: #7e8796;
+  font-size: 16px;
+}
+
+.authoring-current-context em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: #6151d7;
+  background: #ebe7ff;
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.authoring-directory-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 17px 16px 9px;
+}
+
+.authoring-directory-heading > div {
+  display: grid;
+  gap: 2px;
+}
+
+.authoring-directory-heading strong {
+  font-size: 18px;
+}
+
+.authoring-directory-heading > span {
+  color: #8a93a2;
+  font-size: 16px;
+}
+
+.authoring-directory-panel .stage-list {
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+  padding: 4px 12px 14px;
+  overflow-y: auto;
+}
+
+.authoring-directory-panel .stage-item {
+  position: relative;
+  border: 1px solid #e3e7ee;
+  border-radius: 14px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.authoring-directory-panel .stage-item + .stage-item {
+  margin-top: 9px;
+}
+
+.authoring-directory-panel .stage-item.active {
+  border-color: #bdb4f8;
+  background: #f9f8ff;
+  box-shadow: 0 8px 22px rgb(91 75 210 / 9%);
+}
+
+.authoring-directory-panel .stage-item.drop-before::before,
+.authoring-directory-panel .stage-item.drop-after::after,
+.authoring-directory-panel .directory-step-row.drop-before::before,
+.authoring-directory-panel .directory-step-row.drop-after::after {
+  position: absolute;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
+  height: 3px;
+  border-radius: 999px;
+  background: #6e5ce2;
+  content: '';
+}
+
+.authoring-directory-panel .stage-item.drop-before::before,
+.authoring-directory-panel .directory-step-row.drop-before::before {
+  top: 0;
+}
+
+.authoring-directory-panel .stage-item.drop-after::after,
+.authoring-directory-panel .directory-step-row.drop-after::after {
+  bottom: 0;
+}
+
+.authoring-directory-panel .stage-item > button {
+  display: grid;
+  width: 100%;
+  min-height: 68px;
+  grid-template-columns: 26px 38px minmax(0, 1fr) 28px;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 0;
+  padding: 10px 11px;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.authoring-directory-panel .stage-item > button:hover {
+  background: rgb(110 92 226 / 5%);
+  box-shadow: none;
+  transform: none;
+}
+
+.authoring-directory-panel .directory-drag-handle {
+  display: grid;
+  width: 24px;
+  height: 32px;
+  place-items: center;
+  border-radius: 8px;
+  color: #929baa;
+  background: transparent;
+  font-size: 20px;
+  cursor: grab;
+  user-select: none;
+}
+
+.authoring-directory-panel .directory-drag-handle:active {
+  cursor: grabbing;
+}
+
+.authoring-directory-panel .stage-index {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  color: #5d4fd0;
+  background: #ebe8ff;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.authoring-directory-panel .stage-item > button > span:nth-child(3) {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.authoring-directory-panel .stage-item > button strong,
+.authoring-directory-panel .stage-item > button small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authoring-directory-panel .stage-item > button strong {
+  color: #273041;
+  font-size: 17px;
+}
+
+.authoring-directory-panel .stage-item > button small {
+  color: #7f8998;
+  font-size: 16px;
+}
+
+.authoring-directory-panel .stage-item > button em {
+  display: grid;
+  min-width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 999px;
+  color: #626c7d;
+  background: #edf0f4;
+  font-size: 16px;
+  font-style: normal;
+}
+
+.authoring-directory-panel .step-list {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #e7e9ef;
+  padding: 9px 9px 11px 22px;
+}
+
+.authoring-directory-panel .directory-step-row {
+  position: relative;
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  padding: 4px;
+  background: rgb(255 255 255 / 78%);
+}
+
+.authoring-directory-panel .directory-step-row:hover,
+.authoring-directory-panel .directory-step-row.active {
+  border-color: #cec7f9;
+  background: #fff;
+}
+
+.authoring-directory-panel .directory-step-row > button:not(.directory-step-delete) {
+  display: grid;
+  min-width: 0;
+  min-height: 50px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 9px;
+  padding: 5px;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.authoring-directory-panel .directory-step-row > button:not(.directory-step-delete):hover {
+  box-shadow: none;
+  transform: none;
+}
+
+.authoring-directory-panel .directory-step-row i {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  color: #657083;
+  background: #edf0f4;
+  font-size: 16px;
+  font-style: normal;
+  font-weight: 800;
+}
+
+.authoring-directory-panel .directory-step-row > button span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.authoring-directory-panel .directory-step-row strong,
+.authoring-directory-panel .directory-step-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authoring-directory-panel .directory-step-row strong {
+  color: #313a4a;
+  font-size: 16px;
+}
+
+.authoring-directory-panel .directory-step-row small {
+  color: #8a93a1;
+  font-size: 16px;
+}
+
+.authoring-directory-panel .directory-step-row b {
+  color: #2dac7a;
+  font-size: 16px;
+}
+
+.authoring-directory-panel .directory-step-delete {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 9px;
+  padding: 0;
+  color: #9a6670;
+  background: transparent;
+  font-size: 20px;
+}
+
+.authoring-directory-panel .directory-step-delete:hover {
+  color: #c33b52;
+  background: #fff0f2;
+}
+
+.authoring-directory-panel .directory-add-step {
+  width: 100%;
+  min-height: 46px;
+  border: 1px dashed #bfb6f6;
+  border-radius: 11px;
+  padding: 8px 10px;
+  color: #6253d3;
+  background: #f7f5ff;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.authoring-directory-panel .stage-empty {
+  border: 1px dashed #ccd2dc;
+  border-radius: 14px;
+  padding: 22px 14px;
+  color: #7b8594;
+  background: #fff;
+  font-size: 16px;
+  text-align: center;
+}
+
+.authoring-directory-note {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px solid #e5e8ef;
+  padding: 8px 14px;
+  color: #778190;
+  background: #fff;
+  font-size: 16px;
+  box-sizing: border-box;
+}
+
+.authoring-directory-note button {
+  min-height: 36px;
+  border: 1px solid #dfe3ea;
+  border-radius: 10px;
+  padding: 0 11px;
+  color: #586274;
+  background: #f8f9fb;
+  font-size: 16px;
+}
+
+.authoring-more-menu {
+  position: absolute;
+  z-index: 3;
+  bottom: 12px;
+  left: 108px;
+  display: grid;
+  width: 298px;
+  gap: 5px;
+  border: 1px solid #dfe3eb;
+  border-radius: 16px;
+  padding: 9px;
+  color: #283142;
+  background: rgb(255 255 255 / 98%);
+  box-shadow: 0 18px 48px rgb(27 36 54 / 24%);
+}
+
+.authoring-more-menu header {
+  display: flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 4px 8px;
+}
+
+.authoring-more-menu header strong {
+  font-size: 17px;
+}
+
+.authoring-more-menu header button {
+  width: 34px;
+  height: 34px;
+  min-height: 34px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0;
+  color: #707989;
+  background: #f2f4f7;
+  font-size: 20px;
+}
+
+.authoring-more-menu > button,
+.authoring-more-menu > a {
+  display: grid;
+  min-height: 62px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 10px;
+  color: #30394a;
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+  text-decoration: none;
+}
+
+.authoring-more-menu > button:hover,
+.authoring-more-menu > a:hover {
+  background: #f3f1ff;
+  box-shadow: none;
+  transform: none;
+}
+
+.authoring-more-menu > button > span:first-child,
+.authoring-more-menu > a > span:first-child {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 11px;
+  color: #6455d6;
+  background: #ebe8ff;
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.authoring-more-menu > button > span:last-child,
+.authoring-more-menu > a > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.authoring-more-menu strong,
+.authoring-more-menu small {
+  font-size: 16px;
+}
+
+.authoring-more-menu small {
+  color: #828b99;
+}
+
+.authoring-floating-launcher {
+  position: fixed;
+  z-index: 24;
+  top: 50%;
+  left: 14px;
+  width: 58px;
+  height: 58px;
+  min-height: 58px;
+  border-radius: 18px;
+  padding: 0;
+  font-size: 22px;
+  cursor: grab;
+  touch-action: none;
+  transform: translateY(-50%);
+  user-select: none;
+}
+
+.authoring-floating-launcher.dragging {
+  cursor: grabbing;
+  box-shadow: 0 16px 34px rgb(91 75 210 / 52%);
+  transform: scale(1.04);
+}
+
+@media (max-width: 720px) {
+  .authoring-qq-shell {
+    top: 8px;
+    bottom: 8px;
+    left: 8px;
+    max-height: calc(100vh - 16px);
+  }
+
+  .authoring-qq-rail {
+    width: 92px;
+    flex-basis: 92px;
+  }
+
+  .authoring-directory-panel {
+    width: min(348px, calc(100vw - 110px));
+  }
+
+  .authoring-current-context,
+  .authoring-directory-note span {
+    display: none;
+  }
+
+  .authoring-more-menu {
+    left: 101px;
+    width: min(298px, calc(100vw - 118px));
   }
 }
 </style>

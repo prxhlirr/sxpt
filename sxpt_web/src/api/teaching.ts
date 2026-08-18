@@ -69,6 +69,13 @@ export const teachingApi = {
     });
   },
 
+  withdrawPoint(teachingPointId: string) {
+    return apiRequest<TeachingPoint>({
+      method: 'POST',
+      url: `/teaching/points/${teachingPointId}/withdraw`
+    });
+  },
+
   createTaskStep(request: CreateTaskStepRequest) {
     return apiRequest<TaskStep>({
       method: 'POST',

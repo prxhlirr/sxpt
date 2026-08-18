@@ -380,6 +380,25 @@ export interface EvaluationItem {
   updateTime: IsoDateTime;
 }
 
+export interface EvaluationResult {
+  id: string;
+  tenantId: string;
+  executionId: string;
+  evaluationRuleId: string;
+  autoScore: number;
+  manualScore?: number;
+  finalScore: number;
+  evaluationSummary?: string;
+  evidenceJson?: string;
+  reviewedBy?: string;
+  reviewedTime?: IsoDateTime;
+  reviewStatus?: string;
+  reviewReason?: string;
+  evaluationStatus: string;
+  status: string;
+  createTime: IsoDateTime;
+}
+
 export interface TaskExecution {
   id: string;
   tenantId: string;

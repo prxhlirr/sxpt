@@ -150,6 +150,11 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
         attempt.setExecutionId(execution.getId());
         attempt.setStudentId(execution.getStudentId());
         attempt.setTaskId(execution.getTaskId());
+        List<TaskTeachingPoint> teachingPoints = taskPublishService.listTeachingPointsByTask(
+                execution.getTenantId(), execution.getTaskId());
+        if (teachingPoints != null && teachingPoints.size() == 1) {
+            attempt.setTeachingPointId(teachingPoints.get(0).getTeachingPointId());
+        }
         attempt.setStartTime(execution.getStartTime());
         attempt.setCreateBy(execution.getStudentId());
         attempt.setUpdateBy(execution.getStudentId());
@@ -324,6 +329,7 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
         stepResult.setExecutionId(execution.getId());
         stepResult.setStudentId(execution.getStudentId());
         stepResult.setTaskId(execution.getTaskId());
+        stepResult.setTeachingPointId(item.getTeachingPointId());
         stepResult.setTaskStepId(item.getRelatedTaskStepId());
         stepResult.setStepCode(taskStep == null ? item.getRelatedTaskStepId() : taskStep.getStepCode());
         stepResult.setSequenceNo(taskStep == null ? 1L : taskStep.getSequenceNo());

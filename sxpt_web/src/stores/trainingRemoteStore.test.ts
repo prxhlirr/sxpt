@@ -329,6 +329,116 @@ describe('训练 Store 后端同步', () => {
     });
   });
 
+  it('发布本地已录节点时自动补建采集会话，不再要求返回点击开始录制', async () => {
+    const seed = createMockTrainingState();
+    const lesson = seed.lessons[0];
+    lesson.status = 'RECORDED';
+    delete lesson.captureSessionId;
+    delete lesson.teachingPointId;
+    lesson.stages.forEach((stage) =>
+      stage.recordedSteps.forEach((step) => {
+        delete step.remoteDraftId;
+        delete step.remoteResourceId;
+        step.syncStatus = 'LOCAL';
+      })
+    );
+    const startCaptureSession = vi.fn(async () => 'capture-auto-created');
+    const reportRecordedStep = vi.fn(async () => ({
+      eventId: 'event-auto-created',
+      resourceSnapshotId: 'snapshot-auto-created',
+      draftId: 'draft-auto-created'
+    }));
+    const publishLesson = vi.fn(async () => ({
+      teachingPointId: 'point-auto-created',
+      finishedCaptureSession: true,
+      resourceIdsByStepId: {}
+    }));
+    const backend: BackendTrainingApi = {
+      isEnabled: () => true,
+      listBusinessPlatforms: vi.fn(async (platforms) => platforms),
+      createBusinessPlatform: vi.fn(),
+      updateBusinessPlatform: vi.fn(),
+      setBusinessPlatformStatus: vi.fn(),
+      startCaptureSession,
+      reportRecordedStep,
+      publishLesson,
+      publishTeachingTask: vi.fn(),
+      prepareInitialDataForPublishedTask: vi.fn(async () => 0),
+      startStudentTaskExecution: vi.fn(),
+      reportStudentStageCompletion: vi.fn(),
+      reportStudentPracticeStep: vi.fn(),
+      submitStudentTaskExecution: vi.fn()
+    };
+    const store = createTrainingStore({
+      backend,
+      storage: createMemoryStorage({
+        [TRAINING_STORAGE_KEY]: JSON.stringify(seed)
+      })
+    });
+
+    const published = await store.publishLessonRemote(lesson.id);
+
+    expect(startCaptureSession).toHaveBeenCalledOnce();
+    expect(reportRecordedStep).toHaveBeenCalledTimes(
+      lesson.stages.reduce(
+        (total, stage) => total + stage.recordedSteps.length,
+        0
+      )
+    );
+    expect(publishLesson).toHaveBeenCalledOnce();
+    expect(published).toMatchObject({
+      status: 'PUBLISHED',
+      captureSessionId: 'capture-auto-created',
+      teachingPointId: 'point-auto-created'
+    });
+  });
+
+  it('撤回发布时同步撤回后端教学点并恢复可编辑状态', async () => {
+    const seed = createMockTrainingState();
+    const lesson = seed.lessons[0];
+    lesson.status = 'PUBLISHED';
+    lesson.teachingPointId = 'point-published';
+    seed.publishedTasks = seed.publishedTasks.filter(
+      (task) => task.lessonId !== lesson.id
+    );
+    seed.studentTasks = seed.studentTasks.filter(
+      (task) => task.lessonId !== lesson.id
+    );
+    const withdrawLesson = vi.fn(async () => undefined);
+    const backend: BackendTrainingApi = {
+      isEnabled: () => true,
+      listBusinessPlatforms: vi.fn(),
+      createBusinessPlatform: vi.fn(),
+      updateBusinessPlatform: vi.fn(),
+      setBusinessPlatformStatus: vi.fn(),
+      startCaptureSession: vi.fn(),
+      reportRecordedStep: vi.fn(),
+      publishLesson: vi.fn(),
+      withdrawLesson,
+      publishTeachingTask: vi.fn(),
+      prepareInitialDataForPublishedTask: vi.fn(async () => 0),
+      startStudentTaskExecution: vi.fn(),
+      reportStudentStageCompletion: vi.fn(),
+      reportStudentPracticeStep: vi.fn(),
+      submitStudentTaskExecution: vi.fn()
+    };
+    const store = createTrainingStore({
+      backend,
+      storage: createMemoryStorage({
+        [TRAINING_STORAGE_KEY]: JSON.stringify(seed)
+      })
+    });
+
+    const withdrawn = await store.withdrawLessonRemote(lesson.id);
+
+    expect(withdrawLesson).toHaveBeenCalledWith(
+      expect.objectContaining({ teachingPointId: 'point-published' })
+    );
+    expect(withdrawn.status).toBe('RECORDED');
+    expect(withdrawn.teachingPointId).toBeUndefined();
+    expect(withdrawn.publishedAt).toBeUndefined();
+  });
+
   it('未配置分组时按真实学生目录生成学习和练习任务', async () => {
     const seed = createMockTrainingState();
     const lesson = seed.lessons.find(
@@ -397,5 +507,72 @@ describe('训练 Store 后端同步', () => {
     expect(new Set(generatedTasks.map((task) => task.studentId))).toEqual(
       new Set(['student-real-1', 'student-real-2'])
     );
+  });
+
+  it('教师主观评分写入后端并生成学生端可读取的成绩反馈', async () => {
+    const seed = createMockTrainingState();
+    const task = seed.studentTasks.find((candidate) => candidate.status === 'SUBMITTED')!;
+    const published = seed.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    )!;
+    task.remoteExecutionId = 'execution-reviewed-1';
+    published.remoteEvaluationRuleId = 'rule-reviewed-1';
+    const reviewStudentTask = vi.fn(async () => ({
+      id: 'result-reviewed-1',
+      tenantId: 'default',
+      executionId: task.remoteExecutionId!,
+      evaluationRuleId: published.remoteEvaluationRuleId!,
+      autoScore: task.objectiveScore ?? 0,
+      manualScore: 12,
+      finalScore: (task.objectiveScore ?? 0) + 12,
+      evaluationStatus: 'REVIEWED',
+      reviewStatus: 'ADJUSTED',
+      reviewReason: '流程完整，关键操作准确。',
+      status: 'ACTIVE',
+      createTime: '2026-08-13T09:30:00.000Z'
+    }));
+    const backend: BackendTrainingApi = {
+      isEnabled: () => true,
+      listBusinessPlatforms: vi.fn(),
+      createBusinessPlatform: vi.fn(),
+      updateBusinessPlatform: vi.fn(),
+      setBusinessPlatformStatus: vi.fn(),
+      startCaptureSession: vi.fn(),
+      reportRecordedStep: vi.fn(),
+      publishLesson: vi.fn(),
+      publishTeachingTask: vi.fn(),
+      prepareInitialDataForPublishedTask: vi.fn(async () => 0),
+      startStudentTaskExecution: vi.fn(),
+      reportStudentStageCompletion: vi.fn(),
+      reportStudentPracticeStep: vi.fn(),
+      submitStudentTaskExecution: vi.fn(),
+      reviewStudentTask
+    };
+    const store = createTrainingStore({
+      backend,
+      storage: createMemoryStorage({
+        [TRAINING_STORAGE_KEY]: JSON.stringify(seed)
+      }),
+      now: () => '2026-08-13T09:30:00.000Z'
+    });
+
+    const graded = await store.gradeStudentTaskRemote(
+      task.id,
+      12,
+      '流程完整，关键操作准确。'
+    );
+
+    expect(reviewStudentTask).toHaveBeenCalledWith(
+      expect.objectContaining({ remoteEvaluationRuleId: 'rule-reviewed-1' }),
+      expect.objectContaining({ remoteExecutionId: 'execution-reviewed-1' }),
+      12,
+      '流程完整，关键操作准确。'
+    );
+    expect(graded).toMatchObject({
+      status: 'GRADED',
+      subjectiveScore: 12,
+      comment: '流程完整，关键操作准确。',
+      gradedAt: '2026-08-13T09:30:00.000Z'
+    });
   });
 });

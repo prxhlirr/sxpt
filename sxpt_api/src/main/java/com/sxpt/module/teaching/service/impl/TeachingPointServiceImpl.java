@@ -33,6 +33,8 @@ public class TeachingPointServiceImpl implements TeachingPointService {
 
     private static final String DEFAULT_POINT_STATUS = "PUBLISHED";
 
+    private static final String WITHDRAWN_POINT_STATUS = "WITHDRAWN";
+
     private static final String DEFAULT_STATUS = "ACTIVE";
 
     private final TeachingPointMapper teachingPointMapper;
@@ -56,6 +58,31 @@ public class TeachingPointServiceImpl implements TeachingPointService {
         return teachingPoint;
     }
 
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public TeachingPoint withdrawTeachingPoint(String id, String tenantId, String updateBy) {
+        requireText(id);
+        requireText(tenantId);
+        requireText(updateBy);
+        TeachingPoint teachingPoint = teachingPointMapper.selectById(id);
+        if (teachingPoint == null
+                || Boolean.TRUE.equals(teachingPoint.getDeleted())
+                || !tenantId.equals(teachingPoint.getTenantId())) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        if (WITHDRAWN_POINT_STATUS.equals(teachingPoint.getPointStatus())) {
+            return teachingPoint;
+        }
+        if (!DEFAULT_POINT_STATUS.equals(teachingPoint.getPointStatus())) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        teachingPoint.setPointStatus(WITHDRAWN_POINT_STATUS);
+        teachingPoint.setUpdateBy(updateBy);
+        teachingPoint.setUpdateTime(LocalDateTime.now());
+        teachingPointMapper.updateById(teachingPoint);
+        return teachingPoint;
+    }
+
     /**
      * 按原平台查询教学点。
      *
@@ -70,6 +97,7 @@ public class TeachingPointServiceImpl implements TeachingPointService {
         return teachingPointMapper.selectList(new QueryWrapper<TeachingPoint>()
                 .eq("tenant_id", tenantId)
                 .eq("connector_system_id", connectorSystemId)
+                .eq("point_status", DEFAULT_POINT_STATUS)
                 .eq("deleted", Boolean.FALSE)
                 .orderByAsc("point_code", "version_no"));
     }

@@ -373,6 +373,31 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     );
   }
 
+  function resolveLessonCaptureStartUrl(
+    lesson: LessonPlan,
+    platform: BusinessPlatform
+  ): string {
+    const recordedPageUrl = lesson.stages
+      .flatMap((stage) => stage.recordedSteps)
+      .map((step) => step.url?.trim())
+      .find(Boolean);
+    if (recordedPageUrl) return recordedPageUrl;
+
+    const modulePath = getBusinessPlatformModule(
+      platform.id,
+      lesson.businessPlatformModuleId
+    )?.path.trim() ?? '';
+    if (/^[a-z][a-z\d+.-]*:\/\//i.test(modulePath)) return modulePath;
+    if (platform.baseUrl.startsWith('internal://')) {
+      return `${platform.baseUrl.replace(/\/$/, '')}/${modulePath.replace(/^\//, '')}`;
+    }
+    try {
+      return new URL(modulePath, platform.baseUrl).toString();
+    } catch {
+      return `${platform.baseUrl.replace(/\/$/, '')}/${modulePath.replace(/^\//, '')}`;
+    }
+  }
+
   async function runRemote<T>(
     operation: string,
     action: () => Promise<T>
@@ -915,6 +940,19 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return requireLesson(lessonId);
   }
 
+  async function refreshAuthenticatedWorkspace(): Promise<void> {
+    const session = workspaceSession ?? authApi.getSession();
+    if (!session || !backend.isEnabled()) return;
+    const savedState = await workspaceApi.load(session);
+    if (savedState) {
+      replaceState(savedState);
+      state.currentRole = authApi.getPortalRole(session);
+      api.saveState(toPlain(state));
+    }
+    remote.lastError = '';
+    remote.lastSyncedAt = now();
+  }
+
   async function createLessonRemote(
     input: Partial<LessonPlan> = {}
   ): Promise<LessonPlan> {
@@ -1198,6 +1236,51 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return lesson;
   }
 
+  function withdrawLesson(lessonId: string): LessonPlan {
+    const lesson = requireLesson(lessonId);
+    if (lesson.status !== 'PUBLISHED') {
+      throw new Error('只有已发布教案可以撤回发布');
+    }
+    if (state.publishedTasks.some((task) => task.lessonId === lessonId)) {
+      throw new Error('该教案已发布学习、练习或考试任务，暂不能撤回发布');
+    }
+    lesson.status = lesson.stages.some((stage) => stage.recordedSteps.length > 0)
+      ? 'RECORDED'
+      : 'DRAFT';
+    delete lesson.publishedAt;
+    delete lesson.teachingPointId;
+    lesson.updatedAt = now();
+    addActivity(
+      'LESSON_WITHDRAWN',
+      `撤回发布：${lesson.title}`,
+      `教案已恢复为${lesson.status === 'RECORDED' ? '已录制' : '草稿'}状态`
+    );
+    persist();
+    return lesson;
+  }
+
+  async function withdrawLessonRemote(lessonId: string): Promise<LessonPlan> {
+    const lesson = requireLesson(lessonId);
+    if (lesson.status !== 'PUBLISHED') {
+      throw new Error('只有已发布教案可以撤回发布');
+    }
+    if (state.publishedTasks.some((task) => task.lessonId === lessonId)) {
+      throw new Error('该教案已发布学习、练习或考试任务，暂不能撤回发布');
+    }
+    if (backend.isEnabled() && lesson.teachingPointId) {
+      if (!backend.withdrawLesson) {
+        throw new Error('当前后端未提供教案撤回发布接口');
+      }
+      const withdrawRemoteLesson = backend.withdrawLesson;
+      await runRemote('撤回教学点发布', () =>
+        withdrawRemoteLesson(toPlain(lesson))
+      );
+    }
+    const withdrawnLesson = withdrawLesson(lessonId);
+    if (backend.isEnabled()) await saveAuthenticatedWorkspace();
+    return withdrawnLesson;
+  }
+
   function markLessonLectureCompleted(lessonId: string): LessonPlan {
     const lesson = requireLesson(lessonId);
     lesson.lectureCompletedAt = now();
@@ -1290,14 +1373,31 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   }
 
   async function publishLessonRemote(lessonId: string): Promise<LessonPlan> {
-    const lesson = requireLesson(lessonId);
+    let lesson = requireLesson(lessonId);
     const issues = validateLesson(lessonId);
     if (issues.length) throw new TrainingValidationError(issues);
     if (!backend.isEnabled()) return publishLesson(lessonId);
     if (lesson.status === 'PUBLISHED' && lesson.teachingPointId) {
       return lesson;
     }
-    const platform = requireBusinessPlatform(lesson.businessPlatformId);
+    let platform = requireBusinessPlatform(lesson.businessPlatformId);
+
+    const hasStepsAwaitingSync = lesson.stages.some((stage) =>
+      stage.recordedSteps.some(
+        (step) => !step.remoteDraftId || step.syncStatus !== 'SYNCED'
+      )
+    );
+    if (
+      hasStepsAwaitingSync &&
+      (!lesson.captureSessionId || lesson.captureSessionFinished)
+    ) {
+      await startCaptureSessionRemote(
+        lessonId,
+        resolveLessonCaptureStartUrl(lesson, platform)
+      );
+      lesson = requireLesson(lessonId);
+      platform = requireBusinessPlatform(lesson.businessPlatformId);
+    }
 
     for (const stage of lesson.stages) {
       for (const step of stage.recordedSteps) {
@@ -2588,6 +2688,35 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return task;
   }
 
+  async function gradeStudentTaskRemote(
+    taskId: string,
+    subjectiveScore: number,
+    comment: string
+  ): Promise<StudentTask> {
+    const task = requireStudentTask(taskId);
+    const published = state.publishedTasks.find(
+      (candidate) => candidate.id === task.publishedTaskId
+    );
+    if (backend.isEnabled()) {
+      if (!published) throw new Error('未找到该学员任务对应的发布任务');
+      if (!backend.reviewStudentTask) {
+        throw new Error('当前后端未提供教师评分接口');
+      }
+      const reviewStudentTask = backend.reviewStudentTask;
+      await runRemote('保存教师主观评分', () =>
+        reviewStudentTask(
+          toPlain(published),
+          toPlain(task),
+          subjectiveScore,
+          comment.trim()
+        )
+      );
+    }
+    const graded = gradeStudentTask(taskId, subjectiveScore, comment);
+    await flushAuthenticatedWorkspace();
+    return graded;
+  }
+
   function resetDemo(): TrainingState {
     replaceReactiveState(state, api.resetDemo());
     return state;
@@ -2765,6 +2894,8 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     validateLesson,
     publishLesson,
     publishLessonRemote,
+    withdrawLesson,
+    withdrawLessonRemote,
     markLessonLectureCompleted,
     publishLearningAndPracticeRemote,
     startCaptureSessionRemote,
@@ -2790,9 +2921,11 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     restartLearningOrPractice,
     restartStudentAttempt,
     gradeStudentTask,
+    gradeStudentTaskRemote,
     resetDemo,
     clearAuthenticatedWorkspace,
     initializeAuthenticatedWorkspace,
+    refreshAuthenticatedWorkspace,
     saveAuthenticatedWorkspace,
     flushAuthenticatedWorkspace
   };

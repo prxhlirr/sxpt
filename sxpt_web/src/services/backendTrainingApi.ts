@@ -4,6 +4,7 @@ import { courseApi } from '../api/course';
 import type {
   ConnectorSystem,
   Course,
+  EvaluationResult,
   EvaluationRule,
   TaskExecution,
   TeachingTask
@@ -114,6 +115,7 @@ export interface BackendTrainingApi {
     lesson: LessonPlan,
     platform: BusinessPlatform
   ): Promise<PublishedLessonBinding>;
+  withdrawLesson?(lesson: LessonPlan): Promise<void>;
   publishTeachingTask(
     lesson: LessonPlan,
     platform: BusinessPlatform,
@@ -149,6 +151,12 @@ export interface BackendTrainingApi {
   submitStudentTaskExecution(
     studentTask: StudentTask
   ): Promise<TaskExecution>;
+  reviewStudentTask?(
+    publishedTask: PublishedTask,
+    studentTask: StudentTask,
+    subjectiveScore: number,
+    comment: string
+  ): Promise<EvaluationResult>;
 }
 
 export const backendTrainingApi: BackendTrainingApi = {
@@ -353,6 +361,9 @@ export const backendTrainingApi: BackendTrainingApi = {
     const resourceIdsByStepId: Record<string, string> = {};
     for (const stage of lesson.stages) {
       for (const step of stage.recordedSteps) {
+        if (step.remoteResourceId) {
+          resourceIdsByStepId[step.id] = step.remoteResourceId;
+        }
         if (!step.remoteDraftId || step.remoteResourceId) continue;
         const resource = await connectorApi.createResource({
           tenantId: config.tenantId,
@@ -434,6 +445,11 @@ export const backendTrainingApi: BackendTrainingApi = {
       finishedCaptureSession,
       resourceIdsByStepId
     };
+  },
+
+  async withdrawLesson(lesson) {
+    if (!lesson.teachingPointId) return;
+    await teachingApi.withdrawPoint(lesson.teachingPointId);
   },
 
   async publishTeachingTask(lesson, platform, mode, options) {
@@ -734,6 +750,19 @@ export const backendTrainingApi: BackendTrainingApi = {
       getApiConfig().tenantId,
       studentTask.remoteExecutionId
     );
+  },
+
+  async reviewStudentTask(publishedTask, studentTask, subjectiveScore, comment) {
+    if (!studentTask.remoteExecutionId || !publishedTask.remoteEvaluationRuleId) {
+      throw new Error('该练习缺少后端执行或评分规则绑定，不能提交教师评分');
+    }
+    return evaluationApi.review({
+      tenantId: getApiConfig().tenantId,
+      executionId: studentTask.remoteExecutionId,
+      evaluationRuleId: publishedTask.remoteEvaluationRuleId,
+      manualScore: subjectiveScore,
+      reviewReason: comment
+    });
   }
 };
 

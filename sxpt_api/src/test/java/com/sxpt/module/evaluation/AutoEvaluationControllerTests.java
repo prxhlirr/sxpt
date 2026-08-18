@@ -5,6 +5,12 @@ import com.sxpt.common.security.AuthLoginService;
 import com.sxpt.common.security.JwtService;
 import com.sxpt.module.evaluation.entity.EvaluationResult;
 import com.sxpt.module.evaluation.service.AutoEvaluationService;
+import com.sxpt.module.execution.entity.TaskExecution;
+import com.sxpt.module.execution.service.TaskExecutionService;
+import com.sxpt.module.connector.service.ClassicCaseService;
+import com.sxpt.module.user.service.SystemConfigService;
+import com.sxpt.module.user.vo.RuntimeUserContextVO;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +24,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Collections;
 
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
@@ -49,7 +56,10 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         "sxpt.evaluation.auto-evaluation-controller.enabled=true",
         "sxpt.capture.event-controller.enabled=false",
         "sxpt.capture.resource-snapshot-controller.enabled=false",
-        "sxpt.capture.action-draft-controller.enabled=false"
+        "sxpt.capture.action-draft-controller.enabled=false",
+        "sxpt.connector.external-classic-case-controller.enabled=false",
+        "sxpt.origin.adapter-mode=test",
+        "sxpt.origin.local-adapter.enabled=false"
 })
 class AutoEvaluationControllerTests {
 
@@ -63,7 +73,21 @@ class AutoEvaluationControllerTests {
     private AutoEvaluationService autoEvaluationService;
 
     @MockBean
+    private TaskExecutionService taskExecutionService;
+
+    @MockBean
     private AuthLoginService authLoginService;
+
+    @MockBean
+    private ClassicCaseService classicCaseService;
+
+    @MockBean
+    private SystemConfigService systemConfigService;
+
+    @BeforeEach
+    void setUpCurrentUserRuntimeContext() {
+        when(systemConfigService.getRuntimeContextForUser("teacher_001")).thenReturn(buildRuntimeContext());
+    }
 
     /**
      * 验证生成自动评分成功返回评分结果。
@@ -93,6 +117,7 @@ class AutoEvaluationControllerTests {
         assertEquals("tenant_001", requestEntity.getTenantId());
         assertEquals("execution_001", requestEntity.getExecutionId());
         assertEquals("rule_001", requestEntity.getEvaluationRuleId());
+        assertEquals("teacher_001", requestEntity.getCreateBy());
     }
 
     /**
@@ -144,6 +169,7 @@ class AutoEvaluationControllerTests {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"tenantId\":\"tenant_001\",\"executionId\":\"execution_001\","
                                 + "\"evaluationRuleId\":\"rule_001\",\"manualScore\":8.50,"
+                                + "\"reviewReason\":\"流程规范\","
                                 + "\"reviewedBy\":\"forged_teacher\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success", is(true)))
@@ -175,6 +201,27 @@ class AutoEvaluationControllerTests {
                 .andExpect(jsonPath("$.timestamp", notNullValue()));
     }
 
+    @Test
+    void studentCannotReadAnotherStudentsEvaluation() throws Exception {
+        RuntimeUserContextVO studentContext = buildStudentRuntimeContext();
+        when(systemConfigService.getRuntimeContextForUser("student_002")).thenReturn(studentContext);
+        TaskExecution execution = new TaskExecution();
+        execution.setId("execution_001");
+        execution.setTenantId("tenant_001");
+        execution.setStudentId("student_001");
+        when(taskExecutionService.getExecution("tenant_001", "execution_001")).thenReturn(execution);
+
+        mockMvc.perform(get("/api/v1/evaluation/results")
+                        .header("Authorization", "Bearer "
+                                + jwtService.generateToken("student_002", "student002"))
+                        .param("tenantId", "tenant_001")
+                        .param("executionId", "execution_001")
+                        .param("evaluationRuleId", "rule_001"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(false)))
+                .andExpect(jsonPath("$.code", is(403)));
+    }
+
     /**
      * 构造评分结果。
      *
@@ -195,6 +242,35 @@ class AutoEvaluationControllerTests {
         result.setStatus("ACTIVE");
         result.setCreateTime(LocalDateTime.now());
         return result;
+    }
+
+    private RuntimeUserContextVO buildRuntimeContext() {
+        RuntimeUserContextVO context = new RuntimeUserContextVO();
+        RuntimeUserContextVO.UserSummary user = new RuntimeUserContextVO.UserSummary();
+        user.setUserId("teacher_001");
+        user.setTenantId("tenant_001");
+        user.setUsername("teacher001");
+        user.setDisplayName("教师一");
+        user.setUserType("TEACHER");
+        user.setEmployeeNo("T001");
+        context.setUser(user);
+        context.setRoles(Collections.emptyList());
+        context.setOrgs(Collections.emptyList());
+        return context;
+    }
+
+    private RuntimeUserContextVO buildStudentRuntimeContext() {
+        RuntimeUserContextVO context = new RuntimeUserContextVO();
+        RuntimeUserContextVO.UserSummary user = new RuntimeUserContextVO.UserSummary();
+        user.setUserId("student_002");
+        user.setTenantId("tenant_001");
+        user.setUsername("student002");
+        user.setDisplayName("学生二");
+        user.setUserType("STUDENT");
+        context.setUser(user);
+        context.setRoles(Collections.emptyList());
+        context.setOrgs(Collections.emptyList());
+        return context;
     }
 
     /**

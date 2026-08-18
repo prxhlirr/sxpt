@@ -1,9 +1,13 @@
 package com.sxpt.module.execution.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.execution.dto.ReportExecutionTraceRequest;
 import com.sxpt.module.execution.entity.ExecutionTrace;
 import com.sxpt.module.execution.service.ExecutionTraceService;
+import com.sxpt.module.execution.service.TaskExecutionService;
 import com.sxpt.module.execution.vo.ExecutionTraceVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -38,8 +42,12 @@ public class ExecutionTraceController {
 
     private final ExecutionTraceService executionTraceService;
 
-    public ExecutionTraceController(ExecutionTraceService executionTraceService) {
+    private final TaskExecutionService taskExecutionService;
+
+    public ExecutionTraceController(ExecutionTraceService executionTraceService,
+                                    TaskExecutionService taskExecutionService) {
         this.executionTraceService = executionTraceService;
+        this.taskExecutionService = taskExecutionService;
     }
 
     /**
@@ -50,7 +58,13 @@ public class ExecutionTraceController {
      */
     @PostMapping("/report")
     public ApiResult<ExecutionTraceVO> report(@Valid @RequestBody ReportExecutionTraceRequest request) {
-        ExecutionTrace saved = executionTraceService.reportExecutionTrace(toEntity(request));
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        com.sxpt.module.execution.entity.TaskExecution execution = taskExecutionService.getExecution(
+                user.getTenantId(), request.getExecutionId());
+        if (!user.hasAnyRole("ADMIN", "TEACHER") && !user.getUserId().equals(execution.getStudentId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
+        ExecutionTrace saved = executionTraceService.reportExecutionTrace(toEntity(request, user));
         return ApiResult.success(toVO(saved));
     }
 
@@ -64,7 +78,13 @@ public class ExecutionTraceController {
     @GetMapping
     public ApiResult<List<ExecutionTraceVO>> listByExecution(@RequestParam String tenantId,
                                                              @RequestParam String executionId) {
-        return ApiResult.success(toVOList(executionTraceService.listByExecution(tenantId, executionId)));
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        com.sxpt.module.execution.entity.TaskExecution execution = taskExecutionService.getExecution(
+                user.getTenantId(), executionId);
+        if (!user.hasAnyRole("ADMIN", "TEACHER") && !user.getUserId().equals(execution.getStudentId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
+        return ApiResult.success(toVOList(executionTraceService.listByExecution(user.getTenantId(), executionId)));
     }
 
     /**
@@ -73,10 +93,10 @@ public class ExecutionTraceController {
      * @param request SDK 执行轨迹上报请求。
      * @return SDK 执行轨迹实体。
      */
-    private ExecutionTrace toEntity(ReportExecutionTraceRequest request) {
+    private ExecutionTrace toEntity(ReportExecutionTraceRequest request, CurrentUserContext.CurrentUser user) {
         ExecutionTrace executionTrace = new ExecutionTrace();
         executionTrace.setId(generateId());
-        executionTrace.setTenantId(request.getTenantId());
+        executionTrace.setTenantId(user.getTenantId());
         executionTrace.setExecutionId(request.getExecutionId());
         executionTrace.setSdkSessionId(request.getSdkSessionId());
         executionTrace.setClientTraceId(request.getClientTraceId());

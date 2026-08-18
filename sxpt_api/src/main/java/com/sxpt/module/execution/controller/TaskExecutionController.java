@@ -82,9 +82,10 @@ public class TaskExecutionController {
     @GetMapping("/{executionId}")
     public ApiResult<TaskExecutionVO> getExecution(@PathVariable String executionId,
                                                    @RequestParam String tenantId) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
         TaskExecution execution = taskExecutionService.getExecution(
-                CurrentUserContext.getRequiredUser().getTenantId(), executionId);
-        ensureCurrentStudentOwnsExecution(execution);
+                currentUser.getTenantId(), executionId);
+        ensureCanReadExecution(currentUser, execution);
         return ApiResult.success(toVO(execution));
     }
 
@@ -101,8 +102,10 @@ public class TaskExecutionController {
                                                                  @RequestParam String studentId,
                                                                  @RequestParam String taskId) {
         CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        String scopedStudentId = currentUser.hasAnyRole("ADMIN", "TEACHER")
+                ? studentId : currentUser.getUserId();
         return ApiResult.success(toVOList(
-                taskExecutionService.listByStudentAndTask(currentUser.getTenantId(), currentUser.getUserId(), taskId)));
+                taskExecutionService.listByStudentAndTask(currentUser.getTenantId(), scopedStudentId, taskId)));
     }
 
     /**
@@ -132,9 +135,9 @@ public class TaskExecutionController {
      *
      * @param execution 学生任务执行实体。
      */
-    private void ensureCurrentStudentOwnsExecution(TaskExecution execution) {
-        String currentUserId = CurrentUserContext.getRequiredUser().getUserId();
-        if (!currentUserId.equals(execution.getStudentId())) {
+    private void ensureCanReadExecution(CurrentUserContext.CurrentUser currentUser, TaskExecution execution) {
+        if (!currentUser.hasAnyRole("ADMIN", "TEACHER")
+                && !currentUser.getUserId().equals(execution.getStudentId())) {
             throw new BusinessException(ApiResultCode.FORBIDDEN);
         }
     }

@@ -37,6 +37,9 @@ public class ReportPracticeStepResultRequest {
     @Size(max = 64, message = "任务 ID 长度不能超过 64")
     private String taskId;
 
+    @Size(max = 64, message = "教学点 ID 长度不能超过 64")
+    private String teachingPointId;
+
     @NotBlank(message = "任务步骤 ID 不能为空")
     @Size(max = 64, message = "任务步骤 ID 长度不能超过 64")
     private String taskStepId;
@@ -114,6 +117,14 @@ public class ReportPracticeStepResultRequest {
 
     public void setTaskId(String taskId) {
         this.taskId = taskId;
+    }
+
+    public String getTeachingPointId() {
+        return teachingPointId;
+    }
+
+    public void setTeachingPointId(String teachingPointId) {
+        this.teachingPointId = teachingPointId;
     }
 
     public String getTaskStepId() {

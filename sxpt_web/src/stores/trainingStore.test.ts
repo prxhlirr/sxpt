@@ -334,6 +334,36 @@ describe('lesson authoring', () => {
     expect(published.status).toBe('PUBLISHED');
     expect(published.publishedAt).toBe('2026-07-25T08:00:00.000Z');
   });
+
+  it('withdraws a published lesson and blocks withdrawal after tasks are issued', () => {
+    const store = deterministicStore();
+    const lesson = editableLesson(store);
+    const stage = store.addStage(lesson.id, recordedStage('handler', 80));
+    store.updateStage(lesson.id, stage.id, { score: 80 });
+    store.publishLesson(lesson.id);
+
+    const withdrawn = store.withdrawLesson(lesson.id);
+    expect(withdrawn.status).toBe('RECORDED');
+    expect(withdrawn.publishedAt).toBeUndefined();
+
+    store.publishLesson(lesson.id);
+    store.state.publishedTasks.push({
+      id: 'published-task-withdraw-block',
+      lessonId: lesson.id,
+      title: '已下发练习',
+      mode: 'PRACTICE',
+      status: 'SCHEDULED',
+      startAt: '2026-07-26T08:00:00.000Z',
+      endAt: '2026-07-27T08:00:00.000Z',
+      assignedCount: 1,
+      groupCount: 1,
+      dataCount: 1,
+      completedCount: 0
+    });
+    expect(() => store.withdrawLesson(lesson.id)).toThrow(
+      '该教案已发布学习、练习或考试任务，暂不能撤回发布'
+    );
+  });
 });
 
 describe('exam configuration and data pool', () => {

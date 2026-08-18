@@ -427,7 +427,7 @@ DO UPDATE SET
 
 WITH admin_permissions AS (
     SELECT
-        'srp-admin-' || permission.resource_code AS id,
+        'srp-admin-' || md5(permission.id) AS id,
         role.tenant_id,
         role.id AS role_id,
         permission.id AS permission_id
@@ -442,7 +442,7 @@ WITH admin_permissions AS (
 ),
 teacher_permissions AS (
     SELECT
-        'srp-teacher-' || permission.resource_code AS id,
+        'srp-teacher-' || md5(permission.id) AS id,
         role.tenant_id,
         role.id AS role_id,
         permission.id AS permission_id
@@ -468,7 +468,7 @@ teacher_permissions AS (
 ),
 expert_permissions AS (
     SELECT
-        'srp-expert-' || permission.resource_code AS id,
+        'srp-expert-' || md5(permission.id) AS id,
         role.tenant_id,
         role.id AS role_id,
         permission.id AS permission_id
@@ -492,7 +492,7 @@ expert_permissions AS (
 ),
 student_permissions AS (
     SELECT
-        'srp-student-' || permission.resource_code AS id,
+        'srp-student-' || md5(permission.id) AS id,
         role.tenant_id,
         role.id AS role_id,
         permission.id AS permission_id

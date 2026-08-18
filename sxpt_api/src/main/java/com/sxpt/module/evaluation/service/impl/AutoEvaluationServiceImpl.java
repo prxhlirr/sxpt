@@ -14,6 +14,8 @@ import com.sxpt.module.evaluation.mapper.EvaluationResultMapper;
 import com.sxpt.module.evaluation.service.AutoEvaluationService;
 import com.sxpt.module.evaluation.service.EvaluationConfigService;
 import com.sxpt.module.execution.entity.ExecutionTrace;
+import com.sxpt.module.execution.entity.TaskExecution;
+import com.sxpt.module.execution.mapper.TaskExecutionMapper;
 import com.sxpt.module.execution.service.ExecutionTraceService;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
@@ -48,6 +50,8 @@ public class AutoEvaluationServiceImpl implements AutoEvaluationService {
 
     private static final String REVIEWED = "REVIEWED";
 
+    private static final String REVIEW_ADJUSTED = "ADJUSTED";
+
     private static final String DEFAULT_ARCHIVE_STATUS = "NONE";
 
     private static final String DEFAULT_STATUS = "ACTIVE";
@@ -58,6 +62,8 @@ public class AutoEvaluationServiceImpl implements AutoEvaluationService {
 
     private final ExecutionTraceService executionTraceService;
 
+    private final TaskExecutionMapper taskExecutionMapper;
+
     private final List<EvaluationAssertionStrategy> assertionStrategies;
 
     private final ObjectMapper objectMapper;
@@ -65,11 +71,13 @@ public class AutoEvaluationServiceImpl implements AutoEvaluationService {
     public AutoEvaluationServiceImpl(EvaluationResultMapper evaluationResultMapper,
                                      EvaluationConfigService evaluationConfigService,
                                      ExecutionTraceService executionTraceService,
+                                     TaskExecutionMapper taskExecutionMapper,
                                      List<EvaluationAssertionStrategy> assertionStrategies,
                                      ObjectMapper objectMapper) {
         this.evaluationResultMapper = evaluationResultMapper;
         this.evaluationConfigService = evaluationConfigService;
         this.executionTraceService = executionTraceService;
+        this.taskExecutionMapper = taskExecutionMapper;
         this.assertionStrategies = assertionStrategies;
         this.objectMapper = objectMapper;
     }
@@ -136,13 +144,16 @@ public class AutoEvaluationServiceImpl implements AutoEvaluationService {
         BigDecimal manualScore = result.getManualScore().setScale(2, RoundingMode.HALF_UP);
         LocalDateTime now = LocalDateTime.now();
         existed.setManualScore(manualScore);
-        existed.setFinalScore(manualScore);
+        existed.setFinalScore(defaultScore(existed.getAutoScore()).add(manualScore).setScale(2, RoundingMode.HALF_UP));
         existed.setReviewedBy(result.getReviewedBy());
         existed.setReviewedTime(now);
+        existed.setReviewStatus(REVIEW_ADJUSTED);
+        existed.setReviewReason(result.getReviewReason().trim());
         existed.setEvaluationStatus(REVIEWED);
         existed.setUpdateBy(result.getReviewedBy());
         existed.setUpdateTime(now);
         evaluationResultMapper.updateById(existed);
+        refreshExecutionScore(existed, now);
         return existed;
     }
 
@@ -174,9 +185,51 @@ public class AutoEvaluationServiceImpl implements AutoEvaluationService {
         requireText(result.getExecutionId());
         requireText(result.getEvaluationRuleId());
         requireText(result.getReviewedBy());
+        requireText(result.getReviewReason());
         if (result.getManualScore() == null || BigDecimal.ZERO.compareTo(result.getManualScore()) > 0) {
             throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
+    }
+
+    /**
+     * 教师复核后把客观分、主观分和最终分同步回执行主记录，保证教师端与学生端读取同一结果。
+     */
+    private void refreshExecutionScore(EvaluationResult reviewedResult, LocalDateTime now) {
+        List<EvaluationResult> results = evaluationResultMapper.selectList(new QueryWrapper<EvaluationResult>()
+                .eq("tenant_id", reviewedResult.getTenantId())
+                .eq("execution_id", reviewedResult.getExecutionId())
+                .eq("deleted", Boolean.FALSE));
+        BigDecimal autoScore = BigDecimal.ZERO;
+        BigDecimal manualScore = BigDecimal.ZERO;
+        BigDecimal finalScore = BigDecimal.ZERO;
+        boolean includedReviewedResult = false;
+        for (EvaluationResult result : results) {
+            EvaluationResult value = result.getId().equals(reviewedResult.getId()) ? reviewedResult : result;
+            includedReviewedResult = includedReviewedResult || value.getId().equals(reviewedResult.getId());
+            autoScore = autoScore.add(defaultScore(value.getAutoScore()));
+            manualScore = manualScore.add(defaultScore(value.getManualScore()));
+            finalScore = finalScore.add(value.getFinalScore() == null
+                    ? defaultScore(value.getAutoScore()) : value.getFinalScore());
+        }
+        if (!includedReviewedResult) {
+            autoScore = autoScore.add(defaultScore(reviewedResult.getAutoScore()));
+            manualScore = manualScore.add(defaultScore(reviewedResult.getManualScore()));
+            finalScore = finalScore.add(defaultScore(reviewedResult.getFinalScore()));
+        }
+        TaskExecution execution = taskExecutionMapper.selectOne(new QueryWrapper<TaskExecution>()
+                .eq("tenant_id", reviewedResult.getTenantId())
+                .eq("id", reviewedResult.getExecutionId())
+                .eq("deleted", Boolean.FALSE));
+        if (execution == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        execution.setScore(finalScore.setScale(2, RoundingMode.HALF_UP));
+        execution.setResultSummary("评分完成：客观分 " + autoScore.setScale(2, RoundingMode.HALF_UP)
+                + "，教师主观分 " + manualScore.setScale(2, RoundingMode.HALF_UP)
+                + "，最终分 " + execution.getScore() + "。");
+        execution.setUpdateBy(reviewedResult.getReviewedBy());
+        execution.setUpdateTime(now);
+        taskExecutionMapper.updateById(execution);
     }
 
     /**

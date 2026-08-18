@@ -181,6 +181,7 @@ public class PracticeStepResultServiceImpl implements PracticeStepResultService 
         target.setExecutionId(source.getExecutionId());
         target.setStudentId(source.getStudentId());
         target.setTaskId(source.getTaskId());
+        target.setTeachingPointId(source.getTeachingPointId());
         target.setStepCode(source.getStepCode());
         target.setSequenceNo(source.getSequenceNo());
         target.setResultStatus(source.getResultStatus());

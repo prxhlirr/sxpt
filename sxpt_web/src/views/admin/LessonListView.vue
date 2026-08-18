@@ -22,6 +22,7 @@ const moduleFilter = ref('ALL');
 const feedback = ref('');
 const feedbackTone = ref<'success' | 'danger'>('success');
 const publishingLessonId = ref('');
+const withdrawingLessonId = ref('');
 const creatingLesson = ref(false);
 const duplicatingLessonId = ref('');
 const deletingLessonId = ref('');
@@ -226,6 +227,25 @@ async function publishLesson(lesson: LessonPlan) {
     publishingLessonId.value = '';
   }
 }
+
+async function withdrawLesson(lesson: LessonPlan) {
+  if (withdrawingLessonId.value) return;
+  const confirmed = window.confirm(
+    `确认撤回教案“${lesson.title}”的发布吗？撤回后可以继续编辑，再次发布后才能下发新任务。`
+  );
+  if (!confirmed) return;
+  withdrawingLessonId.value = lesson.id;
+  try {
+    await store.withdrawLessonRemote(lesson.id);
+    feedbackTone.value = 'success';
+    feedback.value = `“${lesson.title}”已撤回发布，可继续编辑。`;
+  } catch (error) {
+    feedbackTone.value = 'danger';
+    feedback.value = error instanceof Error ? error.message : '撤回发布失败';
+  } finally {
+    withdrawingLessonId.value = '';
+  }
+}
 </script>
 
 <template>
@@ -346,6 +366,12 @@ async function publishLesson(lesson: LessonPlan) {
                 <div class="row-actions">
                   <RouterLink
                     class="button secondary compact"
+                    :to="{ name: 'lesson-editor', params: { lessonId: lesson.id } }"
+                  >
+                    编辑
+                  </RouterLink>
+                  <RouterLink
+                    class="button secondary compact"
                     :to="{ name: 'lesson-recording', params: { lessonId: lesson.id } }"
                   >
                     查看录制
@@ -363,6 +389,15 @@ async function publishLesson(lesson: LessonPlan) {
                     @click="duplicateLesson(lesson)"
                   >
                     {{ duplicatingLessonId === lesson.id ? '保存中...' : '复制' }}
+                  </button>
+                  <button
+                    v-if="lesson.status === 'PUBLISHED'"
+                    class="compact withdraw-action"
+                    type="button"
+                    :disabled="Boolean(withdrawingLessonId)"
+                    @click="withdrawLesson(lesson)"
+                  >
+                    {{ withdrawingLessonId === lesson.id ? '撤回中…' : '撤回发布' }}
                   </button>
                   <button
                     class="primary compact"
@@ -590,8 +625,9 @@ async function publishLesson(lesson: LessonPlan) {
 
 .row-actions {
   display: flex;
-  min-width: 330px;
+  min-width: 480px;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
 }
 
@@ -627,6 +663,17 @@ async function publishLesson(lesson: LessonPlan) {
 .danger-action:hover:not(:disabled) {
   border-color: #df8d96;
   background: #fff0f2;
+}
+
+.withdraw-action {
+  border-color: #ecd2a1;
+  color: #9a6516;
+  background: #fffaf0;
+}
+
+.withdraw-action:hover:not(:disabled) {
+  border-color: #d9ae61;
+  background: #fff4dd;
 }
 
 .native-dialog {

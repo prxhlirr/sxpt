@@ -165,7 +165,7 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(editor).toContain('businessPlatformModule');
     expect(editor).toContain('configured-business-frame');
     expect(editor).toContain('useEmbeddedBusinessSimulation');
-    expect(editor).toContain('单独打开业务模块');
+    expect(editor).toContain(':src="businessFrameUrl"');
     expect(editor).toContain(
       "['BUSINESS_ACTION', 'SXPT_BUSINESS_ACTION'].includes(messageType)"
     );
@@ -214,22 +214,28 @@ describe('业务平台维护、教案绑定与录制加载', () => {
       ':selector="showStageIntroduction ? undefined : currentStep.selector"'
     );
     expect(playback).toContain('本节点说明');
-    expect(playback).toContain('本教学点说明');
+    expect(playback).toContain('教学点说明');
     expect(playback).toContain('currentStep.teachingText ||');
     expect(playback).toContain('showStageIntroduction');
     expect(playback).toContain('进入本教学点');
-    expect(playback).toContain('class="playback-edge-toolbar"');
-    expect(playback).toContain('class="playback-navigation-drawer"');
+    expect(playback).toContain('class="playback-menu-shell"');
+    expect(playback).toContain('class="playback-menu-rail"');
+    expect(playback).toContain('class="playback-directory-panel"');
+    expect(playback).toContain('class="playback-floating-launcher"');
+    expect(playback).toContain('startLauncherDrag');
+    expect(playback).toContain('sxpt:lesson-playback-launcher');
     expect(playback).toContain("'stage-prompt': showStageIntroduction");
     expect(playback).toContain("'node-prompt': !showStageIntroduction");
     expect(playback).toContain('下一步 →');
     expect(playback).toContain('cyclePromptPosition');
     expect(playback).toContain('AttachmentPanel');
-    expect(playback).toContain('教学点目标与注意事项');
-    expect(playback).toContain('<dt>pageTitle</dt>');
-    expect(playback).toContain('<dt>actionLabel</dt>');
-    expect(playback).toContain('<dt>selector</dt>');
-    expect(playback).toContain('<dt>durationSeconds</dt>');
+    expect(playback).toContain('教学说明');
+    expect(playback).toContain('currentStep.actionLabel');
+    expect(playback).toContain('参考时长');
+    expect(playback).not.toContain('<dt>pageTitle</dt>');
+    expect(playback).not.toContain('<dt>actionLabel</dt>');
+    expect(playback).not.toContain('<dt>selector</dt>');
+    expect(playback).not.toContain('<dt>durationSeconds</dt>');
     expect(recording).toContain("import LessonPlaybackPlayer");
     expect(recording).toContain('<LessonPlaybackPlayer');
     expect(runner).toContain("import LessonPlaybackPlayer");
@@ -259,13 +265,17 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     const businessPage = source('public/lesson-business-capture.html');
 
     expect(editor).toContain('⌖ 元素选择模式');
-    expect(editor).toContain('● 开始录制并选取元素');
+    expect(editor).toContain('＋ 添加节点');
+    expect(editor).not.toContain('authoring-rail-action capture');
     expect(editor).toContain('startElementPick();');
-    expect(editor).toContain('已进入连续元素选择模式');
-    expect(editor).toContain('resumeContinuousElementPick');
-    expect(editor).toContain('连续选取已保持开启');
-    expect(editor).toContain('录制中绑定后会自动继续选取');
-    expect(editor).toContain('class="quick-controls"');
+    expect(editor).toContain('startAddingStep');
+    expect(editor).toContain('pendingNewStepStageId');
+    expect(editor).toContain('选取完成后将创建节点并打开右侧属性配置');
+    expect(editor).toContain('authoring-qq-shell');
+    expect(editor).toContain('authoring-floating-launcher');
+    expect(editor).toContain('handleAuthoringLauncherPointerMove');
+    expect(editor).toContain('persistAuthoringLauncherPosition');
+    expect(editor).toContain('authoring-right-drawer');
     expect(editor).toContain('closeAuthoringDrawers');
     expect(editor).toContain('cyclePickerToolbarPosition');
     expect(editor).toContain('换个角落');
@@ -275,9 +285,9 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(editor).toContain('selectorCandidates: payload.selectorCandidates');
     expect(editor).toContain('⌖ 重新选择元素');
     expect(editor).toContain('authoringLaunchContextKey');
-    expect(editor).toContain('watch(\n  authoringLaunchContextKey');
+    expect(editor).toMatch(/watch\(\s*authoringLaunchContextKey/);
     expect(editor).toContain('@frame-load="handleBusinessFrameLoad"');
-    expect(editor).toContain('元素连续选取仍保持开启');
+    expect(editor).toContain('业务页面已恢复，请继续选择要绑定的目标元素');
     expect(captureFrame).toContain("post({ type: 'SXPT_START_ELEMENT_PICK' })");
     expect(captureFrame).toContain("post({ type: 'START_ELEMENT_PICK' })");
     expect(captureFrame).toContain("message.type === 'ELEMENT_PICKED'");
@@ -329,6 +339,22 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(store).toContain('syncPracticeStagesFromEvidence');
     expect(store).toContain("task.mode === 'PRACTICE'");
     expect(store).toContain('stage.visibility.PRACTICE &&');
+  });
+
+  it('教师端可查看学生练习操作点并把主观评分同步到后端', () => {
+    const review = source('src/views/teacher/TeacherReviewView.vue');
+    const store = source('src/stores/trainingStore.ts');
+    const backend = source('src/services/backendTrainingApi.ts');
+    const workspace = source('src/services/trainingApi.ts');
+    const evaluation = source('src/api/evaluation.ts');
+
+    expect(review).toContain('学生练习操作记录');
+    expect(review).toContain('selectedPracticeSteps');
+    expect(review).toContain('gradeStudentTaskRemote');
+    expect(workspace).toContain('practiceStepResults: Array.isArray');
+    expect(store).toContain('reviewStudentTask(');
+    expect(backend).toContain('evaluationApi.review(');
+    expect(evaluation).toContain("url: '/evaluation/results/review'");
   });
 
   it('考试界面仅保留可隐藏的任务说明浮栏', () => {

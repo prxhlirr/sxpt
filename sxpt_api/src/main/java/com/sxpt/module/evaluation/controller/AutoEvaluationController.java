@@ -1,12 +1,16 @@
 package com.sxpt.module.evaluation.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.api.ApiResultCode;
+import com.sxpt.common.exception.BusinessException;
 import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.evaluation.dto.GenerateAutoEvaluationRequest;
 import com.sxpt.module.evaluation.dto.ReviewEvaluationResultRequest;
 import com.sxpt.module.evaluation.entity.EvaluationResult;
 import com.sxpt.module.evaluation.service.AutoEvaluationService;
 import com.sxpt.module.evaluation.vo.EvaluationResultVO;
+import com.sxpt.module.execution.entity.TaskExecution;
+import com.sxpt.module.execution.service.TaskExecutionService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,9 +40,12 @@ import java.util.UUID;
 public class AutoEvaluationController {
 
     private final AutoEvaluationService autoEvaluationService;
+    private final TaskExecutionService taskExecutionService;
 
-    public AutoEvaluationController(AutoEvaluationService autoEvaluationService) {
+    public AutoEvaluationController(AutoEvaluationService autoEvaluationService,
+                                    TaskExecutionService taskExecutionService) {
         this.autoEvaluationService = autoEvaluationService;
+        this.taskExecutionService = taskExecutionService;
     }
 
     /**
@@ -49,6 +56,8 @@ public class AutoEvaluationController {
      */
     @PostMapping("/auto-generate")
     public ApiResult<EvaluationResultVO> generate(@Valid @RequestBody GenerateAutoEvaluationRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        requireExecutionAccess(user, request.getExecutionId());
         EvaluationResult saved = autoEvaluationService.generateAutoEvaluation(toEntity(request));
         return ApiResult.success(toVO(saved));
     }
@@ -65,8 +74,10 @@ public class AutoEvaluationController {
     public ApiResult<EvaluationResultVO> getResult(@RequestParam String tenantId,
                                                    @RequestParam String executionId,
                                                    @RequestParam String evaluationRuleId) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        requireExecutionAccess(user, executionId);
         return ApiResult.success(toVO(autoEvaluationService.getEvaluationResult(
-                tenantId, executionId, evaluationRuleId)));
+                user.getTenantId(), executionId, evaluationRuleId)));
     }
 
     /**
@@ -77,6 +88,10 @@ public class AutoEvaluationController {
      */
     @PostMapping("/review")
     public ApiResult<EvaluationResultVO> review(@Valid @RequestBody ReviewEvaluationResultRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
+        if (!user.hasAnyRole("ADMIN", "TEACHER")) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
         EvaluationResult saved = autoEvaluationService.reviewEvaluationResult(toReviewEntity(request));
         return ApiResult.success(toVO(saved));
     }
@@ -88,13 +103,24 @@ public class AutoEvaluationController {
      * @return 评分结果实体。
      */
     private EvaluationResult toEntity(GenerateAutoEvaluationRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
         EvaluationResult result = new EvaluationResult();
         result.setId(generateId());
-        result.setTenantId(request.getTenantId());
+        result.setTenantId(user.getTenantId());
         result.setExecutionId(request.getExecutionId());
         result.setEvaluationRuleId(request.getEvaluationRuleId());
-        result.setCreateBy(request.getCreateBy());
+        result.setCreateBy(user.getUserId());
         return result;
+    }
+
+    private void requireExecutionAccess(CurrentUserContext.CurrentUser user, String executionId) {
+        if (user.hasAnyRole("ADMIN", "TEACHER")) {
+            return;
+        }
+        TaskExecution execution = taskExecutionService.getExecution(user.getTenantId(), executionId);
+        if (!user.getUserId().equals(execution.getStudentId())) {
+            throw new BusinessException(ApiResultCode.FORBIDDEN);
+        }
     }
 
     /**
@@ -104,12 +130,14 @@ public class AutoEvaluationController {
      * @return 仅包含复核范围和人工分的实体。
      */
     private EvaluationResult toReviewEntity(ReviewEvaluationResultRequest request) {
+        CurrentUserContext.CurrentUser user = CurrentUserContext.getRequiredUser();
         EvaluationResult result = new EvaluationResult();
-        result.setTenantId(request.getTenantId());
+        result.setTenantId(user.getTenantId());
         result.setExecutionId(request.getExecutionId());
         result.setEvaluationRuleId(request.getEvaluationRuleId());
         result.setManualScore(request.getManualScore());
-        result.setReviewedBy(CurrentUserContext.getRequiredUser().getUserId());
+        result.setReviewReason(request.getReviewReason().trim());
+        result.setReviewedBy(user.getUserId());
         return result;
     }
 
@@ -132,6 +160,8 @@ public class AutoEvaluationController {
         vo.setEvidenceJson(result.getEvidenceJson());
         vo.setReviewedBy(result.getReviewedBy());
         vo.setReviewedTime(result.getReviewedTime());
+        vo.setReviewStatus(result.getReviewStatus());
+        vo.setReviewReason(result.getReviewReason());
         vo.setArchiveStatus(result.getArchiveStatus());
         vo.setArchiveTime(result.getArchiveTime());
         vo.setExpireTime(result.getExpireTime());

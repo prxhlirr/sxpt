@@ -656,7 +656,9 @@ INSERT INTO evaluation_rule (
      90.00, '按创建、填写、提交和结果确认动作计算练习过程分。', 'seed', now(), 'seed', now(), 'ACTIVE', false),
     ('eval-rule-purchase-exam-v1', 'demo-tenant', 'EVAL_PURCHASE_EXAM', '采购申请考试评分规则', 1, 'task-purchase-exam-demo', 'tp-purchase-apply-v1',
      100.00, '按考试静默采集证据和原平台结果校验计算得分。', 'seed', now(), 'seed', now(), 'ACTIVE', false)
-ON CONFLICT (tenant_id, rule_code, version_no) WHERE deleted = false
+-- 历史自动评分规则可能复用 rule_code；演示种子具有稳定主键，按主键幂等更新，
+-- 避免依赖已被历史重复数据阻挡的业务唯一索引。
+ON CONFLICT (id)
 DO UPDATE SET
     rule_name = EXCLUDED.rule_name,
     task_id = EXCLUDED.task_id,
@@ -665,7 +667,8 @@ DO UPDATE SET
     description = EXCLUDED.description,
     update_by = 'seed',
     update_time = now(),
-    status = 'ACTIVE';
+    status = 'ACTIVE',
+    deleted = false;
 
 INSERT INTO evaluation_item (
     id, tenant_id, evaluation_rule_id, teaching_point_id, item_code, item_name,

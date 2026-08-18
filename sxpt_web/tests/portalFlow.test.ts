@@ -12,6 +12,7 @@ import StudentTaskRunnerView from '../src/views/student/StudentTaskRunnerView.vu
 import StudentTasksView from '../src/views/student/StudentTasksView.vue';
 import TeacherDashboardView from '../src/views/teacher/TeacherDashboardView.vue';
 import TeacherReviewView from '../src/views/teacher/TeacherReviewView.vue';
+import { useTrainingStore } from '../src/stores/trainingStore';
 
 async function renderRoute(
   component: Component,
@@ -58,6 +59,10 @@ describe('three-portal workflow rendering', () => {
     expect(html).toContain('主观评分与反馈');
     expect(html).toContain('系统客观分');
     expect(html).toContain('教师主观分');
+    expect(html).toContain('result-archive-card');
+    expect(html).toContain('开始评阅');
+    expect(html).toContain('课程切换');
+    expect(html).toContain('全部课程');
   });
 
   it('renders student tasks with multi-role assignments', async () => {
@@ -65,6 +70,60 @@ describe('three-portal workflow rendering', () => {
     expect(html).toContain('我的业务角色');
     expect(html).toContain('经办组');
     expect(html).toContain('归档组');
+  });
+
+  it('merges learning and practice assignments into one lesson card', async () => {
+    const store = useTrainingStore();
+    const originalTasks = [...store.state.studentTasks];
+    const baseTask = originalTasks[0];
+    expect(baseTask).toBeTruthy();
+    if (!baseTask) return;
+    const trainingBase = {
+      ...baseTask,
+      studentId: baseTask.studentId,
+      lessonId: baseTask.lessonId,
+      status: 'TODO' as const,
+      currentStageIndex: 0,
+      completedStageIds: [],
+      completedPracticeStepIds: [],
+      practiceStepResults: [],
+      objectiveScore: undefined,
+      subjectiveScore: undefined,
+      submittedAt: undefined,
+      gradedAt: undefined
+    };
+    store.state.studentTasks.unshift(
+      {
+        ...trainingBase,
+        id: 'merged-practice-task',
+        publishedTaskId: 'merged-practice-publication',
+        title: '合并展示教案｜流程练习',
+        mode: 'PRACTICE'
+      },
+      {
+        ...trainingBase,
+        id: 'merged-learning-task',
+        publishedTaskId: 'merged-learning-publication',
+        title: '合并展示教案｜流程学习',
+        mode: 'LEARNING'
+      }
+    );
+
+    try {
+      const html = await renderRoute(StudentTasksView, '/student/tasks');
+      expect(html.split('course-card"').length - 1).toBe(1);
+      expect(html).toContain('学习任务');
+      expect(html).toContain('练习任务');
+      expect(html).toContain('开始学习');
+      expect(html).toContain('开始练习');
+      expect(html).not.toContain('MY TRAINING DESK');
+    } finally {
+      store.state.studentTasks.splice(
+        0,
+        store.state.studentTasks.length,
+        ...originalTasks
+      );
+    }
   });
 
   it('renders the seeded exam with only a hideable task description overlay', async () => {
@@ -85,5 +144,9 @@ describe('three-portal workflow rendering', () => {
     expect(html).toContain('成绩与教师反馈');
     expect(html).toContain('客观 + 主观');
     expect(html).toContain('无法可靠绑定具体业务数据');
+    expect(html).toContain('result-archive-card');
+    expect(html).toContain('全部成绩');
+    expect(html).toContain('课程切换');
+    expect(html).toContain('选择课程');
   });
 });

@@ -127,6 +127,25 @@ class TeachingPointControllerTests {
         verify(teachingPointService).listByConnector("tenant_001", "connector_001");
     }
 
+    @Test
+    void withdrawShouldUseAuthenticatedTenantAndUser() throws Exception {
+        TeachingPoint withdrawn = buildSavedTeachingPoint();
+        withdrawn.setPointStatus("WITHDRAWN");
+        when(teachingPointService.withdrawTeachingPoint(
+                "tp_001", "tenant_001", "admin_001"))
+                .thenReturn(withdrawn);
+
+        mockMvc.perform(post("/api/v1/teaching/points/tp_001/withdraw")
+                        .header("Authorization", bearerToken()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success", is(true)))
+                .andExpect(jsonPath("$.result.id", is("tp_001")))
+                .andExpect(jsonPath("$.result.pointStatus", is("WITHDRAWN")));
+
+        verify(teachingPointService).withdrawTeachingPoint(
+                "tp_001", "tenant_001", "admin_001");
+    }
+
     /**
      * 构造 Service 返回的已发布教学点。
      *
@@ -165,6 +184,7 @@ class TeachingPointControllerTests {
      * @return Bearer Token 请求头值。
      */
     private String bearerToken() {
-        return "Bearer " + jwtService.generateToken("admin_001", "admin");
+        return "Bearer " + jwtService.generateToken(
+                "admin_001", "admin", "tenant_001", Collections.singletonList("ADMIN"));
     }
 }

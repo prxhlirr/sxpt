@@ -1,6 +1,7 @@
 package com.sxpt.module.teaching.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.CurrentUserContext;
 import com.sxpt.module.teaching.dto.CreateTeachingPointRequest;
 import com.sxpt.module.teaching.entity.TeachingPoint;
 import com.sxpt.module.teaching.service.TeachingPointService;
@@ -8,6 +9,7 @@ import com.sxpt.module.teaching.vo.TeachingPointVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -51,6 +53,22 @@ public class TeachingPointController {
     public ApiResult<TeachingPointVO> create(@Valid @RequestBody CreateTeachingPointRequest request) {
         TeachingPoint saved = teachingPointService.createTeachingPoint(toEntity(request));
         return ApiResult.success(toVO(saved));
+    }
+
+    /**
+     * 撤回当前租户内已发布的教学点。
+     *
+     * @param id 教学点 ID。
+     * @return 已撤回的教学点。
+     */
+    @PostMapping("/{id}/withdraw")
+    public ApiResult<TeachingPointVO> withdraw(@PathVariable String id) {
+        CurrentUserContext.CurrentUser currentUser = CurrentUserContext.getRequiredUser();
+        TeachingPoint withdrawn = teachingPointService.withdrawTeachingPoint(
+                id,
+                currentUser.getTenantId(),
+                currentUser.getUserId());
+        return ApiResult.success(toVO(withdrawn));
     }
 
     /**

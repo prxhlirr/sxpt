@@ -1,5 +1,9 @@
 import { apiRequest } from './http';
-import type { EvaluationItem, EvaluationRule } from './contracts';
+import type {
+  EvaluationItem,
+  EvaluationResult,
+  EvaluationRule
+} from './contracts';
 
 export const evaluationApi = {
   createRule(request: {
@@ -56,6 +60,28 @@ export const evaluationApi = {
       method: 'GET',
       url: '/evaluation/config/items',
       params: { tenantId, evaluationRuleId }
+    });
+  },
+
+  getResult(tenantId: string, executionId: string, evaluationRuleId: string) {
+    return apiRequest<EvaluationResult>({
+      method: 'GET',
+      url: '/evaluation/results',
+      params: { tenantId, executionId, evaluationRuleId }
+    });
+  },
+
+  review(request: {
+    tenantId: string;
+    executionId: string;
+    evaluationRuleId: string;
+    manualScore: number;
+    reviewReason: string;
+  }) {
+    return apiRequest<EvaluationResult>({
+      method: 'POST',
+      url: '/evaluation/results/review',
+      data: request
     });
   }
 };

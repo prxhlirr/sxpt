@@ -140,6 +140,7 @@ class TaskExecutionServiceImplTests {
         assertEquals("execution_001", attempt.getExecutionId());
         assertEquals("student_001", attempt.getStudentId());
         assertEquals("task_001", attempt.getTaskId());
+        assertEquals("tp_001", attempt.getTeachingPointId());
         assertEquals(saved.getStartTime(), attempt.getStartTime());
         assertEquals("student_001", attempt.getCreateBy());
         assertEquals("student_001", attempt.getUpdateBy());
@@ -256,6 +257,7 @@ class TaskExecutionServiceImplTests {
         assertEquals("execution_001", stepResult.getExecutionId());
         assertEquals("student_001", stepResult.getStudentId());
         assertEquals("task_001", stepResult.getTaskId());
+        assertEquals("tp_001", stepResult.getTeachingPointId());
         assertEquals("step_001", stepResult.getTaskStepId());
         assertEquals("STEP_SUBMIT", stepResult.getStepCode());
         assertEquals(Long.valueOf(1), stepResult.getSequenceNo());

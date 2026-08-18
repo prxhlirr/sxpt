@@ -74,15 +74,16 @@ const currentStageStepEntries = computed(() =>
 <style scoped>
 .playback-navigation-tree {
   display: grid;
-  gap: 7px;
+  min-height: 0;
+  gap: 9px;
   overflow-y: auto;
-  padding: 12px;
+  padding: 14px;
 }
 
 .playback-tree-item {
-  //overflow: hidden;
+  overflow: hidden;
   border: 1px solid #e5e9f0;
-  border-radius: 10px;
+  border-radius: 14px;
   background: #fff;
 }
 
@@ -94,11 +95,12 @@ const currentStageStepEntries = computed(() =>
 .playback-tree-stage {
   display: grid;
   width: 100%;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
+  min-height: 64px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: 0;
-  padding: 9px;
+  padding: 10px 12px;
   color: #556177;
   text-align: left;
   background: transparent;
@@ -113,12 +115,12 @@ const currentStageStepEntries = computed(() =>
 
 .playback-tree-stage span {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   place-items: center;
   color: #fff;
-  font-size: 9px;
+  font-size: 14px;
   background: #8a93a4;
 }
 
@@ -129,32 +131,34 @@ const currentStageStepEntries = computed(() =>
 .playback-tree-stage strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 16px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .playback-tree-stage small {
   color: #9199a8;
-  font-size: 9px;
+  font-size: 14px;
 }
 
 .playback-tree-nodes {
   display: grid;
-  gap: 5px;
-  padding: 0 8px 8px 42px;
+  gap: 6px;
+  padding: 0 10px 11px 52px;
 }
 
 .playback-tree-nodes button {
   overflow: hidden;
   border: 0;
-  border-radius: 7px;
-  padding: 7px 9px;
+  min-height: 42px;
+  border-radius: 9px;
+  padding: 9px 11px;
   color: #68758a;
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
   background: #fff;
+  font-size: 15px;
   cursor: pointer;
 }
 

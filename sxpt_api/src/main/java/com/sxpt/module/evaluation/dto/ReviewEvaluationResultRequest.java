@@ -37,6 +37,10 @@ public class ReviewEvaluationResultRequest {
     @Digits(integer = 8, fraction = 2, message = "人工分最多保留 2 位小数")
     private BigDecimal manualScore;
 
+    @NotBlank(message = "教师评语不能为空")
+    @Size(max = 512, message = "教师评语长度不能超过 512")
+    private String reviewReason;
+
     @Size(max = 64, message = "复核人长度不能超过 64")
     private String reviewedBy;
 
@@ -70,6 +74,14 @@ public class ReviewEvaluationResultRequest {
 
     public void setManualScore(BigDecimal manualScore) {
         this.manualScore = manualScore;
+    }
+
+    public String getReviewReason() {
+        return reviewReason;
+    }
+
+    public void setReviewReason(String reviewReason) {
+        this.reviewReason = reviewReason;
     }
 
     public String getReviewedBy() {

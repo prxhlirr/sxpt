@@ -68,6 +68,35 @@ class TeachingPointServiceImplTests {
         verify(mapper, times(0)).insert(teachingPoint);
     }
 
+    @Test
+    void withdrawTeachingPointShouldUpdatePublishedPoint() {
+        TeachingPoint teachingPoint = buildValidTeachingPoint();
+        teachingPoint.setPointStatus("PUBLISHED");
+        teachingPoint.setDeleted(Boolean.FALSE);
+        when(mapper.selectById("tp_001")).thenReturn(teachingPoint);
+
+        TeachingPoint withdrawn = service.withdrawTeachingPoint(
+                "tp_001", "tenant_001", "teacher_001");
+
+        assertSame(teachingPoint, withdrawn);
+        assertEquals("WITHDRAWN", withdrawn.getPointStatus());
+        assertEquals("teacher_001", withdrawn.getUpdateBy());
+        assertNotNull(withdrawn.getUpdateTime());
+        verify(mapper).updateById(teachingPoint);
+    }
+
+    @Test
+    void withdrawTeachingPointShouldRejectAnotherTenant() {
+        TeachingPoint teachingPoint = buildValidTeachingPoint();
+        teachingPoint.setPointStatus("PUBLISHED");
+        teachingPoint.setDeleted(Boolean.FALSE);
+        when(mapper.selectById("tp_001")).thenReturn(teachingPoint);
+
+        assertThrows(BusinessException.class, () ->
+                service.withdrawTeachingPoint("tp_001", "tenant_other", "teacher_001"));
+        verify(mapper, times(0)).updateById(teachingPoint);
+    }
+
     /**
      * 校验按原平台查询教学点时返回 Mapper 结果。
      */
