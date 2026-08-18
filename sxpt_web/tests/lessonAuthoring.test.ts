@@ -133,4 +133,18 @@ describe('后台教案编排页面', () => {
     expect(editor).toContain('await store.syncBusinessPlatforms()');
     expect(editor).toContain('basicForm.businessPlatformModuleId');
   });
+
+  it('教案设置可从后端案例库选择并锁定 OA 经典案例版本', () => {
+    const editor = source('src/views/admin/LessonEditorView.vue');
+    const store = source('src/stores/trainingStore.ts');
+
+    expect(editor).toContain('listLessonPlanClassicCaseOptions');
+    expect(editor).toContain('经典案例');
+    expect(editor).toContain('锁定版本');
+    expect(editor).toContain('REPLAY_CASE');
+    expect(editor).toContain('按格式生成 Demo');
+    expect(editor).toContain('store.updateLessonRemote');
+    expect(store).toContain('validateLessonPlanClassicCaseConfig');
+    expect(store).toContain('classicCaseConfig');
+  });
 });

@@ -11,6 +11,10 @@ import MetricCard from '../../components/ui/MetricCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import type { LessonPlan, LessonStatus } from '../../domain/models';
+import {
+  dataPrepareApi,
+  type LessonPlanClassicCaseOption
+} from '../../services/trainingApi';
 import { useTrainingStore } from '../../stores/trainingStore';
 
 const store = useTrainingStore();
@@ -31,8 +35,15 @@ const createForm = reactive({
   title: '',
   businessPlatformId: '',
   businessPlatformModuleId: '',
+  generationSource: 'NORMAL' as 'NORMAL' | 'CLASSIC_CASE',
+  classicCaseId: '',
+  caseVersionId: '',
+  generationMode: 'REPLAY_CASE' as 'REPLAY_CASE' | 'FORMAT_DEMO',
   description: ''
 });
+const classicCaseOptions = ref<LessonPlanClassicCaseOption[]>([]);
+const classicCaseLoading = ref(false);
+const classicCaseError = ref('');
 
 const statusLabels: Record<LessonStatus, string> = {
   DRAFT: '草稿',
@@ -67,6 +78,23 @@ const selectedCreateModule = computed(() =>
     createForm.businessPlatformModuleId
   )
 );
+const classicCaseChoices = computed(() => {
+  const result = new Map<string, LessonPlanClassicCaseOption>();
+  classicCaseOptions.value.forEach((option) => {
+    if (!result.has(option.classicCaseId)) result.set(option.classicCaseId, option);
+  });
+  return [...result.values()];
+});
+const selectedClassicCaseVersions = computed(() =>
+  classicCaseOptions.value.filter(
+    (option) => option.classicCaseId === createForm.classicCaseId
+  )
+);
+const selectedClassicCaseOption = computed(() =>
+  selectedClassicCaseVersions.value.find(
+    (option) => option.caseVersionId === createForm.caseVersionId
+  )
+);
 
 watch(
   () => createForm.businessPlatformId,
@@ -82,6 +110,62 @@ watch(
     }
   }
 );
+
+watch(
+  () => [
+    createForm.generationSource,
+    createForm.businessPlatformId,
+    createForm.businessPlatformModuleId
+  ],
+  () => {
+    createForm.classicCaseId = '';
+    createForm.caseVersionId = '';
+    classicCaseOptions.value = [];
+    classicCaseError.value = '';
+    if (createForm.generationSource === 'CLASSIC_CASE') {
+      void loadClassicCaseOptions();
+    }
+  }
+);
+
+watch(
+  () => createForm.classicCaseId,
+  () => {
+    const option = selectedClassicCaseVersions.value[0];
+    createForm.caseVersionId = option?.caseVersionId ?? '';
+    createForm.generationMode = option?.defaultGenerationMode ?? 'REPLAY_CASE';
+  }
+);
+
+watch(
+  () => createForm.caseVersionId,
+  () => {
+    const option = selectedClassicCaseOption.value;
+    if (option && !option.supportedGenerationModes.includes(createForm.generationMode)) {
+      createForm.generationMode = option.defaultGenerationMode;
+    }
+  }
+);
+
+async function loadClassicCaseOptions() {
+  if (
+    !store.remote.enabled ||
+    !selectedCreateModule.value?.code ||
+    !createForm.businessPlatformId
+  ) return;
+  classicCaseLoading.value = true;
+  classicCaseError.value = '';
+  try {
+    classicCaseOptions.value = await dataPrepareApi.listLessonPlanClassicCaseOptions({
+      businessModuleCode: selectedCreateModule.value.code,
+      connectorSystemId: createForm.businessPlatformId
+    });
+  } catch (error) {
+    classicCaseError.value = error instanceof Error ? error.message : '经典案例加载失败';
+  } finally {
+    classicCaseLoading.value = false;
+  }
+}
 
 const filteredLessons = computed(() => {
   const query = keyword.value.trim().toLowerCase();
@@ -137,6 +221,12 @@ function openCreateDialog() {
     enabledBusinessPlatforms.value[0]?.id ?? '';
   createForm.businessPlatformModuleId =
     enabledBusinessPlatformModules.value[0]?.id ?? '';
+  createForm.generationSource = 'NORMAL';
+  createForm.classicCaseId = '';
+  createForm.caseVersionId = '';
+  createForm.generationMode = 'REPLAY_CASE';
+  classicCaseOptions.value = [];
+  classicCaseError.value = '';
   createForm.description = '';
   createDialog.value?.showModal();
 }
@@ -151,10 +241,14 @@ async function createLesson() {
     !createForm.code.trim() ||
     !createForm.title.trim() ||
     !createForm.businessPlatformId ||
-    !createForm.businessPlatformModuleId
+    !createForm.businessPlatformModuleId ||
+    (createForm.generationSource === 'CLASSIC_CASE' &&
+      (!selectedClassicCaseOption.value || !createForm.generationMode))
   ) {
     feedbackTone.value = 'danger';
-    feedback.value = '请填写教案编号和名称，并选择业务平台及平台模块。';
+    feedback.value = createForm.generationSource === 'CLASSIC_CASE'
+      ? '请填写教案信息，并选择可用的经典案例、版本和生成模式。'
+      : '请填写教案编号和名称，并选择业务平台及平台模块。';
     return;
   }
   creatingLesson.value = true;
@@ -165,6 +259,18 @@ async function createLesson() {
       moduleName: selectedCreateModule.value?.name,
       businessPlatformId: createForm.businessPlatformId,
       businessPlatformModuleId: createForm.businessPlatformModuleId,
+      generationSource: createForm.generationSource,
+      classicCaseConfig:
+        createForm.generationSource === 'CLASSIC_CASE' && selectedClassicCaseOption.value
+          ? {
+              connectorSystemId: selectedClassicCaseOption.value.connectorSystemId,
+              classicCaseId: selectedClassicCaseOption.value.classicCaseId,
+              caseCode: selectedClassicCaseOption.value.caseCode,
+              caseName: selectedClassicCaseOption.value.caseName,
+              caseVersionId: selectedClassicCaseOption.value.caseVersionId,
+              generationMode: createForm.generationMode
+            }
+          : undefined,
       description: createForm.description.trim()
     });
     closeCreateDialog();
@@ -456,6 +562,60 @@ async function withdrawLesson(lesson: LessonPlan) {
               <span>教案编号 *</span>
               <input v-model="createForm.code" required />
             </label>
+            <fieldset class="wide generation-source-fieldset">
+              <legend>数据生成方式 *</legend>
+              <div class="generation-source-grid">
+                <label :class="['generation-source-card', { selected: createForm.generationSource === 'NORMAL' }]">
+                  <input v-model="createForm.generationSource" type="radio" value="NORMAL" />
+                  <span><strong>普通数据</strong><small>按模块造数模板生成练习数据</small></span>
+                </label>
+                <label :class="['generation-source-card', { selected: createForm.generationSource === 'CLASSIC_CASE' }]">
+                  <input v-model="createForm.generationSource" type="radio" value="CLASSIC_CASE" />
+                  <span><strong>经典案例</strong><small>锁定 OA 已推送的脱敏案例版本</small></span>
+                </label>
+              </div>
+            </fieldset>
+            <template v-if="createForm.generationSource === 'CLASSIC_CASE'">
+              <label class="wide">
+                <span>经典案例 *</span>
+                <select v-model="createForm.classicCaseId" :disabled="classicCaseLoading" required>
+                  <option value="" disabled>{{ classicCaseLoading ? '正在加载案例' : '请选择可用经典案例' }}</option>
+                  <option v-for="option in classicCaseChoices" :key="option.classicCaseId" :value="option.classicCaseId">
+                    {{ option.caseName }} · {{ option.caseCode }}
+                  </option>
+                </select>
+                <small v-if="classicCaseError" class="field-warning">{{ classicCaseError }}</small>
+                <small v-else-if="!classicCaseLoading && !classicCaseChoices.length" class="field-warning">
+                  当前平台模块暂无可用经典案例，请先由 OA 推送并审核案例。
+                </small>
+              </label>
+              <label>
+                <span>案例版本 *</span>
+                <select v-model="createForm.caseVersionId" :disabled="!createForm.classicCaseId" required>
+                  <option value="" disabled>请选择锁定版本</option>
+                  <option v-for="option in selectedClassicCaseVersions" :key="option.caseVersionId" :value="option.caseVersionId">
+                    V{{ option.versionNo }} · {{ option.caseVersionId }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                <span>生成模式 *</span>
+                <select v-model="createForm.generationMode" :disabled="!selectedClassicCaseOption" required>
+                  <option
+                    v-for="mode in selectedClassicCaseOption?.supportedGenerationModes ?? []"
+                    :key="mode"
+                    :value="mode"
+                  >
+                    {{ mode === 'REPLAY_CASE' ? '复刻脱敏案例' : '按格式生成 Demo' }}
+                  </option>
+                </select>
+              </label>
+              <div v-if="selectedClassicCaseOption" class="wide classic-case-summary">
+                <strong>{{ selectedClassicCaseOption.caseName }}</strong>
+                <span>{{ selectedClassicCaseOption.summary || '暂无案例摘要' }}</span>
+                <small>保存后锁定版本 {{ selectedClassicCaseOption.caseVersionId }}；浏览器不会提交完整案例内容。</small>
+              </div>
+            </template>
             <label class="wide">
               <span>业务平台 *</span>
               <select v-model="createForm.businessPlatformId" required>
@@ -553,6 +713,59 @@ async function withdrawLesson(lesson: LessonPlan) {
   color: #8993a4;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.generation-source-fieldset {
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.generation-source-fieldset legend {
+  margin-bottom: 8px;
+  color: #4a5568;
+  font-size: 13px;
+}
+
+.generation-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.generation-source-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.generation-source-card.selected {
+  border-color: #315efb;
+  background: #f4f7ff;
+}
+
+.generation-source-card span,
+.classic-case-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.generation-source-card small,
+.classic-case-summary span,
+.classic-case-summary small {
+  color: #7d8798;
+  font-size: 12px;
+}
+
+.classic-case-summary {
+  border: 1px solid #e3e8f1;
+  border-radius: 10px;
+  background: #f8fafc;
+  padding: 12px;
 }
 
 .lesson-name {

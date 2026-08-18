@@ -31,6 +31,10 @@ public final class ClassicCaseRuntimeConstants {
 
     public static final String STATUS_SUCCESS = "SUCCESS";
 
+    public static final String STATUS_AVAILABLE = "AVAILABLE";
+
+    public static final String STATUS_DISABLED = "DISABLED";
+
     public static final String TEMPLATE_ID_PREFIX = "classic-case:";
 
     public static final String FIELD_CLASSIC_CASE_ASSET_ID = "classicCaseAssetId";

@@ -697,7 +697,10 @@ export interface ClassicCaseAsset {
   moduleCode: string;
   teachingPointId?: string;
   sceneTypesJson?: string;
+  tagsJson?: string;
   currentVersionId?: string;
+  sourceUpdatedAt?: string;
+  disableReason?: string;
   status?: string;
   createTime?: string;
   updateTime?: string;
@@ -721,11 +724,41 @@ export interface ClassicCaseVersion {
   id: string;
   caseAssetId: string;
   versionNo: number;
+  caseVersionId?: string;
   payloadSchemaVersion?: string;
+  supportedGenerationModesJson?: string;
   payloadHash?: string;
+  contentHash?: string;
+  identityBindingJson?: string;
+  desensitizedCasePayloadJson?: string;
+  caseDataFormatJson?: string;
   status?: string;
   createBy?: string;
   createTime?: string;
+}
+
+export interface LessonPlanClassicCaseOption {
+  classicCaseId: string;
+  connectorSystemId: string;
+  learningConnectorSystemId: string;
+  caseCode: string;
+  caseName: string;
+  businessModuleCode: string;
+  summary?: string;
+  tags: string[];
+  caseVersionId: string;
+  versionNo: number;
+  payloadSchemaVersion: string;
+  supportedGenerationModes: Array<'REPLAY_CASE' | 'FORMAT_DEMO'>;
+  defaultGenerationMode: 'REPLAY_CASE' | 'FORMAT_DEMO';
+}
+
+export interface ClassicCaseConfigValidationRequest {
+  businessModuleCode: string;
+  connectorSystemId: string;
+  classicCaseId: string;
+  caseVersionId: string;
+  generationMode: 'REPLAY_CASE' | 'FORMAT_DEMO';
 }
 
 export interface ClassicCaseUsage {
@@ -1789,6 +1822,37 @@ export const dataPrepareApi = {
   async listClassicCaseVersions(id: string, tenantId: string): Promise<ClassicCaseVersion[]> {
     return requestApi<ClassicCaseVersion[]>(
       `api/v1/classic-cases/${encodeURIComponent(id)}/versions?${stringifyQuery({ tenantId })}`
+    );
+  },
+
+  async getClassicCaseVersion(
+    id: string,
+    caseVersionId: string
+  ): Promise<ClassicCaseVersion> {
+    return requestApi<ClassicCaseVersion>(
+      `api/v1/classic-cases/${encodeURIComponent(id)}/versions/${encodeURIComponent(caseVersionId)}`
+    );
+  },
+
+  async listLessonPlanClassicCaseOptions(params: {
+    businessModuleCode: string;
+    connectorSystemId?: string;
+    keyword?: string;
+  }): Promise<LessonPlanClassicCaseOption[]> {
+    return requestApi<LessonPlanClassicCaseOption[]>(
+      `api/v1/lesson-plans/classic-case-options?${stringifyQuery(params)}`
+    );
+  },
+
+  async validateLessonPlanClassicCaseConfig(
+    request: ClassicCaseConfigValidationRequest
+  ): Promise<LessonPlanClassicCaseOption> {
+    return requestApi<LessonPlanClassicCaseOption>(
+      'api/v1/lesson-plans/classic-case-config/validate',
+      {
+        method: 'POST',
+        body: JSON.stringify(request)
+      }
     );
   },
 

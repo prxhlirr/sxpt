@@ -355,6 +355,9 @@ const classicCaseVersionId = computed(
 const classicCaseTitle = computed(
   () => task.value?.classicCaseTitle || publishedTask.value?.classicCaseTitle || ''
 );
+const classicCaseGenerationMode = computed(
+  () => task.value?.generationMode || publishedTask.value?.generationMode || 'FORMAT_DEMO'
+);
 const activeAllocationId = computed(() => launchAllocation.value?.id || '');
 const originLaunchStatusTitle = computed(() => {
   if (allocationLoading.value) return '正在识别原平台数据';
@@ -367,7 +370,9 @@ const originLaunchStatusHint = computed(() => {
   if (isClassicCaseTask.value) {
     return launchResult.value
       ? `已按经典案例${classicCaseTitle.value ? `「${classicCaseTitle.value}」` : ''}生成本次练习数据。`
-      : '进入原平台时，系统会按经典案例模板即时生成一份脱敏 demo 数据。';
+      : classicCaseGenerationMode.value === 'REPLAY_CASE'
+        ? '进入原平台时，系统会按教案锁定版本复刻一份脱敏案例数据。'
+        : '进入原平台时，系统会按经典案例格式即时生成一份脱敏 demo 数据。';
   }
   return activeAllocationId.value
     ? `分配记录 ${activeAllocationId.value}，系统将按该记录中的单位和角色进入原平台。`
@@ -446,7 +451,10 @@ async function prepareClassicCaseLaunch(openInNewWindow: boolean) {
       tenantId: session?.user.tenantId || '',
       caseAssetId: classicCaseAssetId.value,
       caseVersionId: classicCaseVersionId.value || undefined,
-      usageScene: 'STUDENT_DEMO',
+      usageScene:
+        classicCaseGenerationMode.value === 'REPLAY_CASE'
+          ? 'TEACHING_REPLICA'
+          : 'STUDENT_DEMO',
       sceneType: task.value.mode,
       taskId,
       ownerUserId: currentStudentId,

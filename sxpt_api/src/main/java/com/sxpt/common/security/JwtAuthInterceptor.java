@@ -47,6 +47,10 @@ public class JwtAuthInterceptor implements HandlerInterceptor {
         if (OPTIONS_METHOD.equalsIgnoreCase(request.getMethod())) {
             return true;
         }
+        // Connector Key 已建立可信系统上下文时，不再要求同一次系统调用携带用户 JWT。
+        if (ExternalConnectorContext.get().isPresent()) {
+            return true;
+        }
         String token = resolveToken(request);
         if (!StringUtils.hasText(token)) {
             throw new BusinessException(ApiResultCode.UNAUTHORIZED);

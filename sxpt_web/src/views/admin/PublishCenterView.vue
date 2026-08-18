@@ -22,7 +22,6 @@ const publishing = ref(false);
 const classicCases = ref<ClassicCaseAsset[]>([]);
 const classicCaseLoading = ref(false);
 const classicCaseError = ref('');
-const selectedClassicCaseId = ref('');
 const session = authApi.getSession();
 
 const learningTask = computed(() =>
@@ -50,24 +49,24 @@ const releaseSummary = computed(() =>
   })
 );
 const assignedCount = computed(() => releaseSummary.value.assignedCount);
-const selectedClassicCase = computed(() =>
-  classicCases.value.find((item) => item.id === selectedClassicCaseId.value)
-);
+const lockedClassicCaseConfig = computed(() => lesson.value?.classicCaseConfig);
 const dataPrepareBinding = computed<TaskDataPrepareBinding>(() => {
-  if (!selectedClassicCase.value) {
+  const config = lockedClassicCaseConfig.value;
+  if (lesson.value?.generationSource !== 'CLASSIC_CASE' || !config) {
     return { dataPrepareMode: 'NORMAL' };
   }
   return {
     dataPrepareMode: 'CLASSIC_CASE',
-    classicCaseAssetId: selectedClassicCase.value.id,
-    classicCaseVersionId: selectedClassicCase.value.currentVersionId,
-    classicCaseCode: selectedClassicCase.value.caseCode,
-    classicCaseTitle: selectedClassicCase.value.caseTitle
+    classicCaseAssetId: config.classicCaseId,
+    classicCaseVersionId: config.caseVersionId,
+    classicCaseCode: config.caseCode,
+    classicCaseTitle: config.caseName,
+    generationMode: config.generationMode
   };
 });
 const dataPrepareModeLabel = computed(() =>
-  selectedClassicCase.value
-    ? `经典案例：${selectedClassicCase.value.caseTitle}`
+  lockedClassicCaseConfig.value
+    ? `经典案例：${lockedClassicCaseConfig.value.caseName} · ${lockedClassicCaseConfig.value.caseVersionId}`
     : '普通造数'
 );
 
@@ -77,13 +76,21 @@ async function loadClassicCases() {
   try {
     classicCases.value = await dataPrepareApi.listClassicCases({
       tenantId: session?.user.tenantId || '',
-      teachingPointId: lesson.value?.teachingPointId || undefined
+      learningConnectorSystemId: lesson.value?.businessPlatformId || undefined,
+      moduleCode: store.getBusinessPlatformModule(
+        lesson.value?.businessPlatformId || '',
+        lesson.value?.businessPlatformModuleId || ''
+      )?.code
     });
     if (
-      selectedClassicCaseId.value &&
-      !classicCases.value.some((item) => item.id === selectedClassicCaseId.value)
+      lockedClassicCaseConfig.value &&
+      !classicCases.value.some(
+        (item) =>
+          item.id === lockedClassicCaseConfig.value?.classicCaseId &&
+          ['AVAILABLE', 'ACTIVE'].includes(item.status ?? '')
+      )
     ) {
-      selectedClassicCaseId.value = '';
+      classicCaseError.value = '教案锁定的经典案例当前已停用或不可用；已发布任务仍保留锁定版本。';
     }
   } catch (error) {
     classicCaseError.value =
@@ -201,17 +208,15 @@ onMounted(() => {
           <h2>数据来源</h2>
           <p>
             当前：{{ dataPrepareModeLabel }}。普通造数会在发布练习时批量准备数据；
-            经典案例会在学生进入原平台时按模板即时生成 demo 数据。
+            经典案例会按教案锁定版本在学生进入原平台时生成数据。
           </p>
         </div>
         <label>
-          <span>经典案例</span>
-          <select v-model="selectedClassicCaseId" :disabled="classicCaseLoading || publishing">
-            <option value="">不使用经典案例，按普通造数发布</option>
-            <option v-for="item in classicCases" :key="item.id" :value="item.id">
-              {{ item.caseTitle }}（{{ item.caseCode }}）
-            </option>
-          </select>
+          <span>教案锁定的数据配置</span>
+          <input :value="dataPrepareModeLabel" disabled />
+          <small v-if="lockedClassicCaseConfig">
+            {{ lockedClassicCaseConfig.generationMode === 'REPLAY_CASE' ? '复刻脱敏案例' : '按格式生成 Demo' }}
+          </small>
         </label>
         <button class="secondary" type="button" :disabled="classicCaseLoading" @click="loadClassicCases">
           {{ classicCaseLoading ? '正在刷新' : '刷新案例' }}

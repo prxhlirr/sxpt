@@ -44,7 +44,13 @@ public class ClassicCaseAsset {
 
     private String sceneTypesJson;
 
+    private String tagsJson;
+
     private String currentVersionId;
+
+    private LocalDateTime sourceUpdatedAt;
+
+    private String disableReason;
 
     private Long lockVersion;
 
@@ -156,12 +162,36 @@ public class ClassicCaseAsset {
         this.sceneTypesJson = sceneTypesJson;
     }
 
+    public String getTagsJson() {
+        return tagsJson;
+    }
+
+    public void setTagsJson(String tagsJson) {
+        this.tagsJson = tagsJson;
+    }
+
     public String getCurrentVersionId() {
         return currentVersionId;
     }
 
     public void setCurrentVersionId(String currentVersionId) {
         this.currentVersionId = currentVersionId;
+    }
+
+    public LocalDateTime getSourceUpdatedAt() {
+        return sourceUpdatedAt;
+    }
+
+    public void setSourceUpdatedAt(LocalDateTime sourceUpdatedAt) {
+        this.sourceUpdatedAt = sourceUpdatedAt;
+    }
+
+    public String getDisableReason() {
+        return disableReason;
+    }
+
+    public void setDisableReason(String disableReason) {
+        this.disableReason = disableReason;
     }
 
     public Long getLockVersion() {

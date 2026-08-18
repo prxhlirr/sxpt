@@ -6,6 +6,7 @@ import com.sxpt.module.connector.entity.ConnectorSystem;
 import com.sxpt.module.connector.entity.PlatformCapability;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
 import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
+import com.sxpt.module.connector.service.DataCreateRequestBuildService;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.connector.service.impl.HttpOriginDataPrepareAdapter;
 import org.junit.jupiter.api.Test;
@@ -310,6 +311,85 @@ class OriginDataPrepareAdapterContractTests {
         assertTrue(outboundParticipantId[0].length() <= 64);
         assertNotEquals(internalRequestItemId, outboundParticipantId[0]);
         assertEquals(internalRequestItemId, response.getItems().get(0).getRequestItemId());
+    }
+
+    /**
+     * 经典案例必须绕过普通能力的 forwardBizParams=false，并把锁定版本及脱敏内容交给 OA 学习环境。
+     */
+    @Test
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    void httpAdapterShouldAlwaysForwardClassicCaseBizParamsAndRuntimeTemplate() throws Exception {
+        ConnectorSystemMapper systemMapper = mock(ConnectorSystemMapper.class);
+        PlatformCapabilityMapper capabilityMapper = mock(PlatformCapabilityMapper.class);
+        RestTemplate restTemplate = mock(RestTemplate.class);
+
+        ConnectorSystem system = new ConnectorSystem();
+        system.setId("origin-oa");
+        system.setTenantId("tenant-1");
+        system.setBaseUrl("http://127.0.0.1:9527");
+        system.setAuthType("BEARER");
+        system.setConfigJson("{\"token\":\"oa-token\"}");
+
+        PlatformCapability capability = new PlatformCapability();
+        capability.setEndpointUrl("/openapi/teaching-data/batch-create");
+        capability.setMethod("POST");
+        capability.setRequestSchemaJson(OA_CREATE_CONTRACT);
+
+        when(systemMapper.selectOne(any(QueryWrapper.class))).thenReturn(system);
+        when(capabilityMapper.selectOne(any(QueryWrapper.class))).thenReturn(capability);
+        when(restTemplate.exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), any(HttpEntity.class), eq(String.class)))
+                .thenReturn(new ResponseEntity<>(standardSuccessResponse(), HttpStatus.OK));
+
+        HttpOriginDataPrepareAdapter adapter = new HttpOriginDataPrepareAdapter(
+                systemMapper, capabilityMapper, restTemplate);
+        adapter.createTeachingData(createClassicCaseRequest());
+
+        ArgumentCaptor<HttpEntity> entityCaptor = ArgumentCaptor.forClass(HttpEntity.class);
+        verify(restTemplate).exchange(
+                eq("http://127.0.0.1:9527/openapi/teaching-data/batch-create"),
+                eq(HttpMethod.POST), entityCaptor.capture(), eq(String.class));
+        Map<String, Object> body = new ObjectMapper().convertValue(
+                entityCaptor.getValue().getBody(), Map.class);
+        Map<String, Object> bizParams = (Map<String, Object>) body.get("bizParams");
+        Map<String, Object> classicCase = (Map<String, Object>) bizParams.get("classicCase");
+
+        assertEquals("classic-case-template", body.get("templateCode"));
+        assertEquals("CASE_DRAFT", body.get("initState"));
+        assertEquals("CLASSIC_CASE", bizParams.get("generationSource"));
+        assertEquals("REPLAY_CASE", bizParams.get("generationMode"));
+        assertEquals("oa-version-20260818", classicCase.get("caseVersionId"));
+        assertTrue(classicCase.containsKey("desensitizedCasePayload"));
+        assertFalse(classicCase.containsKey("caseDataFormat"));
+    }
+
+    private OriginDataPrepareAdapter.BatchCreateRequest createClassicCaseRequest() {
+        DataCreateRequestBuildService.ClassicCaseCreateContext context =
+                new DataCreateRequestBuildService.ClassicCaseCreateContext();
+        context.setTenantId("tenant-1");
+        context.setConnectorSystemId("origin-oa");
+        context.setModuleCode("CUSTOMER_ARCHIVE");
+        context.setTemplateId("template-id");
+        context.setTemplateCode("classic-case-template");
+        context.setInitState("CASE_DRAFT");
+        context.setSceneType("TEACHING");
+        context.setRequestBatchId("batch-1");
+        context.setIdempotencyKey("idem-1");
+        context.setTraceId("trace-1");
+        context.setUsageScene(ClassicCaseRuntimeConstants.USAGE_SCENE_TEACHING_REPLICA);
+        context.setCaseAssetId("case-id");
+        context.setCaseCode("OA-CASE-001");
+        context.setCaseVersionId("oa-version-20260818");
+        context.setPayloadSchemaVersion("1.0");
+        context.setIdentityBindingJson("{\"actors\":[]}");
+        context.setDesensitizedCasePayloadJson("{\"businessNo\":\"MASKED-001\"}");
+        DataCreateRequestBuildService.DataCreateRequestItem item =
+                new DataCreateRequestBuildService.DataCreateRequestItem();
+        item.setRequestItemId("item-1");
+        item.setOwnerUserId("student-1");
+        context.setItems(Collections.singletonList(item));
+        return new DataCreateRequestBuildService().buildClassicCaseRequest(context);
     }
 
     private OriginDataPrepareAdapter.BatchCreateRequest createStandardRequest() {

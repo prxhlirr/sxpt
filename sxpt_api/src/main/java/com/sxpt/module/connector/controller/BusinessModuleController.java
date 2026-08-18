@@ -1,10 +1,12 @@
 package com.sxpt.module.connector.controller;
 
 import com.sxpt.common.api.ApiResult;
+import com.sxpt.common.security.ExternalConnectorContext;
 import com.sxpt.module.connector.dto.BusinessModuleRequest;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.service.BusinessModuleService;
 import com.sxpt.module.connector.vo.BusinessModuleVO;
+import com.sxpt.module.connector.vo.ConnectorBusinessModuleVO;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,6 +20,7 @@ import javax.validation.Valid;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.Arrays;
 
 /**
  * 原平台业务模块管理接口。
@@ -111,10 +114,28 @@ public class BusinessModuleController {
      * @param connectorSystemId 原平台配置 ID。
      * @return 业务模块列表。
      */
-    @GetMapping
+    @GetMapping(headers = "!X-Connector-Key")
     public ApiResult<List<BusinessModuleVO>> list(@RequestParam String tenantId,
                                                   @RequestParam String connectorSystemId) {
         return ApiResult.success(toVOList(businessModuleService.listBusinessModules(tenantId, connectorSystemId)));
+    }
+
+    /** OA 使用 Connector Key 查询当前接入可绑定的启用模块。 */
+    @GetMapping(headers = "X-Connector-Key")
+    public ApiResult<List<ConnectorBusinessModuleVO>> listForConnector() {
+        ExternalConnectorContext.require();
+        String tenantId = ExternalConnectorContext.require().getSourceSystem().getTenantId();
+        String learningSystemId = ExternalConnectorContext.require().getLearningSystem().getId();
+        List<ConnectorBusinessModuleVO> result = new ArrayList<>();
+        for (BusinessModule module : businessModuleService.listActiveBusinessModules(tenantId, learningSystemId)) {
+            ConnectorBusinessModuleVO option = new ConnectorBusinessModuleVO();
+            option.setBusinessModuleCode(module.getModuleCode());
+            option.setBusinessModuleName(module.getModuleName());
+            option.setClassicCaseEnabled(Boolean.TRUE);
+            option.setSupportedGenerationModes(Arrays.asList("REPLAY_CASE", "FORMAT_DEMO"));
+            result.add(option);
+        }
+        return ApiResult.success(result);
     }
 
     /**

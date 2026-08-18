@@ -12,7 +12,9 @@ import { useRoute } from 'vue-router';
 import type {
   BusinessPageSnapshot,
   CaptureRect,
+  ClassicCaseGenerationMode,
   CompletionMethod,
+  DataPrepareMode,
   LessonStage,
   RecordedStep,
   RunMode
@@ -33,6 +35,10 @@ import {
   describePickedElement
 } from '../../utils/elementSelector';
 import { sanitizeRecordedBusinessUrl } from '../../utils/businessLaunch';
+import {
+  dataPrepareApi,
+  type LessonPlanClassicCaseOption
+} from '../../services/trainingApi';
 
 type PanelTab = 'stage' | 'step';
 type PickerToolbarPosition = 'top-right' | 'bottom-right' | 'bottom-left' | 'top-left';
@@ -226,11 +232,20 @@ const basicForm = reactive({
   moduleName: '',
   businessPlatformId: '',
   businessPlatformModuleId: '',
+  generationSource: 'NORMAL' as DataPrepareMode,
+  classicCaseId: '',
+  caseVersionId: '',
+  generationMode: 'REPLAY_CASE' as ClassicCaseGenerationMode,
   description: '',
   objectiveMaxScore: 0,
   subjectiveMaxScore: 0,
   tags: ''
 });
+const classicCaseOptions = ref<LessonPlanClassicCaseOption[]>([]);
+const classicCaseLoading = ref(false);
+const classicCaseError = ref('');
+const savingBasicInformation = ref(false);
+let classicCaseLoadSequence = 0;
 const availableBasicBusinessModules = computed(() =>
   (
     store.getBusinessPlatform(basicForm.businessPlatformId)?.modules ?? []
@@ -238,6 +253,31 @@ const availableBasicBusinessModules = computed(() =>
     (businessModule) =>
       businessModule.status === 'ENABLED' ||
       businessModule.id === basicForm.businessPlatformModuleId
+  )
+);
+const selectedBasicBusinessModule = computed(() =>
+  availableBasicBusinessModules.value.find(
+    (businessModule) =>
+      businessModule.id === basicForm.businessPlatformModuleId
+  )
+);
+const classicCaseChoices = computed(() => {
+  const choices = new Map<string, LessonPlanClassicCaseOption>();
+  classicCaseOptions.value.forEach((option) => {
+    if (!choices.has(option.classicCaseId)) {
+      choices.set(option.classicCaseId, option);
+    }
+  });
+  return [...choices.values()];
+});
+const selectedClassicCaseVersions = computed(() =>
+  classicCaseOptions.value.filter(
+    (option) => option.classicCaseId === basicForm.classicCaseId
+  )
+);
+const selectedClassicCaseOption = computed(() =>
+  selectedClassicCaseVersions.value.find(
+    (option) => option.caseVersionId === basicForm.caseVersionId
   )
 );
 
@@ -483,6 +523,11 @@ watch(
     basicForm.moduleName = current.moduleName;
     basicForm.businessPlatformId = current.businessPlatformId;
     basicForm.businessPlatformModuleId = current.businessPlatformModuleId;
+    basicForm.generationSource = current.generationSource ?? 'NORMAL';
+    basicForm.classicCaseId = current.classicCaseConfig?.classicCaseId ?? '';
+    basicForm.caseVersionId = current.classicCaseConfig?.caseVersionId ?? '';
+    basicForm.generationMode =
+      current.classicCaseConfig?.generationMode ?? 'REPLAY_CASE';
     basicForm.description = current.description;
     basicForm.objectiveMaxScore = current.objectiveMaxScore;
     basicForm.subjectiveMaxScore = current.subjectiveMaxScore;
@@ -511,6 +556,40 @@ watch(
       basicForm.businessPlatformModuleId =
         availableBasicBusinessModules.value[0]?.id ?? '';
     }
+  }
+);
+
+watch(
+  () => basicForm.generationSource,
+  (generationSource) => {
+    classicCaseError.value = '';
+    if (generationSource === 'NORMAL') {
+      classicCaseOptions.value = [];
+      basicForm.classicCaseId = '';
+      basicForm.caseVersionId = '';
+      return;
+    }
+    void loadClassicCaseOptions(true);
+  }
+);
+
+watch(
+  () => [
+    basicForm.businessPlatformId,
+    basicForm.businessPlatformModuleId
+  ] as const,
+  ([platformId, moduleId], [previousPlatformId, previousModuleId]) => {
+    if (
+      basicForm.generationSource !== 'CLASSIC_CASE' ||
+      (platformId === previousPlatformId && moduleId === previousModuleId)
+    ) {
+      return;
+    }
+    basicForm.classicCaseId = '';
+    basicForm.caseVersionId = '';
+    classicCaseOptions.value = [];
+    classicCaseError.value = '';
+    void loadClassicCaseOptions(false);
   }
 );
 
@@ -1090,6 +1169,81 @@ function selectStageForEditing(stageId: string) {
 function openLessonModal() {
   showAuthoringMoreMenu.value = false;
   modalView.value = 'lesson';
+  if (basicForm.generationSource === 'CLASSIC_CASE') {
+    void loadClassicCaseOptions(true);
+  }
+}
+
+async function loadClassicCaseOptions(preserveSelection: boolean) {
+  if (basicForm.generationSource !== 'CLASSIC_CASE') return;
+  const moduleCode = selectedBasicBusinessModule.value?.code;
+  if (!store.remote.enabled) {
+    classicCaseOptions.value = [];
+    classicCaseError.value = '经典案例需要连接教学平台后端后才能加载。';
+    return;
+  }
+  if (!basicForm.businessPlatformId || !moduleCode) {
+    classicCaseOptions.value = [];
+    classicCaseError.value = '请先选择业务平台及平台模块。';
+    return;
+  }
+
+  const requestSequence = ++classicCaseLoadSequence;
+  const previousCaseId = preserveSelection ? basicForm.classicCaseId : '';
+  const previousVersionId = preserveSelection ? basicForm.caseVersionId : '';
+  classicCaseLoading.value = true;
+  classicCaseError.value = '';
+  try {
+    const options = await dataPrepareApi.listLessonPlanClassicCaseOptions({
+      businessModuleCode: moduleCode,
+      connectorSystemId: basicForm.businessPlatformId
+    });
+    if (requestSequence !== classicCaseLoadSequence) return;
+    classicCaseOptions.value = options;
+    const previousOption = options.find(
+      (option) =>
+        option.classicCaseId === previousCaseId &&
+        option.caseVersionId === previousVersionId
+    );
+    if (previousOption) {
+      basicForm.classicCaseId = previousOption.classicCaseId;
+      basicForm.caseVersionId = previousOption.caseVersionId;
+      if (!previousOption.supportedGenerationModes.includes(basicForm.generationMode)) {
+        basicForm.generationMode = previousOption.defaultGenerationMode;
+      }
+    } else {
+      basicForm.classicCaseId = '';
+      basicForm.caseVersionId = '';
+      if (previousCaseId || previousVersionId) {
+        classicCaseError.value = '原教案锁定的案例已停用或不再属于当前模块，请重新选择。';
+      }
+    }
+  } catch (error) {
+    if (requestSequence !== classicCaseLoadSequence) return;
+    classicCaseOptions.value = [];
+    classicCaseError.value =
+      error instanceof Error ? error.message : '经典案例加载失败，请稍后重试。';
+  } finally {
+    if (requestSequence === classicCaseLoadSequence) {
+      classicCaseLoading.value = false;
+    }
+  }
+}
+
+function selectClassicCase() {
+  const firstVersion = selectedClassicCaseVersions.value[0];
+  basicForm.caseVersionId = firstVersion?.caseVersionId ?? '';
+  basicForm.generationMode = firstVersion?.defaultGenerationMode ?? 'REPLAY_CASE';
+  classicCaseError.value = '';
+}
+
+function selectClassicCaseVersion() {
+  const option = selectedClassicCaseOption.value;
+  if (!option) return;
+  if (!option.supportedGenerationModes.includes(basicForm.generationMode)) {
+    basicForm.generationMode = option.defaultGenerationMode;
+  }
+  classicCaseError.value = '';
 }
 
 function openPublishModal() {
@@ -1133,10 +1287,19 @@ function cyclePickerToolbarPosition() {
   pickerToolbarPosition.value = positions[(currentIndex + 1) % positions.length];
 }
 
-function saveBasicInformation() {
+async function saveBasicInformation() {
   if (!lesson.value) return;
+  if (
+    basicForm.generationSource === 'CLASSIC_CASE' &&
+    !selectedClassicCaseOption.value
+  ) {
+    showFeedback('请选择可用的经典案例及具体版本。', 'danger');
+    return;
+  }
+  savingBasicInformation.value = true;
   try {
-    store.updateLesson(lesson.value.id, {
+    const classicCaseOption = selectedClassicCaseOption.value;
+    await store.updateLessonRemote(lesson.value.id, {
       code: basicForm.code.trim(),
       title: basicForm.title.trim(),
       moduleName:
@@ -1146,6 +1309,18 @@ function saveBasicInformation() {
         )?.name ?? basicForm.moduleName.trim(),
       businessPlatformId: basicForm.businessPlatformId,
       businessPlatformModuleId: basicForm.businessPlatformModuleId,
+      generationSource: basicForm.generationSource,
+      classicCaseConfig:
+        basicForm.generationSource === 'CLASSIC_CASE' && classicCaseOption
+          ? {
+              connectorSystemId: classicCaseOption.connectorSystemId,
+              classicCaseId: classicCaseOption.classicCaseId,
+              caseCode: classicCaseOption.caseCode,
+              caseName: classicCaseOption.caseName,
+              caseVersionId: classicCaseOption.caseVersionId,
+              generationMode: basicForm.generationMode
+            }
+          : undefined,
       description: basicForm.description.trim(),
       objectiveMaxScore: Number(basicForm.objectiveMaxScore),
       subjectiveMaxScore: Number(basicForm.subjectiveMaxScore),
@@ -1157,6 +1332,8 @@ function saveBasicInformation() {
     showFeedback('基础信息已保存。');
   } catch (error) {
     showFeedback(error instanceof Error ? error.message : '保存失败', 'danger');
+  } finally {
+    savingBasicInformation.value = false;
   }
 }
 
@@ -2449,6 +2626,94 @@ function numberValue(event: Event) {
               当前平台没有可用模块，请先由管理员在业务平台管理中新增。
             </small>
           </label>
+          <fieldset class="classic-case-config" :disabled="configurationLocked">
+            <legend>数据生成方式</legend>
+            <div class="classic-case-source-options">
+              <label :class="{ selected: basicForm.generationSource === 'NORMAL' }">
+                <input v-model="basicForm.generationSource" type="radio" value="NORMAL" />
+                <span><strong>普通造数</strong><small>使用平台模块的数据模板</small></span>
+              </label>
+              <label :class="{ selected: basicForm.generationSource === 'CLASSIC_CASE' }">
+                <input v-model="basicForm.generationSource" type="radio" value="CLASSIC_CASE" />
+                <span><strong>经典案例</strong><small>使用 OA 推送的脱敏案例</small></span>
+              </label>
+            </div>
+
+            <template v-if="basicForm.generationSource === 'CLASSIC_CASE'">
+              <div class="classic-case-editor-grid">
+                <label>
+                  <span>经典案例</span>
+                  <select
+                    v-model="basicForm.classicCaseId"
+                    :disabled="configurationLocked || classicCaseLoading"
+                    @change="selectClassicCase"
+                  >
+                    <option value="" disabled>
+                      {{ classicCaseLoading ? '正在从案例库加载' : '请选择经典案例' }}
+                    </option>
+                    <option
+                      v-for="option in classicCaseChoices"
+                      :key="option.classicCaseId"
+                      :value="option.classicCaseId"
+                    >
+                      {{ option.caseName }} · {{ option.caseCode }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>锁定版本</span>
+                  <select
+                    v-model="basicForm.caseVersionId"
+                    :disabled="configurationLocked || !basicForm.classicCaseId"
+                    @change="selectClassicCaseVersion"
+                  >
+                    <option value="" disabled>请选择案例版本</option>
+                    <option
+                      v-for="option in selectedClassicCaseVersions"
+                      :key="option.caseVersionId"
+                      :value="option.caseVersionId"
+                    >
+                      V{{ option.versionNo }} · {{ option.caseVersionId }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>生成模式</span>
+                  <select
+                    v-model="basicForm.generationMode"
+                    :disabled="configurationLocked || !selectedClassicCaseOption"
+                  >
+                    <option
+                      v-for="mode in selectedClassicCaseOption?.supportedGenerationModes ?? []"
+                      :key="mode"
+                      :value="mode"
+                    >
+                      {{ mode === 'REPLAY_CASE' ? '复刻脱敏案例' : '按格式生成 Demo' }}
+                    </option>
+                  </select>
+                </label>
+                <button
+                  class="classic-case-refresh"
+                  type="button"
+                  :disabled="configurationLocked || classicCaseLoading"
+                  @click="loadClassicCaseOptions(true)"
+                >
+                  {{ classicCaseLoading ? '加载中…' : '刷新案例库' }}
+                </button>
+              </div>
+              <p v-if="classicCaseError" class="classic-case-error">{{ classicCaseError }}</p>
+              <p v-else-if="!classicCaseLoading && !classicCaseChoices.length" class="classic-case-empty">
+                当前业务模块没有可选案例，请先在 OA 将案例推送到实训平台。
+              </p>
+              <div v-if="selectedClassicCaseOption" class="classic-case-selection-summary">
+                <strong>{{ selectedClassicCaseOption.caseName }}</strong>
+                <span>{{ selectedClassicCaseOption.summary || '暂无案例摘要' }}</span>
+                <small>
+                  保存时仅记录案例与版本标识，不会把完整脱敏内容保存到浏览器工作区。
+                </small>
+              </div>
+            </template>
+          </fieldset>
           <label><span>教学简介</span><textarea v-model="basicForm.description" rows="4" :disabled="configurationLocked" /></label>
           <div class="config-grid">
             <label><span>客观分上限</span><input v-model.number="basicForm.objectiveMaxScore" type="number" min="0" :disabled="configurationLocked" /></label>
@@ -2460,8 +2725,13 @@ function numberValue(event: Event) {
             <span><small>教学点分合计</small><strong>{{ objectiveStageScore }}</strong></span>
             <span><small>录制节点</small><strong>{{ recordedStepCount }}</strong></span>
           </div>
-          <button class="panel-primary" type="button" :disabled="configurationLocked" @click="saveBasicInformation">
-            保存基础信息
+          <button
+            class="panel-primary"
+            type="button"
+            :disabled="configurationLocked || savingBasicInformation"
+            @click="saveBasicInformation"
+          >
+            {{ savingBasicInformation ? '正在校验并保存…' : '保存基础信息' }}
           </button>
         </div>
 
@@ -4861,6 +5131,119 @@ function numberValue(event: Event) {
 
 .config-grid {
   gap: 12px;
+}
+
+.classic-case-config {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  border: 1px solid #dfe4ec;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 16px;
+}
+
+.classic-case-config legend {
+  padding: 0 6px;
+  color: #334155;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.classic-case-source-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.config-content .classic-case-source-options > label {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  border: 1px solid #d9e0ea;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px;
+  cursor: pointer;
+}
+
+.config-content .classic-case-source-options > label.selected {
+  border-color: #7564e8;
+  background: #f3f1ff;
+  box-shadow: 0 0 0 2px rgb(101 82 221 / 10%);
+}
+
+.config-content .classic-case-source-options input {
+  width: 18px;
+  min-height: 18px;
+  margin: 2px 0 0;
+  border: 0;
+  padding: 0;
+  box-shadow: none;
+}
+
+.classic-case-source-options span,
+.classic-case-selection-summary {
+  display: grid;
+  gap: 4px;
+}
+
+.classic-case-source-options strong,
+.classic-case-selection-summary strong {
+  color: #243044;
+  font-size: 15px;
+}
+
+.classic-case-source-options small,
+.classic-case-selection-summary span,
+.classic-case-selection-summary small {
+  color: #718096;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.classic-case-editor-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.classic-case-refresh {
+  align-self: end;
+  min-height: var(--authoring-control-height);
+  border: 1px solid #cfd7e3;
+  border-radius: var(--authoring-control-radius);
+  background: #fff;
+  color: #475569;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.classic-case-error,
+.classic-case-empty {
+  margin: 0;
+  border-radius: 9px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.classic-case-error {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.classic-case-empty {
+  background: #fff7ed;
+  color: #9a3412;
+}
+
+.classic-case-selection-summary {
+  border: 1px solid #d9e0ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px;
 }
 
 .element-binding-editor,

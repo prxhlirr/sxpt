@@ -17,9 +17,21 @@ public class ClassicCaseVersionVO {
 
     private Integer versionNo;
 
+    private String caseVersionId;
+
     private String payloadSchemaVersion;
 
+    private String supportedGenerationModesJson;
+
     private String payloadHash;
+
+    private String contentHash;
+
+    private String identityBindingJson;
+
+    private String desensitizedCasePayloadJson;
+
+    private String caseDataFormatJson;
 
     private String status;
 
@@ -51,6 +63,14 @@ public class ClassicCaseVersionVO {
         this.versionNo = versionNo;
     }
 
+    public String getCaseVersionId() {
+        return caseVersionId;
+    }
+
+    public void setCaseVersionId(String caseVersionId) {
+        this.caseVersionId = caseVersionId;
+    }
+
     public String getPayloadSchemaVersion() {
         return payloadSchemaVersion;
     }
@@ -59,12 +79,52 @@ public class ClassicCaseVersionVO {
         this.payloadSchemaVersion = payloadSchemaVersion;
     }
 
+    public String getSupportedGenerationModesJson() {
+        return supportedGenerationModesJson;
+    }
+
+    public void setSupportedGenerationModesJson(String supportedGenerationModesJson) {
+        this.supportedGenerationModesJson = supportedGenerationModesJson;
+    }
+
     public String getPayloadHash() {
         return payloadHash;
     }
 
     public void setPayloadHash(String payloadHash) {
         this.payloadHash = payloadHash;
+    }
+
+    public String getContentHash() {
+        return contentHash;
+    }
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
+    }
+
+    public String getIdentityBindingJson() {
+        return identityBindingJson;
+    }
+
+    public void setIdentityBindingJson(String identityBindingJson) {
+        this.identityBindingJson = identityBindingJson;
+    }
+
+    public String getDesensitizedCasePayloadJson() {
+        return desensitizedCasePayloadJson;
+    }
+
+    public void setDesensitizedCasePayloadJson(String desensitizedCasePayloadJson) {
+        this.desensitizedCasePayloadJson = desensitizedCasePayloadJson;
+    }
+
+    public String getCaseDataFormatJson() {
+        return caseDataFormatJson;
+    }
+
+    public void setCaseDataFormatJson(String caseDataFormatJson) {
+        this.caseDataFormatJson = caseDataFormatJson;
     }
 
     public String getStatus() {

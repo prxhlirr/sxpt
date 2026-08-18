@@ -14,6 +14,8 @@ import com.sxpt.module.connector.dto.ClassicCaseBatchGenerateRequest;
 import com.sxpt.module.connector.dto.ClassicCaseGenerateLaunchRequest;
 import com.sxpt.module.connector.dto.ClassicCaseGenerateRequest;
 import com.sxpt.module.connector.dto.ClassicCaseImportRequest;
+import com.sxpt.module.connector.dto.ClassicCaseUpsertRequest;
+import com.sxpt.module.connector.dto.ClassicCaseConfigValidationRequest;
 import com.sxpt.module.connector.entity.BusinessModule;
 import com.sxpt.module.connector.entity.BusinessModuleProcessActor;
 import com.sxpt.module.connector.entity.ClassicCaseAsset;
@@ -35,6 +37,8 @@ import com.sxpt.module.connector.service.ClassicCaseService;
 import com.sxpt.module.connector.service.DataCreateRequestBuildService;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService.AuthenticatedExternalConnector;
+import com.sxpt.module.connector.vo.LessonPlanClassicCaseOptionVO;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.DataInstanceStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.RecordStatus;
 import com.sxpt.module.teachingdata.enums.DataPrepareStatusEnums.ValidationStatus;
@@ -47,6 +51,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -142,21 +148,56 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         validateEnvironmentBinding(request, sourceSystem, learningSystem, businessModule);
 
         String sceneTypesJson = normalizeJson(request.getSceneTypesJson(), true);
-        String desensitizedPayloadJson = normalizeJson(request.getDesensitizedCasePayloadJson(), false);
-        String caseDataFormatJson = normalizeJson(request.getCaseDataFormatJson(), false);
+        boolean hasReplayPayload = StringUtils.hasText(request.getDesensitizedCasePayloadJson());
+        boolean hasCaseDataFormat = StringUtils.hasText(request.getCaseDataFormatJson());
+        String desensitizedPayloadJson = hasReplayPayload
+                ? normalizeJson(request.getDesensitizedCasePayloadJson(), false)
+                : "{}";
+        String caseDataFormatJson = hasCaseDataFormat
+                ? normalizeJson(request.getCaseDataFormatJson(), false)
+                : "{}";
         String identityBindingJson = normalizeJson(request.getIdentityBindingJson(), false);
+        String tagsJson = StringUtils.hasText(request.getTagsJson())
+                ? normalizeJson(request.getTagsJson(), true)
+                : "[]";
+        String supportedGenerationModesJson = normalizeSupportedGenerationModes(
+                request.getSupportedGenerationModesJson(), hasReplayPayload, hasCaseDataFormat);
         String desensitizePolicyJson = StringUtils.hasText(request.getDesensitizePolicyJson())
                 ? normalizeJson(request.getDesensitizePolicyJson(), false)
                 : null;
         validateIdentityBindingActors(request, identityBindingJson);
 
-        ClassicCaseAsset asset = findAsset(request.getTenantId(), request.getCaseCode());
+        String contentHash = buildContentHash(request, tagsJson, supportedGenerationModesJson,
+                identityBindingJson, desensitizedPayloadJson, caseDataFormatJson);
+        ClassicCaseAsset asset = findAsset(request.getTenantId(),
+                request.getSourceConnectorSystemId(), request.getCaseCode());
         boolean newAsset = asset == null;
         if (newAsset) {
             asset = buildNewAsset(request, sourceSystem, learningSystem, sceneTypesJson);
             classicCaseAssetMapper.insert(asset);
         } else {
             patchAsset(asset, request, sourceSystem, learningSystem, sceneTypesJson);
+        }
+
+        ClassicCaseVersion existingVersion = StringUtils.hasText(request.getCaseVersionId())
+                ? findVersionByExternalId(request.getTenantId(), asset.getId(), request.getCaseVersionId())
+                : null;
+        if (existingVersion != null) {
+            if (!contentHash.equals(existingVersion.getContentHash())) {
+                throw new BusinessException(ApiResultCode.IDEMPOTENCY_CONFLICT.getCode(),
+                        "相同 caseVersionId 对应的案例内容不一致");
+            }
+            // 同内容重推也视为一次显式启用，便于 OA 在停用后恢复同一不可变版本。
+            asset.setCurrentVersionId(existingVersion.getId());
+            asset.setTagsJson(tagsJson);
+            asset.setSourceUpdatedAt(request.getSourceUpdatedAt());
+            asset.setDisableReason(null);
+            asset.setStatus(ClassicCaseRuntimeConstants.STATUS_AVAILABLE);
+            asset.setUpdateBy(request.getCreateBy());
+            asset.setUpdateTime(LocalDateTime.now());
+            asset.setLockVersion((asset.getLockVersion() == null ? 0L : asset.getLockVersion()) + 1L);
+            classicCaseAssetMapper.updateById(asset);
+            return asset;
         }
 
         ClassicCaseVersion version = buildVersion(
@@ -166,11 +207,91 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                 desensitizedPayloadJson,
                 caseDataFormatJson,
                 identityBindingJson,
-                desensitizePolicyJson);
+                desensitizePolicyJson,
+                supportedGenerationModesJson,
+                contentHash);
         classicCaseVersionMapper.insert(version);
 
         asset.setCurrentVersionId(version.getId());
+        asset.setTagsJson(tagsJson);
+        asset.setSourceUpdatedAt(request.getSourceUpdatedAt());
+        asset.setDisableReason(null);
+        asset.setStatus(ClassicCaseRuntimeConstants.STATUS_AVAILABLE);
         asset.setUpdateBy(request.getCreateBy());
+        asset.setUpdateTime(LocalDateTime.now());
+        asset.setLockVersion((asset.getLockVersion() == null ? 0L : asset.getLockVersion()) + 1L);
+        classicCaseAssetMapper.updateById(asset);
+        return asset;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ClassicCaseAsset upsertClassicCase(ClassicCaseUpsertRequest request,
+                                              AuthenticatedExternalConnector connector) {
+        if (request == null || connector == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        ConnectorSystem sourceSystem = connector.getSourceSystem();
+        ConnectorSystem learningSystem = connector.getLearningSystem();
+        BusinessModule module = businessModuleMapper.selectOne(new QueryWrapper<BusinessModule>()
+                .eq("tenant_id", sourceSystem.getTenantId())
+                .eq("connector_system_id", learningSystem.getId())
+                .eq("module_code", request.getBusinessModuleCode().trim())
+                .eq("status", RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE)
+                .last("limit 1"));
+        if (module == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND.getCode(), "业务模块不存在或未启用");
+        }
+        validateObjectNode(request.getIdentityBinding(), "identityBinding");
+        validateOptionalObjectNode(request.getDesensitizedCasePayload(), "desensitizedCasePayload");
+        validateOptionalObjectNode(request.getCaseDataFormat(), "caseDataFormat");
+
+        ClassicCaseImportRequest importRequest = new ClassicCaseImportRequest();
+        importRequest.setTenantId(sourceSystem.getTenantId());
+        importRequest.setCaseCode(request.getCaseCode().trim());
+        importRequest.setCaseVersionId(request.getCaseVersionId().trim());
+        importRequest.setCaseTitle(request.getCaseName().trim());
+        importRequest.setCaseSummary(trimToNull(request.getSummary()));
+        importRequest.setSourceConnectorSystemId(sourceSystem.getId());
+        importRequest.setLearningConnectorSystemId(learningSystem.getId());
+        importRequest.setBusinessModuleId(module.getId());
+        importRequest.setModuleCode(module.getModuleCode());
+        importRequest.setSceneTypesJson("[\"TEACHING\",\"PRACTICE\"]");
+        importRequest.setTagsJson(toJson(request.getTags() == null
+                ? Collections.emptyList() : request.getTags()));
+        importRequest.setSupportedGenerationModesJson(toJson(request.getSupportedGenerationModes()));
+        importRequest.setPayloadSchemaVersion(request.getPayloadSchemaVersion().trim());
+        importRequest.setIdentityBindingJson(request.getIdentityBinding().toString());
+        importRequest.setDesensitizedCasePayloadJson(request.getDesensitizedCasePayload() == null
+                || request.getDesensitizedCasePayload().isNull()
+                ? null : request.getDesensitizedCasePayload().toString());
+        importRequest.setCaseDataFormatJson(request.getCaseDataFormat() == null
+                || request.getCaseDataFormat().isNull()
+                ? null : request.getCaseDataFormat().toString());
+        importRequest.setSourceUpdatedAt(parseSourceUpdatedAt(request.getSourceUpdatedAt()));
+        importRequest.setCreateBy(sourceSystem.getId());
+        return importClassicCase(importRequest);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ClassicCaseAsset disableClassicCase(String tenantId,
+                                               String sourceConnectorSystemId,
+                                               String caseCode,
+                                               String reason,
+                                               String operator) {
+        requireText(tenantId);
+        requireText(sourceConnectorSystemId);
+        requireText(caseCode);
+        requireText(reason);
+        ClassicCaseAsset asset = findAsset(tenantId, sourceConnectorSystemId, caseCode);
+        if (asset == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        asset.setStatus(ClassicCaseRuntimeConstants.STATUS_DISABLED);
+        asset.setDisableReason(reason.trim());
+        asset.setUpdateBy(firstText(operator, sourceConnectorSystemId));
         asset.setUpdateTime(LocalDateTime.now());
         asset.setLockVersion((asset.getLockVersion() == null ? 0L : asset.getLockVersion()) + 1L);
         classicCaseAssetMapper.updateById(asset);
@@ -250,6 +371,86 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                 .orderByDesc("version_no"));
     }
 
+    @Override
+    public ClassicCaseVersion getClassicCaseVersionDetail(String tenantId,
+                                                          String caseAssetId,
+                                                          String caseVersionId) {
+        getClassicCaseAsset(tenantId, caseAssetId);
+        return getClassicCaseVersion(tenantId, caseAssetId, caseVersionId);
+    }
+
+    @Override
+    public List<LessonPlanClassicCaseOptionVO> listClassicCaseOptions(String tenantId,
+                                                                      String businessModuleCode,
+                                                                      String connectorSystemId,
+                                                                      String keyword) {
+        requireText(tenantId);
+        requireText(businessModuleCode);
+        QueryWrapper<ClassicCaseAsset> query = new QueryWrapper<ClassicCaseAsset>()
+                .eq("tenant_id", tenantId)
+                .eq("module_code", businessModuleCode.trim())
+                .in("status", ClassicCaseRuntimeConstants.STATUS_AVAILABLE,
+                        RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE)
+                .orderByDesc("update_time");
+        if (StringUtils.hasText(connectorSystemId)) {
+            query.and(wrapper -> wrapper
+                    .eq("source_connector_system_id", connectorSystemId.trim())
+                    .or()
+                    .eq("learning_connector_system_id", connectorSystemId.trim()));
+        }
+        if (StringUtils.hasText(keyword)) {
+            String normalizedKeyword = keyword.trim();
+            query.and(wrapper -> wrapper
+                    .like("case_title", normalizedKeyword)
+                    .or()
+                    .like("case_code", normalizedKeyword));
+        }
+        List<LessonPlanClassicCaseOptionVO> options = new ArrayList<>();
+        for (ClassicCaseAsset asset : classicCaseAssetMapper.selectList(query)) {
+            List<ClassicCaseVersion> versions = classicCaseVersionMapper.selectList(
+                    new QueryWrapper<ClassicCaseVersion>()
+                            .eq("tenant_id", tenantId)
+                            .eq("case_asset_id", asset.getId())
+                            .in("status", ClassicCaseRuntimeConstants.STATUS_AVAILABLE,
+                                    RecordStatus.ACTIVE.getValue())
+                            .eq("deleted", Boolean.FALSE)
+                            .orderByDesc("version_no"));
+            for (ClassicCaseVersion version : versions) {
+                options.add(toClassicCaseOption(asset, version));
+            }
+        }
+        return options;
+    }
+
+    @Override
+    public LessonPlanClassicCaseOptionVO validateClassicCaseConfig(String tenantId,
+                                                                   ClassicCaseConfigValidationRequest request) {
+        requireText(tenantId);
+        if (request == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        ClassicCaseAsset asset = classicCaseAssetMapper.selectOne(new QueryWrapper<ClassicCaseAsset>()
+                .eq("tenant_id", tenantId)
+                .eq("id", request.getClassicCaseId())
+                .eq("source_connector_system_id", request.getConnectorSystemId())
+                .eq("module_code", request.getBusinessModuleCode())
+                .in("status", ClassicCaseRuntimeConstants.STATUS_AVAILABLE,
+                        RecordStatus.ACTIVE.getValue())
+                .eq("deleted", Boolean.FALSE));
+        if (asset == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND.getCode(),
+                    "经典案例不存在、已停用或与教案模块不匹配");
+        }
+        ClassicCaseVersion version = getClassicCaseVersion(
+                tenantId, asset.getId(), request.getCaseVersionId());
+        if (!supportedGenerationModes(version).contains(request.getGenerationMode().trim())) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "案例版本不支持所选生成模式");
+        }
+        return toClassicCaseOption(asset, version);
+    }
+
     /**
      * 批量生成学生经典案例 demo 数据。
      *
@@ -267,6 +468,11 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                 StringUtils.hasText(request.getCaseVersionId())
                         ? request.getCaseVersionId()
                         : asset.getCurrentVersionId());
+        if (!supportedGenerationModes(version).contains(
+                ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO)) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "案例版本不支持 FORMAT_DEMO 模式");
+        }
         String requestBatchId = firstText(request.getRequestBatchId(), "classic-case-batch-" + UUID.randomUUID());
         String traceId = firstText(request.getTraceId(), requestBatchId);
         List<BatchRuntimeItem> runtimeItems = buildBatchRuntimeItems(request);
@@ -338,6 +544,15 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                 StringUtils.hasText(request.getCaseVersionId())
                         ? request.getCaseVersionId()
                         : asset.getCurrentVersionId());
+        if (ClassicCaseRuntimeConstants.STATUS_DISABLED.equals(asset.getStatus())
+                && !StringUtils.hasText(request.getCaseVersionId())) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED.getCode(), "经典案例已停用");
+        }
+        String generationMode = resolveGenerationMode(request.getUsageScene());
+        if (!supportedGenerationModes(version).contains(generationMode)) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "案例版本不支持当前生成模式");
+        }
         String requestBatchId = firstText(request.getRequestBatchId(), "classic-case-batch-" + UUID.randomUUID());
         String requestItemId = firstText(request.getRequestItemId(), "classic-case-item-" + UUID.randomUUID());
         String traceId = firstText(request.getTraceId(), requestBatchId);
@@ -386,8 +601,11 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         requireText(request.getBusinessModuleId());
         requireText(request.getModuleCode());
         requireText(request.getSceneTypesJson());
-        requireText(request.getDesensitizedCasePayloadJson());
-        requireText(request.getCaseDataFormatJson());
+        if (!StringUtils.hasText(request.getDesensitizedCasePayloadJson())
+                && !StringUtils.hasText(request.getCaseDataFormatJson())) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(),
+                    "脱敏案例内容和数据格式至少提供一项");
+        }
         requireText(request.getIdentityBindingJson());
         requireText(request.getCreateBy());
     }
@@ -457,7 +675,9 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         ClassicCaseAsset asset = classicCaseAssetMapper.selectOne(new QueryWrapper<ClassicCaseAsset>()
                 .eq("tenant_id", tenantId)
                 .eq("id", caseAssetId)
-                .eq("status", RecordStatus.ACTIVE.getValue())
+                .in("status", RecordStatus.ACTIVE.getValue(),
+                        ClassicCaseRuntimeConstants.STATUS_AVAILABLE,
+                        ClassicCaseRuntimeConstants.STATUS_DISABLED)
                 .eq("deleted", Boolean.FALSE));
         if (asset == null) {
             throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
@@ -479,8 +699,10 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         ClassicCaseVersion version = classicCaseVersionMapper.selectOne(new QueryWrapper<ClassicCaseVersion>()
                 .eq("tenant_id", tenantId)
                 .eq("case_asset_id", caseAssetId)
-                .eq("id", caseVersionId)
-                .eq("status", RecordStatus.ACTIVE.getValue())
+                .and(wrapper -> wrapper.eq("id", caseVersionId)
+                        .or().eq("case_version_id", caseVersionId))
+                .in("status", RecordStatus.ACTIVE.getValue(),
+                        ClassicCaseRuntimeConstants.STATUS_AVAILABLE)
                 .eq("deleted", Boolean.FALSE));
         if (version == null) {
             throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
@@ -942,7 +1164,7 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         context.setUsageScene(usageScene.trim());
         context.setCaseAssetId(asset.getId());
         context.setCaseCode(asset.getCaseCode());
-        context.setCaseVersionId(version.getId());
+        context.setCaseVersionId(firstText(version.getCaseVersionId(), version.getId()));
         context.setPayloadSchemaVersion(version.getPayloadSchemaVersion());
         context.setDesensitizedCasePayloadJson(version.getDesensitizedCasePayloadJson());
         context.setCaseDataFormatJson(version.getCaseDataFormatJson());
@@ -1464,11 +1686,23 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
      * @param caseCode 案例编码。
      * @return 已存在的案例资产，未命中时返回 null。
      */
-    private ClassicCaseAsset findAsset(String tenantId, String caseCode) {
+    private ClassicCaseAsset findAsset(String tenantId, String sourceConnectorSystemId, String caseCode) {
         return classicCaseAssetMapper.selectOne(new QueryWrapper<ClassicCaseAsset>()
                 .eq("tenant_id", tenantId)
+                .eq("source_connector_system_id", sourceConnectorSystemId)
                 .eq("case_code", caseCode)
                 .eq("deleted", Boolean.FALSE));
+    }
+
+    private ClassicCaseVersion findVersionByExternalId(String tenantId,
+                                                       String caseAssetId,
+                                                       String caseVersionId) {
+        return classicCaseVersionMapper.selectOne(new QueryWrapper<ClassicCaseVersion>()
+                .eq("tenant_id", tenantId)
+                .eq("case_asset_id", caseAssetId)
+                .eq("case_version_id", caseVersionId.trim())
+                .eq("deleted", Boolean.FALSE)
+                .last("limit 1"));
     }
 
     /**
@@ -1520,6 +1754,9 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
         asset.setModuleCode(request.getModuleCode());
         asset.setTeachingPointId(trimToNull(request.getTeachingPointId()));
         asset.setSceneTypesJson(sceneTypesJson);
+        asset.setTagsJson(StringUtils.hasText(request.getTagsJson()) ? request.getTagsJson() : "[]");
+        asset.setSourceUpdatedAt(request.getSourceUpdatedAt());
+        asset.setDisableReason(null);
         asset.setUpdateBy(request.getCreateBy());
         asset.setUpdateTime(LocalDateTime.now());
     }
@@ -1558,25 +1795,173 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                                             String desensitizedPayloadJson,
                                             String caseDataFormatJson,
                                             String identityBindingJson,
-                                            String desensitizePolicyJson) {
+                                            String desensitizePolicyJson,
+                                            String supportedGenerationModesJson,
+                                            String contentHash) {
         ClassicCaseVersion version = new ClassicCaseVersion();
         version.setId(UUID.randomUUID().toString());
         version.setTenantId(request.getTenantId());
         version.setCaseAssetId(asset.getId());
         version.setVersionNo(versionNo);
+        version.setCaseVersionId(StringUtils.hasText(request.getCaseVersionId())
+                ? request.getCaseVersionId().trim()
+                : version.getId());
         version.setPayloadSchemaVersion(StringUtils.hasText(request.getPayloadSchemaVersion())
                 ? request.getPayloadSchemaVersion().trim()
                 : DEFAULT_PAYLOAD_SCHEMA_VERSION);
         version.setDesensitizedCasePayloadJson(desensitizedPayloadJson);
         version.setCaseDataFormatJson(caseDataFormatJson);
         version.setIdentityBindingJson(identityBindingJson);
+        version.setSupportedGenerationModesJson(supportedGenerationModesJson);
         version.setDesensitizePolicyJson(desensitizePolicyJson);
         version.setPayloadHash(sha256(desensitizedPayloadJson));
+        version.setContentHash(contentHash);
         version.setCreateBy(request.getCreateBy());
         version.setCreateTime(LocalDateTime.now());
-        version.setStatus(RecordStatus.ACTIVE.getValue());
+        version.setStatus(ClassicCaseRuntimeConstants.STATUS_AVAILABLE);
         version.setDeleted(Boolean.FALSE);
         return version;
+    }
+
+    private String normalizeSupportedGenerationModes(String modesJson,
+                                                       boolean hasReplayPayload,
+                                                       boolean hasCaseDataFormat) {
+        List<String> modes = new ArrayList<>();
+        if (StringUtils.hasText(modesJson)) {
+            JsonNode node = parseJsonNode(modesJson, true);
+            for (JsonNode item : node) {
+                if (!item.isTextual()) {
+                    throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), "生成模式必须为字符串");
+                }
+                String mode = item.asText().trim();
+                if (!ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE.equals(mode)
+                        && !ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO.equals(mode)) {
+                    throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), "不支持的经典案例生成模式");
+                }
+                if (!modes.contains(mode)) {
+                    modes.add(mode);
+                }
+            }
+        } else {
+            if (hasReplayPayload) {
+                modes.add(ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE);
+            }
+            if (hasCaseDataFormat) {
+                modes.add(ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO);
+            }
+        }
+        if (modes.isEmpty()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), "至少需要一种经典案例生成模式");
+        }
+        if (modes.contains(ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE) && !hasReplayPayload) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "REPLAY_CASE 模式缺少 desensitizedCasePayload");
+        }
+        if (modes.contains(ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO) && !hasCaseDataFormat) {
+            throw new BusinessException(ApiResultCode.DATA_PREPARE_CONFIG_INCOMPLETE.getCode(),
+                    "FORMAT_DEMO 模式缺少 caseDataFormat");
+        }
+        return toJson(modes);
+    }
+
+    private String buildContentHash(ClassicCaseImportRequest request,
+                                    String tagsJson,
+                                    String supportedGenerationModesJson,
+                                    String identityBindingJson,
+                                    String desensitizedPayloadJson,
+                                    String caseDataFormatJson) {
+        String canonical = firstText(request.getCaseTitle(), "") + "\n"
+                + firstText(request.getModuleCode(), "") + "\n"
+                + firstText(request.getPayloadSchemaVersion(), DEFAULT_PAYLOAD_SCHEMA_VERSION) + "\n"
+                + firstText(request.getCaseSummary(), "") + "\n"
+                + supportedGenerationModesJson + "\n"
+                + tagsJson + "\n"
+                + identityBindingJson + "\n"
+                + desensitizedPayloadJson + "\n"
+                + caseDataFormatJson + "\n"
+                + (request.getSourceUpdatedAt() == null ? "" : request.getSourceUpdatedAt().toString());
+        return sha256(canonical);
+    }
+
+    private Set<String> supportedGenerationModes(ClassicCaseVersion version) {
+        Set<String> result = new LinkedHashSet<>();
+        String json = version == null ? null : version.getSupportedGenerationModesJson();
+        if (!StringUtils.hasText(json)) {
+            result.add(ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE);
+            result.add(ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO);
+            return result;
+        }
+        JsonNode node = parseJsonNode(json, true);
+        for (JsonNode item : node) {
+            if (item.isTextual() && StringUtils.hasText(item.asText())) {
+                result.add(item.asText().trim());
+            }
+        }
+        return result;
+    }
+
+    private LessonPlanClassicCaseOptionVO toClassicCaseOption(ClassicCaseAsset asset,
+                                                               ClassicCaseVersion version) {
+        LessonPlanClassicCaseOptionVO option = new LessonPlanClassicCaseOptionVO();
+        option.setClassicCaseId(asset.getId());
+        option.setConnectorSystemId(asset.getSourceConnectorSystemId());
+        option.setLearningConnectorSystemId(asset.getLearningConnectorSystemId());
+        option.setCaseCode(asset.getCaseCode());
+        option.setCaseName(asset.getCaseTitle());
+        option.setBusinessModuleCode(asset.getModuleCode());
+        option.setSummary(asset.getCaseSummary());
+        option.setTags(parseStringArray(asset.getTagsJson()));
+        option.setCaseVersionId(firstText(version.getCaseVersionId(), version.getId()));
+        option.setVersionNo(version.getVersionNo());
+        option.setPayloadSchemaVersion(version.getPayloadSchemaVersion());
+        List<String> modes = new ArrayList<>(supportedGenerationModes(version));
+        option.setSupportedGenerationModes(modes);
+        option.setDefaultGenerationMode(modes.contains(ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE)
+                ? ClassicCaseRuntimeConstants.GENERATION_MODE_REPLAY_CASE
+                : ClassicCaseRuntimeConstants.GENERATION_MODE_FORMAT_DEMO);
+        return option;
+    }
+
+    private List<String> parseStringArray(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Collections.emptyList();
+        }
+        JsonNode node = parseJsonNode(json, true);
+        List<String> values = new ArrayList<>();
+        for (JsonNode item : node) {
+            if (item.isTextual() && StringUtils.hasText(item.asText())) {
+                values.add(item.asText().trim());
+            }
+        }
+        return values;
+    }
+
+    private void validateObjectNode(JsonNode node, String fieldName) {
+        if (node == null || node.isNull() || !node.isObject()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), fieldName + " 必须是 JSON 对象");
+        }
+    }
+
+    private void validateOptionalObjectNode(JsonNode node, String fieldName) {
+        if (node != null && !node.isNull() && !node.isObject()) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), fieldName + " 必须是 JSON 对象");
+        }
+    }
+
+    private LocalDateTime parseSourceUpdatedAt(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = value.trim();
+        try {
+            return LocalDateTime.parse(normalized, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (DateTimeParseException ignored) {
+            try {
+                return LocalDateTime.parse(normalized, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            } catch (DateTimeParseException ex) {
+                throw new BusinessException(ApiResultCode.PARAM_ERROR.getCode(), "sourceUpdatedAt 格式错误");
+            }
+        }
     }
 
     /**

@@ -84,6 +84,49 @@ public class ClassicCaseController {
         return ApiResult.success(result);
     }
 
+    /** 目标契约中的案例列表路径，支持模块、来源、状态、关键字、标签和分页筛选。 */
+    @GetMapping
+    public ApiResult<List<ClassicCaseAssetVO>> searchClassicCases(
+            @RequestParam(required = false) String businessModuleCode,
+            @RequestParam(required = false) String connectorSystemId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) String tag,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "20") Integer pageSize) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
+        if (page == null || page < 1 || pageSize == null || pageSize < 1 || pageSize > 200) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        List<ClassicCaseAssetVO> matched = new ArrayList<>();
+        String normalizedKeyword = normalize(keyword);
+        String normalizedTag = normalize(tag);
+        for (ClassicCaseAsset asset : classicCaseService.listClassicCaseAssets(
+                currentUser.getTenantId(), null, businessModuleCode, null)) {
+            if (StringUtils.hasText(connectorSystemId)
+                    && !connectorSystemId.equals(asset.getSourceConnectorSystemId())
+                    && !connectorSystemId.equals(asset.getLearningConnectorSystemId())) {
+                continue;
+            }
+            if (StringUtils.hasText(status) && !status.equalsIgnoreCase(asset.getStatus())) {
+                continue;
+            }
+            String searchable = (asset.getCaseCode() + " " + asset.getCaseTitle() + " "
+                    + (asset.getCaseSummary() == null ? "" : asset.getCaseSummary())).toLowerCase();
+            if (normalizedKeyword != null && !searchable.contains(normalizedKeyword)) {
+                continue;
+            }
+            if (normalizedTag != null && (asset.getTagsJson() == null
+                    || !asset.getTagsJson().toLowerCase().contains(normalizedTag))) {
+                continue;
+            }
+            matched.add(toVO(asset));
+        }
+        int from = Math.min((page - 1) * pageSize, matched.size());
+        int to = Math.min(from + pageSize, matched.size());
+        return ApiResult.success(new ArrayList<>(matched.subList(from, to)));
+    }
+
     /**
      * 查询经典案例详情。
      *
@@ -112,9 +155,19 @@ public class ClassicCaseController {
         List<ClassicCaseVersion> versions = classicCaseService.listClassicCaseVersions(currentUser.getTenantId(), id);
         List<ClassicCaseVersionVO> result = new ArrayList<>();
         for (ClassicCaseVersion version : versions) {
-            result.add(toVO(version));
+            result.add(toSummaryVO(version));
         }
         return ApiResult.success(result);
+    }
+
+    /** 查询确定的 OA 案例版本详情。 */
+    @GetMapping("/{id}/versions/{caseVersionId}")
+    public ApiResult<ClassicCaseVersionVO> getClassicCaseVersion(
+            @PathVariable String id,
+            @PathVariable String caseVersionId) {
+        CurrentUserContext.CurrentUser currentUser = requireClassicCaseOperator();
+        return ApiResult.success(toVO(classicCaseService.getClassicCaseVersionDetail(
+                currentUser.getTenantId(), id, caseVersionId)));
     }
 
     /**
@@ -207,11 +260,11 @@ public class ClassicCaseController {
      *
      * 业务功能：
      * 1. 管理员、老师、专家可以用于备案/教学复刻和批量准备。
-     * 2. 学生只能在练习场景下按经典案例模板生成自己的 demo 数据，避免学生通过接口冒用教学备案能力。
+     * 2. 学生只能为自己生成教案已锁定版本的复刻数据或格式 demo 数据。
      *
      * 关键流程：
      * 1. 先读取可信登录上下文，不信任前端传入的用户身份。
-     * 2. 对学生角色额外限制 usageScene 必须是 STUDENT_DEMO。
+     * 2. 对学生角色额外限制 usageScene 必须是 STUDENT_DEMO 或 TEACHING_REPLICA，并强制绑定当前用户。
      *
      * @param request 经典案例生成请求。
      * @return 当前可信登录用户。
@@ -223,7 +276,8 @@ public class ClassicCaseController {
         }
         if (currentUser.hasAnyRole("STUDENT")
                 && request != null
-                && ClassicCaseRuntimeConstants.USAGE_SCENE_STUDENT_DEMO.equals(request.getUsageScene())) {
+                && (ClassicCaseRuntimeConstants.USAGE_SCENE_STUDENT_DEMO.equals(request.getUsageScene())
+                || ClassicCaseRuntimeConstants.USAGE_SCENE_TEACHING_REPLICA.equals(request.getUsageScene()))) {
             return requireTenant(currentUser);
         }
         throw new BusinessException(ApiResultCode.FORBIDDEN);
@@ -316,7 +370,10 @@ public class ClassicCaseController {
         vo.setModuleCode(asset.getModuleCode());
         vo.setTeachingPointId(asset.getTeachingPointId());
         vo.setSceneTypesJson(asset.getSceneTypesJson());
+        vo.setTagsJson(asset.getTagsJson());
         vo.setCurrentVersionId(asset.getCurrentVersionId());
+        vo.setSourceUpdatedAt(asset.getSourceUpdatedAt());
+        vo.setDisableReason(asset.getDisableReason());
         vo.setStatus(asset.getStatus());
         vo.setCreateTime(asset.getCreateTime());
         vo.setUpdateTime(asset.getUpdateTime());
@@ -396,15 +453,31 @@ public class ClassicCaseController {
      * @return 版本返回对象。
      */
     private ClassicCaseVersionVO toVO(ClassicCaseVersion version) {
+        ClassicCaseVersionVO vo = toSummaryVO(version);
+        vo.setIdentityBindingJson(version.getIdentityBindingJson());
+        vo.setDesensitizedCasePayloadJson(version.getDesensitizedCasePayloadJson());
+        vo.setCaseDataFormatJson(version.getCaseDataFormatJson());
+        return vo;
+    }
+
+    /** 列表只返回版本索引；完整脱敏内容仅由确定版本详情接口返回。 */
+    private ClassicCaseVersionVO toSummaryVO(ClassicCaseVersion version) {
         ClassicCaseVersionVO vo = new ClassicCaseVersionVO();
         vo.setId(version.getId());
         vo.setCaseAssetId(version.getCaseAssetId());
         vo.setVersionNo(version.getVersionNo());
+        vo.setCaseVersionId(version.getCaseVersionId());
         vo.setPayloadSchemaVersion(version.getPayloadSchemaVersion());
+        vo.setSupportedGenerationModesJson(version.getSupportedGenerationModesJson());
         vo.setPayloadHash(version.getPayloadHash());
+        vo.setContentHash(version.getContentHash());
         vo.setStatus(version.getStatus());
         vo.setCreateBy(version.getCreateBy());
         vo.setCreateTime(version.getCreateTime());
         return vo;
+    }
+
+    private String normalize(String value) {
+        return StringUtils.hasText(value) ? value.trim().toLowerCase() : null;
     }
 }

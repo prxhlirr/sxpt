@@ -23,6 +23,7 @@ import type {
 import {
   authApi,
   createTrainingApi,
+  dataPrepareApi,
   trainingWorkspaceApi,
   type AuthSession,
   type TrainingApi
@@ -917,6 +918,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       moduleName: input.moduleName?.trim() || businessPlatformModule.name,
       businessPlatformId,
       businessPlatformModuleId,
+      generationSource: input.generationSource ?? 'NORMAL',
+      classicCaseConfig: input.classicCaseConfig
+        ? toPlain(input.classicCaseConfig)
+        : undefined,
       description: input.description?.trim() || '',
       version: 1,
       status: 'DRAFT',
@@ -956,6 +961,23 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
   async function createLessonRemote(
     input: Partial<LessonPlan> = {}
   ): Promise<LessonPlan> {
+    if (input.generationSource === 'CLASSIC_CASE') {
+      const config = input.classicCaseConfig;
+      if (!config) throw new Error('请选择经典案例及具体版本');
+      if (backend.isEnabled()) {
+        const module = requireBusinessPlatformModule(
+          input.businessPlatformId ?? '',
+          input.businessPlatformModuleId ?? ''
+        );
+        await dataPrepareApi.validateLessonPlanClassicCaseConfig({
+          businessModuleCode: module.code,
+          connectorSystemId: config.connectorSystemId,
+          classicCaseId: config.classicCaseId,
+          caseVersionId: config.caseVersionId,
+          generationMode: config.generationMode
+        });
+      }
+    }
     return persistLessonMutation(() => createLesson(input));
   }
 
@@ -1086,6 +1108,45 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     return lesson;
   }
 
+  async function updateLessonRemote(
+    lessonId: string,
+    patch: Partial<Omit<LessonPlan, 'id' | 'stages'>>
+  ): Promise<LessonPlan> {
+    const current = requireLesson(lessonId);
+    const generationSource = patch.generationSource ?? current.generationSource ?? 'NORMAL';
+    const hasClassicCasePatch = Object.prototype.hasOwnProperty.call(
+      patch,
+      'classicCaseConfig'
+    );
+    const classicCaseConfig = hasClassicCasePatch
+      ? patch.classicCaseConfig
+      : current.classicCaseConfig;
+    const normalizedPatch = {
+      ...patch,
+      generationSource,
+      classicCaseConfig:
+        generationSource === 'CLASSIC_CASE' ? classicCaseConfig : undefined
+    };
+
+    if (generationSource === 'CLASSIC_CASE') {
+      if (!classicCaseConfig) throw new Error('请选择经典案例及具体版本');
+      if (backend.isEnabled()) {
+        const platformId = patch.businessPlatformId ?? current.businessPlatformId;
+        const moduleId =
+          patch.businessPlatformModuleId ?? current.businessPlatformModuleId;
+        const module = requireBusinessPlatformModule(platformId, moduleId);
+        await dataPrepareApi.validateLessonPlanClassicCaseConfig({
+          businessModuleCode: module.code,
+          connectorSystemId: classicCaseConfig.connectorSystemId,
+          classicCaseId: classicCaseConfig.classicCaseId,
+          caseVersionId: classicCaseConfig.caseVersionId,
+          generationMode: classicCaseConfig.generationMode
+        });
+      }
+    }
+    return persistLessonMutation(() => updateLesson(lessonId, normalizedPatch));
+  }
+
   function addStage(
     lessonId: string,
     input: Partial<LessonStage> = {}
@@ -1173,6 +1234,14 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     const issues: string[] = [];
     if (!lesson.title.trim()) issues.push('教案名称不能为空');
     if (!lesson.moduleName.trim()) issues.push('业务模块不能为空');
+    if (
+      lesson.generationSource === 'CLASSIC_CASE' &&
+      (!lesson.classicCaseConfig?.classicCaseId ||
+        !lesson.classicCaseConfig.caseVersionId ||
+        !lesson.classicCaseConfig.generationMode)
+    ) {
+      issues.push('经典案例教案必须锁定可用的案例、版本和生成模式');
+    }
     const platform = getBusinessPlatform(lesson.businessPlatformId);
     if (!platform) {
       issues.push('教案必须绑定有效的业务平台');
@@ -1506,6 +1575,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       classicCaseVersionId: dataPrepareBinding.classicCaseVersionId,
       classicCaseCode: dataPrepareBinding.classicCaseCode,
       classicCaseTitle: dataPrepareBinding.classicCaseTitle,
+      generationMode: dataPrepareBinding.generationMode,
       syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
     };
     published.dataPrepareMode = dataPrepareBinding.dataPrepareMode;
@@ -1513,6 +1583,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     published.classicCaseVersionId = dataPrepareBinding.classicCaseVersionId;
     published.classicCaseCode = dataPrepareBinding.classicCaseCode;
     published.classicCaseTitle = dataPrepareBinding.classicCaseTitle;
+    published.generationMode = dataPrepareBinding.generationMode;
     if (dataPrepareBinding.dataPrepareMode === 'CLASSIC_CASE') {
       published.dataCount = 0;
     }
@@ -1556,6 +1627,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         existingAssignment.classicCaseVersionId = dataPrepareBinding.classicCaseVersionId;
         existingAssignment.classicCaseCode = dataPrepareBinding.classicCaseCode;
         existingAssignment.classicCaseTitle = dataPrepareBinding.classicCaseTitle;
+        existingAssignment.generationMode = dataPrepareBinding.generationMode;
         return;
       }
       state.studentTasks.push({
@@ -1581,6 +1653,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         classicCaseVersionId: dataPrepareBinding.classicCaseVersionId,
         classicCaseCode: dataPrepareBinding.classicCaseCode,
         classicCaseTitle: dataPrepareBinding.classicCaseTitle,
+        generationMode: dataPrepareBinding.generationMode,
         completedPracticeStepIds: [],
         practiceStepResults: [],
         syncStatus: backend.isEnabled() ? 'SYNCING' : 'LOCAL'
@@ -2887,6 +2960,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     deleteLesson,
     deleteLessonRemote,
     updateLesson,
+    updateLessonRemote,
     addStage,
     updateStage,
     removeStage,

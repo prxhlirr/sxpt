@@ -2,6 +2,7 @@ package com.sxpt.module.connector.dto;
 
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.Size;
+import java.time.LocalDateTime;
 
 /**
  * 经典案例导入请求。
@@ -31,6 +32,9 @@ public class ClassicCaseImportRequest {
     @Size(max = 1024, message = "案例说明长度不能超过 1024")
     private String caseSummary;
 
+    @Size(max = 128, message = "案例版本 ID 长度不能超过 128")
+    private String caseVersionId;
+
     @NotBlank(message = "来源正式环境平台 ID 不能为空")
     @Size(max = 64, message = "来源正式环境平台 ID 长度不能超过 64")
     private String sourceConnectorSystemId;
@@ -53,6 +57,10 @@ public class ClassicCaseImportRequest {
     @NotBlank(message = "适用场景不能为空")
     private String sceneTypesJson;
 
+    private String tagsJson;
+
+    private String supportedGenerationModesJson;
+
     @Size(max = 32, message = "payload 格式版本长度不能超过 32")
     private String payloadSchemaVersion;
 
@@ -66,6 +74,8 @@ public class ClassicCaseImportRequest {
     private String identityBindingJson;
 
     private String desensitizePolicyJson;
+
+    private LocalDateTime sourceUpdatedAt;
 
     @NotBlank(message = "创建人不能为空")
     @Size(max = 64, message = "创建人长度不能超过 64")
@@ -101,6 +111,14 @@ public class ClassicCaseImportRequest {
 
     public void setCaseSummary(String caseSummary) {
         this.caseSummary = caseSummary;
+    }
+
+    public String getCaseVersionId() {
+        return caseVersionId;
+    }
+
+    public void setCaseVersionId(String caseVersionId) {
+        this.caseVersionId = caseVersionId;
     }
 
     public String getSourceConnectorSystemId() {
@@ -151,6 +169,22 @@ public class ClassicCaseImportRequest {
         this.sceneTypesJson = sceneTypesJson;
     }
 
+    public String getTagsJson() {
+        return tagsJson;
+    }
+
+    public void setTagsJson(String tagsJson) {
+        this.tagsJson = tagsJson;
+    }
+
+    public String getSupportedGenerationModesJson() {
+        return supportedGenerationModesJson;
+    }
+
+    public void setSupportedGenerationModesJson(String supportedGenerationModesJson) {
+        this.supportedGenerationModesJson = supportedGenerationModesJson;
+    }
+
     public String getPayloadSchemaVersion() {
         return payloadSchemaVersion;
     }
@@ -189,6 +223,14 @@ public class ClassicCaseImportRequest {
 
     public void setDesensitizePolicyJson(String desensitizePolicyJson) {
         this.desensitizePolicyJson = desensitizePolicyJson;
+    }
+
+    public LocalDateTime getSourceUpdatedAt() {
+        return sourceUpdatedAt;
+    }
+
+    public void setSourceUpdatedAt(LocalDateTime sourceUpdatedAt) {
+        this.sourceUpdatedAt = sourceUpdatedAt;
     }
 
     public String getCreateBy() {

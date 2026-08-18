@@ -428,13 +428,16 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
         JsonNode requestSnapshot = parseOptionalJson(request.getRequestJson());
         JsonNode capabilityContract = parseOptionalJson(
                 capability == null ? null : capability.getRequestSchemaJson());
+        boolean classicCaseRequest = isClassicCaseRequest(requestSnapshot);
         OriginBatchCreateRequest originRequest = new OriginBatchCreateRequest();
         originRequest.setBusinessModuleCode(firstText(
                 textValue(capabilityContract, "businessModuleCode"), request.getModuleCode()));
-        originRequest.setTemplateCode(firstText(
-                textValue(capabilityContract, "templateCode"), resolveTemplateCode(requestSnapshot)));
-        originRequest.setInitState(firstText(
-                textValue(capabilityContract, "initState"), resolveInitState(requestSnapshot)));
+        originRequest.setTemplateCode(classicCaseRequest
+                ? resolveTemplateCode(requestSnapshot)
+                : firstText(textValue(capabilityContract, "templateCode"), resolveTemplateCode(requestSnapshot)));
+        originRequest.setInitState(classicCaseRequest
+                ? resolveInitState(requestSnapshot)
+                : firstText(textValue(capabilityContract, "initState"), resolveInitState(requestSnapshot)));
         originRequest.setSceneType(request.getSceneType());
         originRequest.setParticipants(buildOriginParticipants(request, capabilityContract));
         originRequest.setBizParams(resolveBizParams(requestSnapshot, capabilityContract));
@@ -660,7 +663,8 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
      */
     private Map<String, Object> resolveBizParams(JsonNode requestSnapshot,
                                                  JsonNode capabilityContract) {
-        if (!booleanValue(capabilityContract, "forwardBizParams", true)) {
+        if (!isClassicCaseRequest(requestSnapshot)
+                && !booleanValue(capabilityContract, "forwardBizParams", true)) {
             return new LinkedHashMap<>();
         }
         JsonNode bizParams = requestSnapshot == null ? null : requestSnapshot.get("bizParams");
@@ -668,6 +672,11 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
             return new LinkedHashMap<>();
         }
         return JSON_MAPPER.convertValue(bizParams, MAP_TYPE);
+    }
+
+    private boolean isClassicCaseRequest(JsonNode requestSnapshot) {
+        return "CLASSIC_CASE".equals(nestedTextValue(
+                requestSnapshot, "bizParams", "generationSource"));
     }
 
     /**

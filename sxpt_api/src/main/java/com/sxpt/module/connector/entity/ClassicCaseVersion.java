@@ -28,7 +28,11 @@ public class ClassicCaseVersion {
 
     private Integer versionNo;
 
+    private String caseVersionId;
+
     private String payloadSchemaVersion;
+
+    private String supportedGenerationModesJson;
 
     private String desensitizedCasePayloadJson;
 
@@ -39,6 +43,8 @@ public class ClassicCaseVersion {
     private String desensitizePolicyJson;
 
     private String payloadHash;
+
+    private String contentHash;
 
     private String createBy;
 
@@ -80,12 +86,28 @@ public class ClassicCaseVersion {
         this.versionNo = versionNo;
     }
 
+    public String getCaseVersionId() {
+        return caseVersionId;
+    }
+
+    public void setCaseVersionId(String caseVersionId) {
+        this.caseVersionId = caseVersionId;
+    }
+
     public String getPayloadSchemaVersion() {
         return payloadSchemaVersion;
     }
 
     public void setPayloadSchemaVersion(String payloadSchemaVersion) {
         this.payloadSchemaVersion = payloadSchemaVersion;
+    }
+
+    public String getSupportedGenerationModesJson() {
+        return supportedGenerationModesJson;
+    }
+
+    public void setSupportedGenerationModesJson(String supportedGenerationModesJson) {
+        this.supportedGenerationModesJson = supportedGenerationModesJson;
     }
 
     public String getDesensitizedCasePayloadJson() {
@@ -126,6 +148,14 @@ public class ClassicCaseVersion {
 
     public void setPayloadHash(String payloadHash) {
         this.payloadHash = payloadHash;
+    }
+
+    public String getContentHash() {
+        return contentHash;
+    }
+
+    public void setContentHash(String contentHash) {
+        this.contentHash = contentHash;
     }
 
     public String getCreateBy() {

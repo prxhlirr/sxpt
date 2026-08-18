@@ -2,12 +2,22 @@ export type PortalRole = 'admin' | 'teacher' | 'student';
 export type LessonStatus = 'DRAFT' | 'RECORDED' | 'PUBLISHED' | 'ARCHIVED';
 export type RunMode = 'LEARNING' | 'PRACTICE' | 'EXAM';
 export type DataPrepareMode = 'NORMAL' | 'CLASSIC_CASE';
+export type ClassicCaseGenerationMode = 'REPLAY_CASE' | 'FORMAT_DEMO';
+export interface LessonClassicCaseConfig {
+  connectorSystemId: string;
+  classicCaseId: string;
+  caseCode: string;
+  caseName: string;
+  caseVersionId: string;
+  generationMode: ClassicCaseGenerationMode;
+}
 export interface TaskDataPrepareBinding {
   dataPrepareMode: DataPrepareMode;
   classicCaseAssetId?: string;
   classicCaseVersionId?: string;
   classicCaseCode?: string;
   classicCaseTitle?: string;
+  generationMode?: ClassicCaseGenerationMode;
 }
 export type CompletionMethod =
   | 'click'
@@ -132,6 +142,8 @@ export interface LessonPlan {
   moduleName: string;
   businessPlatformId: string;
   businessPlatformModuleId: string;
+  generationSource?: DataPrepareMode;
+  classicCaseConfig?: LessonClassicCaseConfig;
   description: string;
   version: number;
   status: LessonStatus;
@@ -245,6 +257,7 @@ export interface PublishedTask {
   classicCaseVersionId?: string;
   classicCaseCode?: string;
   classicCaseTitle?: string;
+  generationMode?: ClassicCaseGenerationMode;
   remoteCourseId?: string;
   remoteTaskId?: string;
   remoteTeachingPointId?: string;
@@ -293,6 +306,7 @@ export interface StudentTask {
   classicCaseVersionId?: string;
   classicCaseCode?: string;
   classicCaseTitle?: string;
+  generationMode?: ClassicCaseGenerationMode;
   completedPracticeStepIds?: string[];
   practiceStepResults?: PracticeStepResult[];
   objectiveScore?: number;

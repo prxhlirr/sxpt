@@ -5,6 +5,7 @@ import com.sxpt.common.trace.TraceIdInterceptor;
 import com.sxpt.common.idempotent.IdempotentInterceptor;
 import com.sxpt.common.security.AuthenticatedUserContextService;
 import com.sxpt.common.security.ExternalApiKeyAuthInterceptor;
+import com.sxpt.common.security.ConnectorKeyAuthInterceptor;
 import com.sxpt.common.security.JwtAuthInterceptor;
 import com.sxpt.module.connector.service.ExternalConnectorCredentialService;
 import org.apache.shiro.mgt.SecurityManager;
@@ -109,6 +110,10 @@ public class WebConfig implements WebMvcConfigurer {
         if (externalConnectorCredentialService != null) {
             registry.addInterceptor(new ExternalApiKeyAuthInterceptor(externalConnectorCredentialService))
                     .addPathPatterns("/api/v1/external/**");
+            registry.addInterceptor(new ConnectorKeyAuthInterceptor(externalConnectorCredentialService))
+                    .addPathPatterns(
+                            "/api/v1/connector/business-modules",
+                            "/api/v1/connector/classic-cases/**");
         }
         registry.addInterceptor(new JwtAuthInterceptor(securityManager, authenticatedUserContextService))
                 .addPathPatterns("/api/v1/**")

@@ -21,6 +21,7 @@ const modules = ref<BusinessModule[]>([]);
 const cases = ref<ClassicCaseAsset[]>([]);
 const versions = ref<ClassicCaseVersion[]>([]);
 const selectedCase = ref<ClassicCaseAsset | null>(null);
+const selectedVersion = ref<ClassicCaseVersion | null>(null);
 const launchResult = ref<ClassicCaseLaunchResult | null>(null);
 const notice = reactive({
   show: false,
@@ -61,6 +62,10 @@ const text = {
   learningEnv: '学习环境',
   currentVersion: '当前版本',
   versions: '版本记录',
+  versionDetail: '版本内容（已脱敏）',
+  identityBinding: '身份绑定',
+  replayPayload: '案例数据',
+  formatPayload: '格式数据',
   noVersionRecords: '暂无版本记录',
   launchContext: '启动上下文',
   businessNo: '业务编号',
@@ -76,6 +81,7 @@ const text = {
 };
 const statusTextMap: Record<string, string> = {
   ACTIVE: '启用',
+  AVAILABLE: '可用',
   SUCCESS: '成功',
   FAILED: '失败',
   DISABLED: '停用',
@@ -97,7 +103,7 @@ const selectedModule = computed(() =>
   modules.value.find((item) => item.moduleCode === filters.moduleCode)
 );
 const enabledCaseCount = computed(() =>
-  cases.value.filter((item) => item.status === 'ACTIVE').length
+  cases.value.filter((item) => item.status === 'ACTIVE' || item.status === 'AVAILABLE').length
 );
 const latestVersion = computed(() => versions.value[0]);
 
@@ -163,12 +169,24 @@ async function loadCases() {
 
 async function loadVersions(caseAsset: ClassicCaseAsset | null) {
   selectedCase.value = caseAsset;
+  selectedVersion.value = null;
   launchResult.value = null;
   if (!caseAsset) {
     versions.value = [];
     return;
   }
   versions.value = await dataPrepareApi.listClassicCaseVersions(caseAsset.id, filters.tenantId);
+  if (versions.value[0]) {
+    await loadVersionDetail(versions.value[0]);
+  }
+}
+
+async function loadVersionDetail(version: ClassicCaseVersion) {
+  if (!selectedCase.value) return;
+  selectedVersion.value = await dataPrepareApi.getClassicCaseVersion(
+    selectedCase.value.id,
+    version.caseVersionId || version.id
+  );
 }
 
 async function generateTeachingReplica() {
@@ -223,7 +241,7 @@ function friendlyErrorMessage(err: unknown) {
 }
 
 function statusClass(status?: string) {
-  if (status === 'ACTIVE' || status === 'SUCCESS') return 'success';
+  if (status === 'ACTIVE' || status === 'AVAILABLE' || status === 'SUCCESS') return 'success';
   if (status === 'FAILED') return 'danger';
   return 'info';
 }
@@ -389,9 +407,15 @@ function formatTime(value?: string) {
           <section class="version-section">
             <h3>{{ text.versions }}</h3>
             <ul v-if="versions.length" class="version-list">
-              <li v-for="version in versions" :key="version.id">
+              <li
+                v-for="version in versions"
+                :key="version.id"
+                :class="{ selected: version.id === selectedVersion?.id }"
+                @click="loadVersionDetail(version)"
+              >
                 <div>
                   <strong>v{{ version.versionNo }}</strong>
+                  <span>{{ version.caseVersionId || version.id }}</span>
                   <span>{{ version.payloadSchemaVersion || '-' }}</span>
                 </div>
                 <span class="status-badge" :class="statusClass(version.status)">
@@ -400,6 +424,22 @@ function formatTime(value?: string) {
               </li>
             </ul>
             <p v-else class="helper-text">{{ text.noVersionRecords }}</p>
+          </section>
+
+          <section v-if="selectedVersion" class="version-section version-detail">
+            <h3>{{ text.versionDetail }}</h3>
+            <label v-if="selectedVersion.identityBindingJson">
+              <span>{{ text.identityBinding }}</span>
+              <pre>{{ selectedVersion.identityBindingJson }}</pre>
+            </label>
+            <label v-if="selectedVersion.desensitizedCasePayloadJson">
+              <span>{{ text.replayPayload }}</span>
+              <pre>{{ selectedVersion.desensitizedCasePayloadJson }}</pre>
+            </label>
+            <label v-if="selectedVersion.caseDataFormatJson">
+              <span>{{ text.formatPayload }}</span>
+              <pre>{{ selectedVersion.caseDataFormatJson }}</pre>
+            </label>
           </section>
 
           <section v-if="launchResult" class="launch-box">
@@ -536,6 +576,12 @@ tr.selected {
   border: 1px solid var(--dp-line);
   border-radius: 6px;
   padding: 10px;
+  cursor: pointer;
+}
+
+.version-list li.selected {
+  border-color: #2563eb;
+  background: #eff6ff;
 }
 
 .version-list div {
@@ -549,6 +595,30 @@ tr.selected {
 
 .version-list span {
   color: var(--dp-muted);
+  font-size: 12px;
+}
+
+.version-detail label {
+  display: grid;
+  gap: 6px;
+}
+
+.version-detail label > span {
+  color: var(--dp-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.version-detail pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid var(--dp-line);
+  border-radius: 6px;
+  background: #f8fafc;
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
   font-size: 12px;
 }
 

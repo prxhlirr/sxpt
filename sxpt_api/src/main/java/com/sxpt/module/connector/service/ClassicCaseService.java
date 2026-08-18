@@ -7,6 +7,10 @@ import com.sxpt.module.connector.dto.ClassicCaseGenerateRequest;
 import com.sxpt.module.connector.entity.ClassicCaseAsset;
 import com.sxpt.module.connector.entity.ClassicCaseUsage;
 import com.sxpt.module.connector.entity.ClassicCaseVersion;
+import com.sxpt.module.connector.dto.ClassicCaseUpsertRequest;
+import com.sxpt.module.connector.dto.ClassicCaseConfigValidationRequest;
+import com.sxpt.module.connector.service.ExternalConnectorCredentialService.AuthenticatedExternalConnector;
+import com.sxpt.module.connector.vo.LessonPlanClassicCaseOptionVO;
 
 import java.util.List;
 
@@ -30,6 +34,17 @@ public interface ClassicCaseService {
      * @return 已创建或更新的经典案例资产。
      */
     ClassicCaseAsset importClassicCase(ClassicCaseImportRequest request);
+
+    /** 按 OA caseVersionId 幂等接收目标契约中的经典案例。 */
+    ClassicCaseAsset upsertClassicCase(ClassicCaseUpsertRequest request,
+                                       AuthenticatedExternalConnector connector);
+
+    /** 停用来源平台下的经典案例，使其不再出现在新教案选项中。 */
+    ClassicCaseAsset disableClassicCase(String tenantId,
+                                        String sourceConnectorSystemId,
+                                        String caseCode,
+                                        String reason,
+                                        String operator);
 
     /**
      * 基于经典案例在学习环境生成业务数据。
@@ -70,6 +85,21 @@ public interface ClassicCaseService {
      * @return 版本列表。
      */
     List<ClassicCaseVersion> listClassicCaseVersions(String tenantId, String caseAssetId);
+
+    /** 按内部 ID 或 OA caseVersionId 查询确定版本。 */
+    ClassicCaseVersion getClassicCaseVersionDetail(String tenantId,
+                                                   String caseAssetId,
+                                                   String caseVersionId);
+
+    /** 查询教案创建页可锁定的可用案例版本摘要。 */
+    List<LessonPlanClassicCaseOptionVO> listClassicCaseOptions(String tenantId,
+                                                               String businessModuleCode,
+                                                               String connectorSystemId,
+                                                               String keyword);
+
+    /** 教案保存前重新校验租户、来源、模块、版本及生成模式。 */
+    LessonPlanClassicCaseOptionVO validateClassicCaseConfig(String tenantId,
+                                                            ClassicCaseConfigValidationRequest request);
 
     /**
      * 批量生成学生经典案例 demo 数据。
