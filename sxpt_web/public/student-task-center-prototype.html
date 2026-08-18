@@ -1,0 +1,1132 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>学生任务中心 · 合并展示原型</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --purple: #6657d6;
+        --purple-dark: #5040bd;
+        --purple-soft: #f0edff;
+        --green: #12946c;
+        --green-soft: #eaf8f3;
+        --amber: #c77a16;
+        --amber-soft: #fff5e5;
+        --blue: #2879d6;
+        --blue-soft: #edf5ff;
+        --text: #263247;
+        --muted: #7c8799;
+        --line: #e4e8ef;
+        --panel: #fff;
+        --canvas: #f5f6f9;
+        font-family:
+          Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        background: var(--canvas);
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .app-shell {
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: 226px minmax(0, 1fr);
+      }
+
+      .sidebar {
+        position: sticky;
+        top: 0;
+        height: 100vh;
+        padding: 24px 16px;
+        color: #d9deea;
+        background:
+          radial-gradient(circle at 20% 0%, rgb(116 99 234 / 26%), transparent 28%),
+          linear-gradient(180deg, #252b3a, #1b202d);
+      }
+
+      .brand {
+        display: flex;
+        align-items: center;
+        gap: 11px;
+        padding: 0 8px 24px;
+      }
+
+      .brand-mark {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 13px;
+        color: #fff;
+        background: linear-gradient(145deg, #7869ed, #5948c7);
+        font-size: 18px;
+        font-weight: 900;
+      }
+
+      .brand strong,
+      .brand small {
+        display: block;
+      }
+
+      .brand strong {
+        color: #fff;
+        font-size: 17px;
+      }
+
+      .brand small {
+        margin-top: 3px;
+        color: #929bad;
+        font-size: 12px;
+      }
+
+      .nav-title {
+        margin: 12px 10px 8px;
+        color: #7d879a;
+        font-size: 11px;
+        font-weight: 800;
+        letter-spacing: 0.09em;
+      }
+
+      .nav-item {
+        display: flex;
+        min-height: 48px;
+        align-items: center;
+        gap: 12px;
+        margin: 4px 0;
+        border-radius: 12px;
+        padding: 0 13px;
+        color: #b7c0cf;
+        font-size: 15px;
+      }
+
+      .nav-item.active {
+        color: #fff;
+        background: rgb(255 255 255 / 10%);
+      }
+
+      .nav-item i {
+        display: grid;
+        width: 24px;
+        height: 24px;
+        place-items: center;
+        font-style: normal;
+      }
+
+      main {
+        min-width: 0;
+      }
+
+      .topbar {
+        display: flex;
+        height: 68px;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid var(--line);
+        padding: 0 30px;
+        background: rgb(255 255 255 / 92%);
+        backdrop-filter: blur(14px);
+      }
+
+      .topbar > span {
+        color: #788398;
+        font-size: 14px;
+      }
+
+      .student {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .student-avatar {
+        display: grid;
+        width: 36px;
+        height: 36px;
+        place-items: center;
+        border-radius: 50%;
+        color: #fff;
+        background: #6657d6;
+        font-weight: 800;
+      }
+
+      .student strong,
+      .student small {
+        display: block;
+      }
+
+      .student strong {
+        font-size: 14px;
+      }
+
+      .student small {
+        margin-top: 2px;
+        color: #8a94a5;
+        font-size: 12px;
+      }
+
+      .content {
+        width: min(1420px, 100%);
+        margin: 0 auto;
+        padding: 30px 32px 56px;
+      }
+
+      .hero {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 20px;
+        margin-bottom: 22px;
+      }
+
+      .hero small {
+        color: var(--purple);
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: 0.12em;
+      }
+
+      h1 {
+        margin: 7px 0 7px;
+        font-size: clamp(26px, 3vw, 36px);
+        line-height: 1.2;
+      }
+
+      .hero p {
+        max-width: 780px;
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.7;
+      }
+
+      .summary {
+        display: flex;
+        gap: 8px;
+      }
+
+      .summary span {
+        min-width: 100px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        padding: 11px 14px;
+        background: #fff;
+      }
+
+      .summary b,
+      .summary small {
+        display: block;
+      }
+
+      .summary b {
+        font-size: 22px;
+      }
+
+      .summary small {
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .organization-note {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 13px;
+        margin-bottom: 18px;
+        border: 1px solid #ddd7ff;
+        border-radius: 14px;
+        padding: 13px 16px;
+        color: #514790;
+        background: #f5f2ff;
+      }
+
+      .organization-note > i {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 10px;
+        color: #fff;
+        background: var(--purple);
+        font-style: normal;
+        font-weight: 900;
+      }
+
+      .organization-note strong,
+      .organization-note span {
+        display: block;
+      }
+
+      .organization-note strong {
+        font-size: 14px;
+      }
+
+      .organization-note span {
+        margin-top: 3px;
+        font-size: 13px;
+      }
+
+      .organization-note code {
+        border-radius: 999px;
+        padding: 7px 11px;
+        color: #6255c5;
+        background: #fff;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        margin-bottom: 20px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        padding: 8px;
+        background: #fff;
+      }
+
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .filters button {
+        min-height: 38px;
+        border: 0;
+        border-radius: 10px;
+        padding: 0 15px;
+        color: #748094;
+        background: transparent;
+        font-size: 14px;
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      .filters button.active {
+        color: #fff;
+        background: var(--purple);
+      }
+
+      .search {
+        display: flex;
+        min-width: 260px;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0 12px;
+      }
+
+      .search input {
+        width: 100%;
+        height: 38px;
+        border: 0;
+        outline: 0;
+        color: var(--text);
+        background: transparent;
+        font: inherit;
+      }
+
+      .platform-section {
+        margin-top: 26px;
+      }
+
+      .platform-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        margin-bottom: 13px;
+      }
+
+      .platform-title {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .platform-icon {
+        display: grid;
+        width: 44px;
+        height: 44px;
+        place-items: center;
+        border-radius: 13px;
+        color: #fff;
+        background: linear-gradient(145deg, #6679ed, #5543c5);
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .platform-title h2,
+      .platform-title p {
+        margin: 0;
+      }
+
+      .platform-title h2 {
+        font-size: 20px;
+      }
+
+      .platform-title p {
+        margin-top: 3px;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .platform-heading > span {
+        border-radius: 999px;
+        padding: 7px 11px;
+        color: #617087;
+        background: #e9edf3;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .module-block {
+        margin-bottom: 18px;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        background: #eef1f5;
+      }
+
+      .module-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 18px;
+      }
+
+      .module-heading > div {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+
+      .module-heading strong {
+        font-size: 16px;
+      }
+
+      .module-heading span {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .module-heading em {
+        color: var(--purple);
+        font-size: 12px;
+        font-style: normal;
+        font-weight: 800;
+      }
+
+      .lesson-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px;
+        padding: 0 14px 14px;
+      }
+
+      .lesson-card {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        background: #fff;
+        box-shadow: 0 8px 24px rgb(31 39 68 / 5%);
+      }
+
+      .lesson-card.hidden {
+        display: none;
+      }
+
+      .lesson-head {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: start;
+        gap: 12px;
+        padding: 18px 18px 15px;
+      }
+
+      .lesson-order {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 12px;
+        color: var(--purple);
+        background: var(--purple-soft);
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .lesson-title h3,
+      .lesson-title p {
+        margin: 0;
+      }
+
+      .lesson-title h3 {
+        overflow: hidden;
+        font-size: 17px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .lesson-title p {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .lesson-state {
+        border-radius: 999px;
+        padding: 6px 9px;
+        color: var(--green);
+        background: var(--green-soft);
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .lesson-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        padding: 0 18px 14px;
+      }
+
+      .lesson-meta span {
+        border-radius: 7px;
+        padding: 5px 8px;
+        color: #6e798c;
+        background: #f3f5f8;
+        font-size: 12px;
+      }
+
+      .task-pair {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+        padding: 0 18px 17px;
+      }
+
+      .mode-panel {
+        display: grid;
+        min-width: 0;
+        gap: 10px;
+        border: 1px solid var(--line);
+        border-radius: 13px;
+        padding: 13px;
+        background: #fafbfc;
+      }
+
+      .mode-panel.learning {
+        border-color: #dcd7ff;
+        background: #faf9ff;
+      }
+
+      .mode-panel.practice {
+        border-color: #d8ece5;
+        background: #f8fcfa;
+      }
+
+      .mode-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .mode-name {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 14px;
+        font-weight: 900;
+      }
+
+      .mode-name i {
+        display: grid;
+        width: 27px;
+        height: 27px;
+        place-items: center;
+        border-radius: 8px;
+        color: #fff;
+        background: var(--purple);
+        font-size: 12px;
+        font-style: normal;
+      }
+
+      .practice .mode-name i {
+        background: var(--green);
+      }
+
+      .mode-status {
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .mode-status.doing {
+        color: var(--blue);
+      }
+
+      .mode-status.done {
+        color: var(--green);
+      }
+
+      .progress-line {
+        overflow: hidden;
+        height: 5px;
+        border-radius: 999px;
+        background: #e8eaf0;
+      }
+
+      .progress-line i {
+        display: block;
+        height: 100%;
+        border-radius: inherit;
+        background: var(--purple);
+      }
+
+      .practice .progress-line i {
+        background: var(--green);
+      }
+
+      .mode-detail {
+        display: flex;
+        min-height: 34px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .mode-detail b {
+        color: #465268;
+        font-size: 12px;
+      }
+
+      .task-button {
+        display: grid;
+        min-height: 42px;
+        place-items: center;
+        border: 0;
+        border-radius: 10px;
+        color: #fff;
+        background: var(--purple);
+        font-size: 14px;
+        font-weight: 900;
+        cursor: pointer;
+      }
+
+      .task-button:hover {
+        background: var(--purple-dark);
+      }
+
+      .practice .task-button {
+        background: var(--green);
+      }
+
+      .task-button.secondary {
+        border: 1px solid var(--line);
+        color: #59657a;
+        background: #fff;
+      }
+
+      .history-toggle {
+        display: flex;
+        width: 100%;
+        min-height: 44px;
+        align-items: center;
+        justify-content: space-between;
+        border: 0;
+        border-top: 1px solid var(--line);
+        padding: 0 18px;
+        color: #707b8e;
+        background: #fbfcfd;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .history-toggle b {
+        color: var(--purple);
+      }
+
+      .history-list {
+        display: none;
+        border-top: 1px solid var(--line);
+        background: #f8f9fb;
+      }
+
+      .history-list.open {
+        display: block;
+      }
+
+      .history-row {
+        display: grid;
+        grid-template-columns: minmax(120px, 1.2fr) repeat(2, minmax(90px, 1fr)) auto;
+        align-items: center;
+        gap: 10px;
+        padding: 11px 18px;
+        color: #687489;
+        font-size: 12px;
+      }
+
+      .history-row + .history-row {
+        border-top: 1px dashed #dde2e9;
+      }
+
+      .history-row strong {
+        color: #3f4c61;
+      }
+
+      .history-row button {
+        border: 0;
+        color: var(--purple);
+        background: transparent;
+        font-size: 12px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .exam-card {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 14px;
+        margin-top: 26px;
+        border: 1px solid #f1d5ae;
+        border-radius: 16px;
+        padding: 16px 18px;
+        background: #fffaf2;
+      }
+
+      .exam-card i {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 12px;
+        color: #fff;
+        background: #cf8121;
+        font-style: normal;
+        font-weight: 900;
+      }
+
+      .exam-card strong,
+      .exam-card span {
+        display: block;
+      }
+
+      .exam-card strong {
+        font-size: 15px;
+      }
+
+      .exam-card span {
+        margin-top: 4px;
+        color: #8a7151;
+        font-size: 12px;
+      }
+
+      .exam-card button {
+        min-height: 40px;
+        border: 0;
+        border-radius: 10px;
+        padding: 0 17px;
+        color: #fff;
+        background: #c97919;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .prototype-toast {
+        position: fixed;
+        z-index: 20;
+        right: 26px;
+        bottom: 24px;
+        max-width: min(360px, calc(100vw - 40px));
+        border-radius: 12px;
+        padding: 13px 16px;
+        color: #fff;
+        background: rgb(39 47 65 / 94%);
+        box-shadow: 0 14px 36px rgb(20 25 39 / 24%);
+        font-size: 13px;
+        opacity: 0;
+        pointer-events: none;
+        transform: translateY(12px);
+        transition: 180ms ease;
+      }
+
+      .prototype-toast.show {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @media (max-width: 1100px) {
+        .lesson-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .hero {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+
+      @media (max-width: 760px) {
+        .app-shell {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          display: none;
+        }
+
+        .content {
+          padding: 22px 14px 42px;
+        }
+
+        .topbar {
+          padding: 0 16px;
+        }
+
+        .summary,
+        .organization-note code,
+        .search {
+          display: none;
+        }
+
+        .toolbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .task-pair {
+          grid-template-columns: 1fr;
+        }
+
+        .platform-heading {
+          align-items: flex-start;
+        }
+
+        .history-row {
+          grid-template-columns: 1fr auto;
+        }
+
+        .history-row span:nth-of-type(2) {
+          display: none;
+        }
+
+        .exam-card {
+          grid-template-columns: auto 1fr;
+        }
+
+        .exam-card button {
+          grid-column: 1 / -1;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">实</span>
+          <div><strong>业务实训平台</strong><small>STUDENT CENTER</small></div>
+        </div>
+        <div class="nav-title">学生工作台</div>
+        <div class="nav-item active"><i>▦</i>学习与练习</div>
+        <div class="nav-item"><i>◇</i>我的考试</div>
+        <div class="nav-item"><i>✓</i>成绩反馈</div>
+        <div class="nav-title">其他</div>
+        <div class="nav-item"><i>?</i>帮助中心</div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <span>2026 秋季学期 · 我的任务</span>
+          <div class="student">
+            <span class="student-avatar">张</span>
+            <div><strong>张同学</strong><small>学生账号 student01</small></div>
+          </div>
+        </header>
+
+        <div class="content">
+          <section class="hero">
+            <div>
+              <small>MY TRAINING DESK</small>
+              <h1>学习与练习</h1>
+              <p>按业务平台和模块查找教案。同一教案的学习、练习合并展示，不再生成两张重复卡片。</p>
+            </div>
+            <div class="summary">
+              <span><b>4</b><small>教案任务</small></span>
+              <span><b>2</b><small>待完成</small></span>
+              <span><b>75%</b><small>本周完成率</small></span>
+            </div>
+          </section>
+
+          <div class="organization-note">
+            <i>合</i>
+            <div>
+              <strong>推荐组织方式</strong>
+              <span>业务平台下按模块分组；教案只占一张卡，学习和练习作为两个并列入口；重复发布折叠为历史轮次。</span>
+            </div>
+            <code>平台 → 模块 → 教案 → 学习 / 练习</code>
+          </div>
+
+          <div class="toolbar">
+            <div class="filters" aria-label="平台筛选">
+              <button class="active" type="button" data-platform="all">全部平台</button>
+              <button type="button" data-platform="oa">OA 协同办公</button>
+              <button type="button" data-platform="purchase">采购业务系统</button>
+            </div>
+            <label class="search">⌕<input id="lesson-search" placeholder="搜索教案或业务模块" /></label>
+          </div>
+
+          <section class="platform-section" data-platform-section="oa">
+            <div class="platform-heading">
+              <div class="platform-title">
+                <span class="platform-icon">OA</span>
+                <div><h2>OA 协同办公平台</h2><p>2 个业务模块 · 3 个教案任务</p></div>
+              </div>
+              <span>3 个教案</span>
+            </div>
+
+            <section class="module-block">
+              <header class="module-heading">
+                <div><strong>公文管理</strong><span>DOCUMENT WORKFLOW</span></div>
+                <em>2 个教案</em>
+              </header>
+              <div class="lesson-grid">
+                <article class="lesson-card" data-search="公文起草与审批 公文管理 OA">
+                  <header class="lesson-head">
+                    <span class="lesson-order">01</span>
+                    <div class="lesson-title">
+                      <h3>公文起草与审批完整流程</h3>
+                      <p>OA-DOC-001 · 最新发布 08-17 14:20</p>
+                    </div>
+                    <span class="lesson-state">练习中</span>
+                  </header>
+                  <div class="lesson-meta">
+                    <span>5 个教学点</span><span>18 个操作节点</span><span>角色：办公室文员</span>
+                  </div>
+                  <div class="task-pair">
+                    <section class="mode-panel learning">
+                      <div class="mode-head">
+                        <span class="mode-name"><i>学</i>学习任务</span>
+                        <span class="mode-status done">已完成</span>
+                      </div>
+                      <div class="progress-line"><i style="width: 100%"></i></div>
+                      <div class="mode-detail"><span>5 / 5 教学点</span><b>第 2 次</b></div>
+                      <button class="task-button secondary" type="button" data-action="重新学习《公文起草与审批完整流程》">重新学习</button>
+                    </section>
+                    <section class="mode-panel practice">
+                      <div class="mode-head">
+                        <span class="mode-name"><i>练</i>练习任务</span>
+                        <span class="mode-status doing">进行中</span>
+                      </div>
+                      <div class="progress-line"><i style="width: 42%"></i></div>
+                      <div class="mode-detail"><span>已完成 7 / 18 操作点</span><b>42%</b></div>
+                      <button class="task-button" type="button" data-action="继续练习《公文起草与审批完整流程》">继续练习</button>
+                    </section>
+                  </div>
+                  <button class="history-toggle" type="button">
+                    <span>同一教案还有 <b>2 轮历史任务</b></span><span class="chevron">展开⌄</span>
+                  </button>
+                  <div class="history-list">
+                    <div class="history-row">
+                      <strong>第 2 轮 · 08-10 发布</strong><span>学习：已完成</span><span>练习：86 分</span><button type="button" data-action="查看第 2 轮历史记录">查看记录</button>
+                    </div>
+                    <div class="history-row">
+                      <strong>第 1 轮 · 07-28 发布</strong><span>学习：已完成</span><span>练习：78 分</span><button type="button" data-action="查看第 1 轮历史记录">查看记录</button>
+                    </div>
+                  </div>
+                </article>
+
+                <article class="lesson-card" data-search="收文登记与分发 公文管理 OA">
+                  <header class="lesson-head">
+                    <span class="lesson-order">02</span>
+                    <div class="lesson-title">
+                      <h3>收文登记与分发</h3>
+                      <p>OA-DOC-002 · 最新发布 08-16 09:30</p>
+                    </div>
+                    <span class="lesson-state">待开始</span>
+                  </header>
+                  <div class="lesson-meta">
+                    <span>4 个教学点</span><span>13 个操作节点</span><span>角色：收文员</span>
+                  </div>
+                  <div class="task-pair">
+                    <section class="mode-panel learning">
+                      <div class="mode-head">
+                        <span class="mode-name"><i>学</i>学习任务</span>
+                        <span class="mode-status">待开始</span>
+                      </div>
+                      <div class="progress-line"><i style="width: 0%"></i></div>
+                      <div class="mode-detail"><span>按教师讲解流程学习</span><b>约 12 分钟</b></div>
+                      <button class="task-button" type="button" data-action="开始学习《收文登记与分发》">开始学习</button>
+                    </section>
+                    <section class="mode-panel practice">
+                      <div class="mode-head">
+                        <span class="mode-name"><i>练</i>练习任务</span>
+                        <span class="mode-status">待开始</span>
+                      </div>
+                      <div class="progress-line"><i style="width: 0%"></i></div>
+                      <div class="mode-detail"><span>进入原业务系统自由操作</span><b>13 个评分点</b></div>
+                      <button class="task-button" type="button" data-action="开始练习《收文登记与分发》">开始练习</button>
+                    </section>
+                  </div>
+                </article>
+              </div>
+            </section>
+
+            <section class="module-block">
+              <header class="module-heading">
+                <div><strong>会议管理</strong><span>MEETING MANAGEMENT</span></div>
+                <em>1 个教案</em>
+              </header>
+              <div class="lesson-grid">
+                <article class="lesson-card" data-search="会议申请与会议室预订 会议管理 OA">
+                  <header class="lesson-head">
+                    <span class="lesson-order">01</span>
+                    <div class="lesson-title">
+                      <h3>会议申请与会议室预订</h3>
+                      <p>OA-MTG-001 · 最新发布 08-13 16:40</p>
+                    </div>
+                    <span class="lesson-state">已完成</span>
+                  </header>
+                  <div class="lesson-meta">
+                    <span>3 个教学点</span><span>10 个操作节点</span><span>角色：会议管理员</span>
+                  </div>
+                  <div class="task-pair">
+                    <section class="mode-panel learning">
+                      <div class="mode-head"><span class="mode-name"><i>学</i>学习任务</span><span class="mode-status done">已完成</span></div>
+                      <div class="progress-line"><i style="width: 100%"></i></div>
+                      <div class="mode-detail"><span>完成于 08-14</span><b>第 1 次</b></div>
+                      <button class="task-button secondary" type="button" data-action="重新学习《会议申请与会议室预订》">重新学习</button>
+                    </section>
+                    <section class="mode-panel practice">
+                      <div class="mode-head"><span class="mode-name"><i>练</i>练习任务</span><span class="mode-status done">已评分</span></div>
+                      <div class="progress-line"><i style="width: 100%"></i></div>
+                      <div class="mode-detail"><span>客观 88 + 主观 6</span><b>94 分</b></div>
+                      <button class="task-button secondary" type="button" data-action="查看《会议申请与会议室预订》练习反馈">查看反馈</button>
+                    </section>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </section>
+
+          <section class="platform-section" data-platform-section="purchase">
+            <div class="platform-heading">
+              <div class="platform-title">
+                <span class="platform-icon">采</span>
+                <div><h2>采购业务系统</h2><p>1 个业务模块 · 1 个教案任务</p></div>
+              </div>
+              <span>1 个教案</span>
+            </div>
+            <section class="module-block">
+              <header class="module-heading">
+                <div><strong>采购申请</strong><span>PURCHASE REQUEST</span></div>
+                <em>1 个教案</em>
+              </header>
+              <div class="lesson-grid">
+                <article class="lesson-card" data-search="采购申请与审批 采购业务系统">
+                  <header class="lesson-head">
+                    <span class="lesson-order">01</span>
+                    <div class="lesson-title"><h3>采购申请与审批</h3><p>PUR-REQ-001 · 最新发布 08-15 11:10</p></div>
+                    <span class="lesson-state">学习中</span>
+                  </header>
+                  <div class="lesson-meta"><span>6 个教学点</span><span>21 个操作节点</span><span>角色：采购专员</span></div>
+                  <div class="task-pair">
+                    <section class="mode-panel learning">
+                      <div class="mode-head"><span class="mode-name"><i>学</i>学习任务</span><span class="mode-status doing">进行中</span></div>
+                      <div class="progress-line"><i style="width: 55%"></i></div>
+                      <div class="mode-detail"><span>3 / 6 教学点</span><b>55%</b></div>
+                      <button class="task-button" type="button" data-action="继续学习《采购申请与审批》">继续学习</button>
+                    </section>
+                    <section class="mode-panel practice">
+                      <div class="mode-head"><span class="mode-name"><i>练</i>练习任务</span><span class="mode-status">待开始</span></div>
+                      <div class="progress-line"><i style="width: 0%"></i></div>
+                      <div class="mode-detail"><span>可直接开始，不强制学完</span><b>21 个评分点</b></div>
+                      <button class="task-button" type="button" data-action="开始练习《采购申请与审批》">开始练习</button>
+                    </section>
+                  </div>
+                </article>
+              </div>
+            </section>
+          </section>
+
+          <section class="exam-card">
+            <i>考</i>
+            <div><strong>考试任务建议保持独立入口</strong><span>考试存在截止时间、次数限制和成绩状态，不与学习/练习合并，避免误操作。</span></div>
+            <button type="button" data-action="进入我的考试列表">查看考试任务</button>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div id="prototype-toast" class="prototype-toast"></div>
+
+    <script>
+      const platformButtons = [...document.querySelectorAll('[data-platform]')];
+      const platformSections = [...document.querySelectorAll('[data-platform-section]')];
+      const searchInput = document.querySelector('#lesson-search');
+      const toast = document.querySelector('#prototype-toast');
+      let toastTimer;
+
+      platformButtons.forEach((button) => {
+        button.addEventListener('click', () => {
+          platformButtons.forEach((item) => item.classList.remove('active'));
+          button.classList.add('active');
+          const platform = button.dataset.platform;
+          platformSections.forEach((section) => {
+            section.style.display = platform === 'all' || section.dataset.platformSection === platform ? '' : 'none';
+          });
+        });
+      });
+
+      document.querySelectorAll('.history-toggle').forEach((button) => {
+        button.addEventListener('click', () => {
+          const history = button.nextElementSibling;
+          const opened = history.classList.toggle('open');
+          button.querySelector('.chevron').textContent = opened ? '收起⌃' : '展开⌄';
+        });
+      });
+
+      searchInput.addEventListener('input', () => {
+        const keyword = searchInput.value.trim().toLowerCase();
+        document.querySelectorAll('.lesson-card').forEach((card) => {
+          card.classList.toggle('hidden', Boolean(keyword) && !card.dataset.search.toLowerCase().includes(keyword));
+        });
+      });
+
+      document.querySelectorAll('[data-action]').forEach((button) => {
+        button.addEventListener('click', () => {
+          toast.textContent = `原型交互：${button.dataset.action}`;
+          toast.classList.add('show');
+          clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => toast.classList.remove('show'), 2200);
+        });
+      });
+    </script>
+  </body>
+</html>

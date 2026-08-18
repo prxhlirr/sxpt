@@ -67,3 +67,15 @@ sxpt:
     adapter-mode: "${SXPT_ORIGIN_ADAPTER_MODE:http}"
     local-adapter:
       enabled: "${SXPT_ORIGIN_LOCAL_ADAPTER_ENABLED:false}"
+
+---
+spring:
+  profiles: dev
+  datasource:
+    # 历史脚本由人工执行，尚未接入 Flyway。dev 启动时只执行本次经典案例接入所需的
+    # 幂等结构升级和本地 OA 环境配对，避免 Java 实体与数据库表结构版本不一致。
+    initialization-mode: always
+    continue-on-error: false
+    schema:
+      - classpath:db/schema/V18__classic_case_connector_contract.sql
+      - classpath:db/dev/classic_case_oa_local_bootstrap.sql

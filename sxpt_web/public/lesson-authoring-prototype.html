@@ -1,0 +1,1614 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>教案编排交互原型</title>
+    <style>
+      :root {
+        color: #182230;
+        background: #edf1f6;
+        font-family: Inter, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+        font-synthesis: none;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+      }
+
+      button,
+      input,
+      textarea,
+      select {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .business-stage,
+      .business-frame {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .business-stage {
+        z-index: 0;
+        overflow: hidden;
+        background: #edf1f6;
+      }
+
+      .business-frame {
+        display: block;
+        border: 0;
+        background: #edf1f6;
+      }
+
+      .prototype-mark {
+        position: fixed;
+        z-index: 12;
+        top: 12px;
+        left: 50%;
+        translate: -50% 0;
+        border: 1px solid rgb(255 255 255 / 76%);
+        border-radius: 999px;
+        padding: 6px 11px;
+        color: #526071;
+        background: rgb(255 255 255 / 82%);
+        box-shadow: 0 7px 24px rgb(25 40 65 / 12%);
+        backdrop-filter: blur(12px);
+        font-size: 11px;
+        font-weight: 700;
+        pointer-events: none;
+        transition: opacity 180ms ease;
+      }
+
+      body.recording .prototype-mark,
+      body.selecting-element .prototype-mark {
+        opacity: 0;
+      }
+
+      body.selecting-element .edge-trigger {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .drawer {
+        position: fixed;
+        z-index: 20;
+        top: 12px;
+        bottom: 12px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid rgb(255 255 255 / 86%);
+        border-radius: 18px;
+        background: rgb(250 252 255 / 96%);
+        box-shadow:
+          0 24px 70px rgb(22 34 52 / 22%),
+          0 3px 12px rgb(22 34 52 / 9%);
+        backdrop-filter: blur(18px);
+        transition:
+          transform 220ms cubic-bezier(0.2, 0.75, 0.25, 1),
+          opacity 180ms ease;
+      }
+
+      .drawer-left {
+        left: 12px;
+        width: 310px;
+      }
+
+      .drawer-left.is-closed {
+        transform: translateX(calc(-100% - 22px));
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .drawer-right {
+        right: 12px;
+        width: 382px;
+      }
+
+      .drawer-right.is-closed {
+        transform: translateX(calc(100% + 22px));
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .drawer-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid #e8edf4;
+        padding: 16px 16px 14px;
+      }
+
+      .drawer-header small,
+      .section-heading small,
+      .property-title small {
+        display: block;
+        margin-bottom: 4px;
+        color: #8590a1;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: 0.12em;
+      }
+
+      .drawer-header h1,
+      .drawer-header h2,
+      .property-title h2 {
+        margin: 0;
+        font-size: 16px;
+        line-height: 1.25;
+      }
+
+      .header-meta {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 8px;
+        color: #667085;
+        font-size: 10px;
+      }
+
+      .save-state {
+        color: #087f5b;
+        font-weight: 800;
+      }
+
+      .icon-button {
+        display: grid;
+        flex: 0 0 auto;
+        width: 30px;
+        height: 30px;
+        place-items: center;
+        border: 1px solid #dfe5ee;
+        border-radius: 8px;
+        color: #5f6b7a;
+        background: #fff;
+        font-size: 16px;
+      }
+
+      .icon-button:hover {
+        border-color: #bfc9d7;
+        color: #182230;
+      }
+
+      .authoring-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        border-bottom: 1px solid #e8edf4;
+        padding: 12px 14px;
+      }
+
+      .action-button {
+        display: grid;
+        place-items: center;
+        min-height: 36px;
+        border: 1px solid #dde4ed;
+        border-radius: 9px;
+        color: #465467;
+        background: #fff;
+        font-size: 11px;
+        font-weight: 750;
+        text-decoration: none;
+      }
+
+      .action-button:hover {
+        border-color: #aebccc;
+        background: #f8fafc;
+      }
+
+      .action-button.record {
+        grid-column: 1 / -1;
+        border-color: #db3c4d;
+        color: #fff;
+        background: linear-gradient(135deg, #e24959, #c8263a);
+        box-shadow: 0 6px 16px rgb(200 38 58 / 19%);
+      }
+
+      .action-button.record::before {
+        content: "";
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-right: 7px;
+        border: 2px solid rgb(255 255 255 / 58%);
+        border-radius: 50%;
+        vertical-align: -1px;
+        background: #fff;
+      }
+
+      .directory {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 10px;
+      }
+
+      .section-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 5px 8px;
+      }
+
+      .section-heading strong {
+        font-size: 12px;
+      }
+
+      .text-button {
+        border: 0;
+        padding: 4px;
+        color: #5a4dc7;
+        background: transparent;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .teaching-point {
+        margin-bottom: 7px;
+        overflow: hidden;
+        border: 1px solid transparent;
+        border-radius: 11px;
+        background: rgb(255 255 255 / 62%);
+        transition:
+          border-color 150ms ease,
+          box-shadow 150ms ease,
+          opacity 150ms ease;
+      }
+
+      .teaching-point.is-active {
+        border-color: #d7d0ff;
+        background: #f5f3ff;
+      }
+
+      .teaching-point.is-dragging,
+      .step-row.is-dragging {
+        opacity: 0.38;
+      }
+
+      .teaching-point.drag-before {
+        box-shadow: 0 -3px 0 #6b5bd2;
+      }
+
+      .teaching-point.drag-after {
+        box-shadow: 0 3px 0 #6b5bd2;
+      }
+
+      .point-button,
+      .step-button {
+        display: grid;
+        width: 100%;
+        align-items: center;
+        border: 0;
+        text-align: left;
+      }
+
+      .point-button {
+        grid-template-columns: 12px 26px minmax(0, 1fr) auto;
+        gap: 8px;
+        padding: 9px 9px;
+        color: #344054;
+        background: transparent;
+      }
+
+      .drag-handle {
+        display: grid;
+        width: 12px;
+        place-items: center;
+        color: #a5adba;
+        cursor: grab;
+        font-size: 12px;
+        font-weight: 900;
+        letter-spacing: -0.16em;
+        user-select: none;
+      }
+
+      .drag-handle:active {
+        cursor: grabbing;
+      }
+
+      .point-index {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border-radius: 8px;
+        color: #6b5bd2;
+        background: #ebe8ff;
+        font-size: 10px;
+        font-weight: 900;
+      }
+
+      .point-copy,
+      .step-copy {
+        min-width: 0;
+      }
+
+      .point-copy strong,
+      .step-copy strong {
+        display: block;
+        overflow: hidden;
+        font-size: 11px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .point-copy small,
+      .step-copy small {
+        display: block;
+        overflow: hidden;
+        margin-top: 3px;
+        color: #8792a2;
+        font-size: 9px;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .point-count {
+        min-width: 21px;
+        border-radius: 999px;
+        padding: 3px 6px;
+        color: #7a8595;
+        background: #eef2f6;
+        font-size: 9px;
+        font-style: normal;
+        text-align: center;
+      }
+
+      .step-list {
+        position: relative;
+        display: grid;
+        gap: 3px;
+        margin: 0 8px 8px 21px;
+        padding-left: 12px;
+      }
+
+      .step-row {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 25px;
+        align-items: center;
+        border-radius: 8px;
+        transition:
+          box-shadow 150ms ease,
+          opacity 150ms ease;
+      }
+
+      .step-row:hover {
+        background: #f1eefc;
+      }
+
+      .step-row.drag-before {
+        box-shadow: 0 -2px 0 #6b5bd2;
+      }
+
+      .step-row.drag-after {
+        box-shadow: 0 2px 0 #6b5bd2;
+      }
+
+      .step-list::before {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 1px;
+        background: #ddd9fa;
+        content: "";
+      }
+
+      .step-button {
+        grid-template-columns: 10px 20px minmax(0, 1fr) 14px;
+        gap: 7px;
+        border-radius: 8px;
+        padding: 7px 8px;
+        color: #596579;
+        background: transparent;
+      }
+
+      .delete-step {
+        display: grid;
+        width: 23px;
+        height: 23px;
+        place-items: center;
+        border: 0;
+        border-radius: 6px;
+        color: #a97078;
+        background: transparent;
+        font-size: 13px;
+        opacity: 0;
+        transition:
+          color 140ms ease,
+          background 140ms ease,
+          opacity 140ms ease;
+      }
+
+      .step-row:hover .delete-step,
+      .delete-step:focus-visible {
+        opacity: 1;
+      }
+
+      .delete-step:hover {
+        color: #bd3345;
+        background: #ffe8eb;
+      }
+
+      .add-step-button {
+        width: 100%;
+        border: 1px dashed #cbc5ee;
+        border-radius: 7px;
+        padding: 7px;
+        color: #6658bb;
+        background: rgb(255 255 255 / 52%);
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      .add-step-button:hover {
+        border-color: #8173d4;
+        background: #fff;
+      }
+
+      .drag-hint {
+        color: #8c96a5;
+        font-size: 9px;
+        font-weight: 700;
+      }
+
+      .step-button:hover,
+      .step-button.is-active {
+        color: #3b2ea0;
+        background: #ebe8ff;
+      }
+
+      .step-number {
+        display: grid;
+        width: 18px;
+        height: 18px;
+        place-items: center;
+        border: 1px solid #d8ddeb;
+        border-radius: 50%;
+        background: #fff;
+        font-size: 8px;
+        font-style: normal;
+        font-weight: 800;
+      }
+
+      .step-state {
+        color: #16a06d;
+        font-size: 9px;
+      }
+
+      .left-footer {
+        display: grid;
+        gap: 7px;
+        border-top: 1px solid #e8edf4;
+        padding: 12px 14px 14px;
+      }
+
+      .footer-links {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+      }
+
+      .publish-button {
+        min-height: 38px;
+        border: 0;
+        border-radius: 10px;
+        color: #fff;
+        background: #5a4bc4;
+        font-size: 11px;
+        font-weight: 850;
+      }
+
+      .property-scroll {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 15px 16px 22px;
+      }
+
+      .property-title {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .context-badge {
+        flex: 0 0 auto;
+        border-radius: 999px;
+        padding: 5px 8px;
+        color: #6758c9;
+        background: #eeeaff;
+        font-size: 9px;
+        font-weight: 850;
+      }
+
+      .property-summary {
+        margin: 7px 0 0;
+        color: #7a8697;
+        font-size: 10px;
+      }
+
+      .form-section {
+        display: grid;
+        gap: 11px;
+        margin-top: 16px;
+        border-top: 1px solid #e8edf4;
+        padding-top: 15px;
+      }
+
+      .form-section:first-of-type {
+        margin-top: 13px;
+      }
+
+      .form-section > strong {
+        color: #485568;
+        font-size: 10px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+      }
+
+      .field > span {
+        color: #647185;
+        font-size: 10px;
+        font-weight: 750;
+      }
+
+      .field input,
+      .field textarea,
+      .field select {
+        width: 100%;
+        border: 1px solid #dfe5ed;
+        border-radius: 8px;
+        outline: none;
+        color: #293647;
+        background: #fff;
+        padding: 9px 10px;
+        font-size: 11px;
+      }
+
+      .field input:focus,
+      .field textarea:focus,
+      .field select:focus {
+        border-color: #7566d6;
+        box-shadow: 0 0 0 3px rgb(117 102 214 / 10%);
+      }
+
+      .field textarea {
+        min-height: 78px;
+        resize: vertical;
+      }
+
+      .field-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 9px;
+      }
+
+      .attachment-box {
+        display: grid;
+        gap: 8px;
+        border: 1px dashed #cfd7e3;
+        border-radius: 10px;
+        padding: 10px;
+        background: #f8fafc;
+      }
+
+      .attachment-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .file-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        padding: 8px;
+        color: #4e5d70;
+        background: #fff;
+        font-size: 9px;
+      }
+
+      .file-chip b {
+        color: #e25555;
+      }
+
+      details.advanced {
+        border: 1px solid #e4e8ef;
+        border-radius: 9px;
+        background: #fff;
+      }
+
+      details.advanced summary {
+        padding: 10px;
+        color: #647185;
+        cursor: pointer;
+        font-size: 10px;
+        font-weight: 800;
+      }
+
+      .advanced-fields {
+        display: grid;
+        gap: 10px;
+        border-top: 1px solid #edf0f5;
+        padding: 10px;
+      }
+
+      .binding-card {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        border: 1px solid #dcd6ff;
+        border-radius: 10px;
+        padding: 10px;
+        color: #5144ac;
+        background: #f5f3ff;
+      }
+
+      .binding-card strong,
+      .binding-card small {
+        display: block;
+      }
+
+      .binding-card strong {
+        font-size: 10px;
+      }
+
+      .binding-card small {
+        margin-top: 3px;
+        color: #8175c5;
+        font-size: 9px;
+      }
+
+      .binding-card button,
+      .small-primary {
+        flex: 0 0 auto;
+        border: 0;
+        border-radius: 7px;
+        padding: 7px 9px;
+        color: #fff;
+        background: #6556c9;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      .danger-zone {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .danger-zone button {
+        border: 0;
+        padding: 5px;
+        color: #c4394a;
+        background: transparent;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      .edge-trigger {
+        position: fixed;
+        z-index: 18;
+        top: 50%;
+        display: grid;
+        width: 28px;
+        min-height: 72px;
+        place-items: center;
+        border: 1px solid rgb(255 255 255 / 75%);
+        color: #fff;
+        background: rgb(34 46 65 / 72%);
+        box-shadow: 0 7px 20px rgb(17 25 39 / 18%);
+        backdrop-filter: blur(10px);
+        font-size: 11px;
+        font-weight: 900;
+        opacity: 0.4;
+        transition:
+          opacity 160ms ease,
+          transform 160ms ease;
+      }
+
+      .edge-trigger:hover {
+        opacity: 1;
+      }
+
+      .edge-trigger.left {
+        left: 0;
+        border-left: 0;
+        border-radius: 0 9px 9px 0;
+      }
+
+      .edge-trigger.right {
+        right: 0;
+        border-right: 0;
+        border-radius: 9px 0 0 9px;
+      }
+
+      .edge-trigger span {
+        writing-mode: vertical-rl;
+        letter-spacing: 0.14em;
+      }
+
+      .edge-trigger.is-hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .recording-pill {
+        position: fixed;
+        z-index: 24;
+        top: 12px;
+        left: 50%;
+        display: none;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid rgb(255 255 255 / 68%);
+        border-radius: 999px;
+        padding: 7px 8px 7px 12px;
+        color: #fff;
+        background: rgb(31 40 54 / 82%);
+        box-shadow: 0 9px 28px rgb(17 25 39 / 22%);
+        backdrop-filter: blur(12px);
+        translate: -50% 0;
+        font-size: 10px;
+      }
+
+      body.recording .recording-pill,
+      body.selecting-element .recording-pill {
+        display: flex;
+      }
+
+      body.selecting-element .recording-pill i {
+        background: #7c6be4;
+        box-shadow: 0 0 0 4px rgb(124 107 228 / 17%);
+      }
+
+      .recording-pill i {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #ff5364;
+        box-shadow: 0 0 0 4px rgb(255 83 100 / 17%);
+        animation: pulse 1.2s infinite;
+      }
+
+      .recording-pill strong {
+        font-size: 10px;
+      }
+
+      .recording-pill span {
+        color: #c9d1db;
+      }
+
+      .recording-pill button {
+        border: 0;
+        border-radius: 999px;
+        padding: 6px 9px;
+        color: #fff;
+        background: #da3c4e;
+        font-size: 9px;
+        font-weight: 800;
+      }
+
+      .toast {
+        position: fixed;
+        z-index: 30;
+        bottom: 18px;
+        left: 50%;
+        max-width: min(520px, calc(100vw - 40px));
+        border: 1px solid rgb(255 255 255 / 80%);
+        border-radius: 10px;
+        padding: 9px 13px;
+        color: #fff;
+        background: rgb(31 42 58 / 86%);
+        box-shadow: 0 9px 28px rgb(17 25 39 / 20%);
+        backdrop-filter: blur(12px);
+        translate: -50% 16px;
+        font-size: 10px;
+        opacity: 0;
+        pointer-events: none;
+        transition:
+          opacity 180ms ease,
+          translate 180ms ease;
+      }
+
+      .toast.is-visible {
+        translate: -50% 0;
+        opacity: 1;
+      }
+
+      .publish-check {
+        display: grid;
+        gap: 8px;
+      }
+
+      .check-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        border-radius: 8px;
+        padding: 9px;
+        color: #4d5b6c;
+        background: #f5f7fa;
+        font-size: 10px;
+      }
+
+      .check-item b {
+        color: #15966a;
+      }
+
+      @keyframes pulse {
+        50% {
+          opacity: 0.45;
+        }
+      }
+
+      @media (max-width: 920px) {
+        .drawer-left {
+          width: min(310px, calc(100vw - 48px));
+        }
+
+        .drawer-right {
+          width: min(382px, calc(100vw - 48px));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="business-stage" aria-label="全屏业务系统">
+      <iframe
+        id="businessFrame"
+        class="business-frame"
+        src="./lesson-business-capture.html"
+        title="采购业务管理系统"
+      ></iframe>
+    </main>
+
+    <div class="prototype-mark">交互原型 · 业务系统始终保持全屏</div>
+
+    <aside id="leftDrawer" class="drawer drawer-left" aria-label="教学目录">
+      <header class="drawer-header">
+        <div>
+          <small>LESSON AUTHORING</small>
+          <h1>测试教案 01</h1>
+          <div class="header-meta">
+            <span>V1</span>
+            <span>·</span>
+            <span id="saveState" class="save-state">✓ 已保存</span>
+          </div>
+        </div>
+        <button class="icon-button" type="button" title="收起目录" data-close="left">‹</button>
+      </header>
+
+      <section class="authoring-actions" aria-label="编排操作">
+        <button id="recordButton" class="action-button record" type="button">开始录制并选取元素</button>
+        <button class="action-button" type="button" data-toast="已插入一个说明节点">＋ 插入说明</button>
+        <button class="action-button" type="button" data-toast="已撤销最后一个节点">↶ 撤销节点</button>
+        <button id="addTeachingPoint" class="action-button" type="button">＋ 教学点</button>
+        <button id="collapseAll" class="action-button" type="button">收起两侧</button>
+      </section>
+
+      <section class="directory">
+        <div class="section-heading">
+          <div><small>COURSE OUTLINE</small><strong>教学目录</strong></div>
+          <span class="drag-hint">按住 ≡ 拖动排序</span>
+        </div>
+
+        <article class="teaching-point is-active" data-stage="apply" draggable="true">
+          <button class="point-button" type="button" data-select-stage="apply">
+            <span class="drag-handle" title="拖动教学点">≡</span>
+            <span class="point-index">01</span>
+            <span class="point-copy"><strong>创建采购申请</strong><small>申请人 · 20 分</small></span>
+            <em class="point-count">3</em>
+          </button>
+          <div class="step-list">
+            <div class="step-row" data-step="create" draggable="true">
+              <button class="step-button" type="button" data-select-step="create">
+                <span class="drag-handle" title="拖动节点">≡</span>
+                <i class="step-number">1</i>
+                <span class="step-copy"><strong>点击新建申请</strong><small>点击操作</small></span>
+                <b class="step-state">●</b>
+              </button>
+              <button class="delete-step" type="button" data-delete-step="create" title="删除节点">×</button>
+            </div>
+            <div class="step-row" data-step="save" draggable="true">
+              <button class="step-button" type="button" data-select-step="save">
+                <span class="drag-handle" title="拖动节点">≡</span>
+                <i class="step-number">2</i>
+                <span class="step-copy"><strong>保存申请草稿</strong><small>点击操作</small></span>
+                <b class="step-state">●</b>
+              </button>
+              <button class="delete-step" type="button" data-delete-step="save" title="删除节点">×</button>
+            </div>
+            <div class="step-row" data-step="submit" draggable="true">
+              <button class="step-button" type="button" data-select-step="submit">
+                <span class="drag-handle" title="拖动节点">≡</span>
+                <i class="step-number">3</i>
+                <span class="step-copy"><strong>提交采购申请</strong><small>点击操作</small></span>
+                <b class="step-state">●</b>
+              </button>
+              <button class="delete-step" type="button" data-delete-step="submit" title="删除节点">×</button>
+            </div>
+            <button class="add-step-button" type="button" data-add-step="apply">＋ 添加节点</button>
+          </div>
+        </article>
+
+        <article class="teaching-point" data-stage="approve" draggable="true">
+          <button class="point-button" type="button" data-select-stage="approve">
+            <span class="drag-handle" title="拖动教学点">≡</span>
+            <span class="point-index">02</span>
+            <span class="point-copy"><strong>完成采购审批</strong><small>部门负责人 · 15 分</small></span>
+            <em class="point-count">2</em>
+          </button>
+          <div class="step-list" hidden>
+            <div class="step-row" data-step="handle" draggable="true">
+              <button class="step-button" type="button" data-select-step="handle">
+                <span class="drag-handle" title="拖动节点">≡</span>
+                <i class="step-number">1</i>
+                <span class="step-copy"><strong>打开待办任务</strong><small>点击操作</small></span>
+                <b class="step-state">●</b>
+              </button>
+              <button class="delete-step" type="button" data-delete-step="handle" title="删除节点">×</button>
+            </div>
+            <div class="step-row" data-step="approve" draggable="true">
+              <button class="step-button" type="button" data-select-step="approve">
+                <span class="drag-handle" title="拖动节点">≡</span>
+                <i class="step-number">2</i>
+                <span class="step-copy"><strong>审批通过</strong><small>点击操作</small></span>
+                <b class="step-state">●</b>
+              </button>
+              <button class="delete-step" type="button" data-delete-step="approve" title="删除节点">×</button>
+            </div>
+            <button class="add-step-button" type="button" data-add-step="approve">＋ 添加节点</button>
+          </div>
+        </article>
+
+        <article class="teaching-point" data-stage="archive" draggable="true">
+          <button class="point-button" type="button" data-select-stage="archive">
+            <span class="drag-handle" title="拖动教学点">≡</span>
+            <span class="point-index">03</span>
+            <span class="point-copy"><strong>采购资料归档</strong><small>档案管理员 · 10 分</small></span>
+            <em class="point-count">1</em>
+          </button>
+          <div class="step-list" hidden>
+            <div class="step-row" data-step="archive" draggable="true">
+              <button class="step-button" type="button" data-select-step="archive">
+                <span class="drag-handle" title="拖动节点">≡</span>
+                <i class="step-number">1</i>
+                <span class="step-copy"><strong>确认业务归档</strong><small>点击操作</small></span>
+                <b class="step-state">●</b>
+              </button>
+              <button class="delete-step" type="button" data-delete-step="archive" title="删除节点">×</button>
+            </div>
+            <button class="add-step-button" type="button" data-add-step="archive">＋ 添加节点</button>
+          </div>
+        </article>
+      </section>
+
+      <footer class="left-footer">
+        <div class="footer-links">
+          <a class="action-button" href="./lesson-playback-prototype.html">▶ 讲解预览</a>
+          <button class="action-button" type="button" data-toast="发布校验使用独立弹窗，不占用右侧属性栏">✓ 发布校验</button>
+        </div>
+        <button class="publish-button" type="button" data-toast="原型演示：发布确认使用独立弹窗">发布教案</button>
+      </footer>
+    </aside>
+
+    <aside id="rightDrawer" class="drawer drawer-right" aria-label="属性配置">
+      <header class="drawer-header">
+        <div>
+          <small>CONTEXT PROPERTIES</small>
+          <h2>属性配置</h2>
+          <div class="header-meta"><span>选择左侧内容自动切换</span></div>
+        </div>
+        <button class="icon-button" type="button" title="收起属性" data-close="right">›</button>
+      </header>
+      <div id="propertyContent" class="property-scroll"></div>
+    </aside>
+
+    <button id="leftTrigger" class="edge-trigger left is-hidden" type="button" aria-label="展开教学目录">
+      <span>教学目录</span>
+    </button>
+    <div class="recording-pill" aria-live="polite">
+      <i></i>
+      <strong id="statusTitle">正在录制</strong>
+      <span id="statusDetail">创建采购申请 · 连续选取中</span>
+      <button id="statusAction" type="button">结束录制</button>
+    </div>
+
+    <div id="toast" class="toast" aria-live="polite"></div>
+
+    <template id="stageTemplate">
+      <div class="property-title">
+        <div><small>TEACHING POINT</small><h2 data-field-text="name"></h2></div>
+        <span class="context-badge">教学点属性</span>
+      </div>
+      <p class="property-summary" data-field-text="summary"></p>
+      <section class="form-section">
+        <strong>基本信息</strong>
+        <label class="field"><span>教学点名称</span><input data-field-value="name" /></label>
+        <label class="field"><span>教学说明</span><textarea data-field-value="description"></textarea></label>
+        <div class="field-row">
+          <label class="field"><span>分值</span><input type="number" data-field-value="score" /></label>
+          <label class="field"><span>完成方式</span><select><option>完成全部必做节点</option><option>手动确认完成</option></select></label>
+        </div>
+      </section>
+      <section class="form-section">
+        <strong>教学点附件</strong>
+        <div class="attachment-box">
+          <div class="attachment-head"><span>进入教学点时展示</span><button class="text-button" type="button" data-toast="请选择要上传的附件">＋ 上传</button></div>
+          <div class="file-chip"><b>PDF</b><span>采购申请填写规范.pdf · 1.2 MB</span></div>
+        </div>
+      </section>
+      <section class="form-section">
+        <details class="advanced">
+          <summary>高级设置</summary>
+          <div class="advanced-fields">
+            <label class="field"><span>教学点标识 stageKey</span><input value="purchase_apply" readonly /></label>
+            <label class="field"><span>负责角色 groupKey</span><input data-field-value="role" /></label>
+          </div>
+        </details>
+        <div class="danger-zone"><span></span><button type="button" data-toast="原型中未执行删除操作">删除教学点</button></div>
+      </section>
+    </template>
+
+    <template id="stepTemplate">
+      <div class="property-title">
+        <div><small>RECORDED STEP</small><h2 data-field-text="name"></h2></div>
+        <span class="context-badge">节点属性</span>
+      </div>
+      <p class="property-summary" data-field-text="summary"></p>
+      <section class="form-section">
+        <strong>讲解内容</strong>
+        <label class="field"><span>节点标题</span><input data-field-value="name" /></label>
+        <label class="field"><span>逐步讲解</span><textarea data-field-value="description"></textarea></label>
+        <div class="binding-card">
+          <div><strong>已绑定业务元素</strong><small data-field-text="selector"></small></div>
+          <button type="button" data-toast="已进入重新选择元素模式">重新选择</button>
+        </div>
+      </section>
+      <section class="form-section">
+        <strong>节点附件</strong>
+        <div class="attachment-box">
+          <div class="attachment-head"><span>进入该节点时展示</span><button class="text-button" type="button" data-toast="请选择要上传的附件">＋ 上传</button></div>
+          <div class="file-chip"><b>PPT</b><span>操作注意事项.pptx · 860 KB</span></div>
+        </div>
+      </section>
+      <section class="form-section">
+        <details class="advanced">
+          <summary>高级设置</summary>
+          <div class="advanced-fields">
+            <div class="field-row">
+              <label class="field"><span>操作类型</span><select><option>点击</option><option>输入</option><option>选择</option></select></label>
+              <label class="field"><span>建议时长</span><input value="15 秒" /></label>
+            </div>
+            <label class="field"><span>元素选择器</span><input data-field-value="selector" readonly /></label>
+          </div>
+        </details>
+        <div class="danger-zone"><button type="button" data-toast="节点已向上移动">↑ 上移</button><button type="button" data-toast="原型中未执行删除操作">删除节点</button></div>
+      </section>
+    </template>
+
+    <script>
+      const stages = {
+        apply: {
+          name: "创建采购申请",
+          summary: "教学点 1 · 3 个录制节点",
+          description: "讲解如何进入采购申请页面，填写申请资料并提交审批。",
+          score: 20,
+          role: "申请人"
+        },
+        approve: {
+          name: "完成采购审批",
+          summary: "教学点 2 · 2 个录制节点",
+          description: "讲解部门负责人如何处理采购待办并完成审批。",
+          score: 15,
+          role: "部门负责人"
+        },
+        archive: {
+          name: "采购资料归档",
+          summary: "教学点 3 · 1 个录制节点",
+          description: "讲解审批完成后如何核对材料并完成业务归档。",
+          score: 10,
+          role: "档案管理员"
+        }
+      };
+
+      const steps = {
+        create: {
+          stage: "apply",
+          name: "点击新建申请",
+          summary: "节点 1 / 3 · 已同步",
+          description: "点击页面右上角的“新建申请”，进入采购申请填写页面。",
+          selector: '[data-action="create"]'
+        },
+        save: {
+          stage: "apply",
+          name: "保存申请草稿",
+          summary: "节点 2 / 3 · 已同步",
+          description: "完成采购信息填写后先保存草稿，确认页面提示保存成功。",
+          selector: '[data-action="save"]'
+        },
+        submit: {
+          stage: "apply",
+          name: "提交采购申请",
+          summary: "节点 3 / 3 · 已同步",
+          description: "检查采购信息无误后点击提交，进入部门审批流程。",
+          selector: '[data-action="submit"]'
+        },
+        handle: {
+          stage: "approve",
+          name: "打开待办任务",
+          summary: "节点 1 / 2 · 已同步",
+          description: "进入审批待办列表，打开需要处理的采购申请。",
+          selector: '[data-action="handle"]'
+        },
+        approve: {
+          stage: "approve",
+          name: "审批通过",
+          summary: "节点 2 / 2 · 已同步",
+          description: "核对采购信息与附件后执行审批通过。",
+          selector: '[data-action="approve"]'
+        },
+        archive: {
+          stage: "archive",
+          name: "确认业务归档",
+          summary: "节点 1 / 1 · 已同步",
+          description: "确认材料完整后点击归档，结束采购业务流程。",
+          selector: '[data-action="archive"]'
+        }
+      };
+
+      const leftDrawer = document.querySelector("#leftDrawer");
+      const rightDrawer = document.querySelector("#rightDrawer");
+      const leftTrigger = document.querySelector("#leftTrigger");
+      const directory = document.querySelector(".directory");
+      const propertyContent = document.querySelector("#propertyContent");
+      const businessFrame = document.querySelector("#businessFrame");
+      const saveState = document.querySelector("#saveState");
+      const toast = document.querySelector("#toast");
+      const statusTitle = document.querySelector("#statusTitle");
+      const statusDetail = document.querySelector("#statusDetail");
+      const statusAction = document.querySelector("#statusAction");
+      let activeStage = "apply";
+      let activeStep = "";
+      let pendingStepStage = "";
+      let toastTimer;
+      let saveTimer;
+      let dragState = null;
+
+      function setDrawer(side, open) {
+        const drawer = side === "left" ? leftDrawer : rightDrawer;
+        drawer.classList.toggle("is-closed", !open);
+        if (side === "left") leftTrigger.classList.toggle("is-hidden", open);
+      }
+
+      function showToast(message) {
+        window.clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2200);
+      }
+
+      function simulateAutoSave() {
+        window.clearTimeout(saveTimer);
+        saveState.textContent = "保存中…";
+        saveState.style.color = "#b76e00";
+        saveTimer = window.setTimeout(() => {
+          saveState.textContent = "✓ 已自动保存";
+          saveState.style.color = "#087f5b";
+        }, 650);
+      }
+
+      function clearDragMarkers() {
+        directory.querySelectorAll(".is-dragging, .drag-before, .drag-after").forEach((element) => {
+          element.classList.remove("is-dragging", "drag-before", "drag-after");
+        });
+      }
+
+      function renumberDirectory() {
+        const points = Array.from(directory.querySelectorAll(":scope > .teaching-point"));
+        points.forEach((point, pointIndex) => {
+          point.querySelector(".point-index").textContent = String(pointIndex + 1).padStart(2, "0");
+          const rows = Array.from(point.querySelectorAll(":scope > .step-list > .step-row"));
+          point.querySelector(".point-count").textContent = String(rows.length);
+          rows.forEach((row, stepIndex) => {
+            row.querySelector(".step-number").textContent = String(stepIndex + 1);
+            const stepId = row.dataset.step;
+            if (steps[stepId]) {
+              steps[stepId].stage = point.dataset.stage;
+              steps[stepId].summary = `节点 ${stepIndex + 1} / ${rows.length} · ${
+                stepId.startsWith("picked-") ? "待完善" : "已同步"
+              }`;
+            }
+          });
+        });
+      }
+
+      function createStepRow(stepId, title, kind = "操作节点") {
+        const row = document.createElement("div");
+        row.className = "step-row";
+        row.dataset.step = stepId;
+        row.draggable = true;
+        row.innerHTML = `
+          <button class="step-button" type="button" data-select-step="${stepId}">
+            <span class="drag-handle" title="拖动节点">≡</span>
+            <i class="step-number"></i>
+            <span class="step-copy"><strong>${title}</strong><small>${kind}</small></span>
+            <b class="step-state">○</b>
+          </button>
+          <button class="delete-step" type="button" data-delete-step="${stepId}" title="删除节点">×</button>
+        `;
+        return row;
+      }
+
+      function startAddingStep(stageId) {
+        const point = directory.querySelector(`.teaching-point[data-stage="${stageId}"]`);
+        if (!point) return;
+        pendingStepStage = stageId;
+        activeStage = stageId;
+        activeStep = "";
+        document.body.classList.add("selecting-element");
+        statusTitle.textContent = "正在选择页面元素";
+        statusDetail.textContent = `${stages[stageId]?.name ?? "当前教学点"} · 点击要绑定的业务元素`;
+        statusAction.textContent = "取消选择";
+        setDrawer("left", false);
+        setDrawer("right", false);
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_START_ELEMENT_PICK" }, "*");
+        showToast("请在业务系统中点击需要绑定为节点的页面元素");
+      }
+
+      function cancelAddingStep() {
+        if (!pendingStepStage) return;
+        pendingStepStage = "";
+        document.body.classList.remove("selecting-element");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_CANCEL_ELEMENT_PICK" }, "*");
+        setDrawer("left", true);
+        setDrawer("right", false);
+        showToast("已取消元素选择，没有创建节点");
+      }
+
+      function addPickedStep(payload) {
+        const stageId = pendingStepStage;
+        const point = directory.querySelector(`.teaching-point[data-stage="${stageId}"]`);
+        const list = point?.querySelector(".step-list");
+        if (!stageId || !point || !list) return false;
+        const rawLabel = String(payload.text || payload.actionLabel || "页面元素").trim();
+        const title = rawLabel ? `操作：${rawLabel}` : "新操作节点";
+        const stepId = `picked-${Date.now()}`;
+        steps[stepId] = {
+          stage: stageId,
+          name: title,
+          summary: "刚刚完成元素选取 · 等待保存",
+          description: "请补充该操作节点的讲解说明。",
+          selector: String(payload.selector || "已绑定页面元素")
+        };
+        list.insertBefore(createStepRow(stepId, title), list.querySelector(".add-step-button"));
+        pendingStepStage = "";
+        document.body.classList.remove("selecting-element");
+        setDrawer("left", true);
+        renumberDirectory();
+        selectStep(stepId);
+        simulateAutoSave();
+        showToast("元素绑定成功，节点已创建，请在右侧补充节点属性");
+        return true;
+      }
+
+      function deleteStep(stepId) {
+        const row = directory.querySelector(`.step-row[data-step="${stepId}"]`);
+        if (!row || !window.confirm("确认删除这个节点吗？")) return;
+        const point = row.closest(".teaching-point");
+        row.remove();
+        delete steps[stepId];
+        if (activeStep === stepId) {
+          activeStep = "";
+          setDrawer("right", false);
+          businessFrame.contentWindow?.postMessage({ type: "SXPT_CLEAR_PREVIEW_STEP" }, "*");
+        }
+        renumberDirectory();
+        simulateAutoSave();
+        showToast(`节点已删除，“${point?.querySelector(".point-copy strong")?.textContent ?? "当前教学点"}”目录已更新`);
+      }
+
+      function fillTemplate(templateId, data) {
+        const fragment = document.querySelector(templateId).content.cloneNode(true);
+        fragment.querySelectorAll("[data-field-text]").forEach((element) => {
+          element.textContent = data[element.dataset.fieldText] ?? "";
+        });
+        fragment.querySelectorAll("[data-field-value]").forEach((element) => {
+          element.value = data[element.dataset.fieldValue] ?? "";
+          element.addEventListener("input", simulateAutoSave);
+        });
+        propertyContent.replaceChildren(fragment);
+        wireDynamicActions();
+      }
+
+      function wireDynamicActions() {
+        propertyContent.querySelectorAll("[data-toast]").forEach((button) => {
+          button.addEventListener("click", () => showToast(button.dataset.toast));
+        });
+      }
+
+      function selectStage(stageId, openProperties = true) {
+        activeStage = stageId;
+        activeStep = "";
+        document.querySelectorAll(".teaching-point").forEach((point) => {
+          const active = point.dataset.stage === stageId;
+          point.classList.toggle("is-active", active);
+          point.querySelector(".step-list").hidden = !active;
+        });
+        document.querySelectorAll(".step-button").forEach((step) => step.classList.remove("is-active"));
+        fillTemplate("#stageTemplate", stages[stageId]);
+        if (openProperties) setDrawer("right", true);
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_CLEAR_PREVIEW_STEP" }, "*");
+      }
+
+      function selectStep(stepId) {
+        const step = steps[stepId];
+        if (!step) return;
+        activeStage = step.stage;
+        activeStep = stepId;
+        document.querySelectorAll(".teaching-point").forEach((point) => {
+          const active = point.dataset.stage === step.stage;
+          point.classList.toggle("is-active", active);
+          point.querySelector(".step-list").hidden = !active;
+        });
+        document.querySelectorAll(".step-button").forEach((button) => {
+          button.classList.toggle("is-active", button.dataset.selectStep === stepId);
+        });
+        fillTemplate("#stepTemplate", step);
+        setDrawer("right", true);
+        businessFrame.contentWindow?.postMessage(
+          {
+            type: "SXPT_PREVIEW_STEP",
+            selector: step.selector,
+            selectorCandidates: [],
+            url: businessFrame.src
+          },
+          "*"
+        );
+        showToast(`已定位并高亮：${step.name}`);
+      }
+
+      function renderSpecialView(view) {
+        activeStep = "";
+        if (view === "lesson") {
+          propertyContent.innerHTML = `
+            <div class="property-title">
+              <div><small>LESSON SETTINGS</small><h2>教案基础设置</h2></div>
+              <span class="context-badge">教案属性</span>
+            </div>
+            <p class="property-summary">测试教案 01 · 采购管理系统</p>
+            <section class="form-section">
+              <label class="field"><span>教案名称</span><input value="测试教案 01" /></label>
+              <label class="field"><span>教学简介</span><textarea>采购申请、审批与归档业务全流程实训。</textarea></label>
+              <label class="field"><span>业务模块</span><select><option>OA 系统 / 采购管理</option></select></label>
+            </section>`;
+          propertyContent.querySelectorAll("input, textarea, select").forEach((element) => element.addEventListener("input", simulateAutoSave));
+        } else {
+          propertyContent.innerHTML = `
+            <div class="property-title">
+              <div><small>PUBLISH CHECK</small><h2>发布校验</h2></div>
+              <span class="context-badge">校验通过</span>
+            </div>
+            <p class="property-summary">发布前检查教案结构和录制内容。</p>
+            <section class="form-section publish-check">
+              <div class="check-item"><b>✓</b><span>教案基础信息完整</span></div>
+              <div class="check-item"><b>✓</b><span>3 个教学点均已配置</span></div>
+              <div class="check-item"><b>✓</b><span>6 个节点均已绑定业务元素</span></div>
+              <div class="check-item"><b>✓</b><span>所有录制节点已同步后端</span></div>
+              <button class="publish-button" type="button" data-toast="原型演示：教案发布成功">确认发布教案</button>
+            </section>`;
+          wireDynamicActions();
+        }
+        setDrawer("right", true);
+      }
+
+      function startRecording() {
+        document.body.classList.add("recording");
+        statusTitle.textContent = "正在录制";
+        statusDetail.textContent = `${stages[activeStage]?.name ?? "当前教学点"} · 连续选取中`;
+        statusAction.textContent = "结束录制";
+        setDrawer("left", false);
+        setDrawer("right", false);
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_SET_RECORDING", enabled: true }, "*");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_START_ELEMENT_PICK" }, "*");
+        showToast("录制已开始，左右抽屉已自动收起，业务系统保持全屏");
+      }
+
+      function stopRecording() {
+        document.body.classList.remove("recording");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_CANCEL_ELEMENT_PICK" }, "*");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_SET_RECORDING", enabled: false }, "*");
+        setDrawer("left", true);
+        showToast("录制已结束；右侧属性栏仅在选择教学点或节点时出现");
+      }
+
+      function handleStatusAction() {
+        if (pendingStepStage) {
+          cancelAddingStep();
+          return;
+        }
+        stopRecording();
+      }
+
+      document.querySelectorAll("[data-close]").forEach((button) => {
+        button.addEventListener("click", () => setDrawer(button.dataset.close, false));
+      });
+      leftTrigger.addEventListener("click", () => setDrawer("left", true));
+      document.querySelector("#collapseAll").addEventListener("click", () => {
+        setDrawer("left", false);
+        setDrawer("right", false);
+      });
+      document.querySelector("#recordButton").addEventListener("click", startRecording);
+      statusAction.addEventListener("click", handleStatusAction);
+      document.querySelector("#addTeachingPoint").addEventListener("click", () => {
+        activeStep = "";
+        fillTemplate("#stageTemplate", {
+          name: "新教学点",
+          summary: "尚未录制节点",
+          description: "",
+          score: 0,
+          role: ""
+        });
+        setDrawer("right", true);
+        showToast("已新增教学点，请在右侧完善属性");
+      });
+      document.querySelectorAll("[data-select-stage]").forEach((button) => {
+        button.addEventListener("click", () => selectStage(button.dataset.selectStage));
+      });
+      directory.addEventListener("click", (event) => {
+        const addButton = event.target.closest("[data-add-step]");
+        if (addButton) {
+          event.stopPropagation();
+          startAddingStep(addButton.dataset.addStep);
+          return;
+        }
+        const deleteButton = event.target.closest("[data-delete-step]");
+        if (deleteButton) {
+          event.stopPropagation();
+          deleteStep(deleteButton.dataset.deleteStep);
+          return;
+        }
+        const stepButton = event.target.closest("[data-select-step]");
+        if (stepButton) {
+          event.stopPropagation();
+          selectStep(stepButton.dataset.selectStep);
+        }
+      });
+      directory.addEventListener("dragstart", (event) => {
+        const stepRow = event.target.closest(".step-row");
+        const teachingPoint = event.target.closest(".teaching-point");
+        if (stepRow) {
+          dragState = {
+            type: "step",
+            source: stepRow,
+            list: stepRow.closest(".step-list")
+          };
+        } else if (teachingPoint) {
+          dragState = { type: "stage", source: teachingPoint };
+        } else {
+          return;
+        }
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", dragState.type);
+        requestAnimationFrame(() => dragState?.source.classList.add("is-dragging"));
+      });
+      directory.addEventListener("dragover", (event) => {
+        if (!dragState) return;
+        clearDragMarkers();
+        dragState.source.classList.add("is-dragging");
+        if (dragState.type === "stage") {
+          const target = event.target.closest(".teaching-point");
+          if (!target || target === dragState.source) return;
+          event.preventDefault();
+          const after = event.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+          target.classList.add(after ? "drag-after" : "drag-before");
+          return;
+        }
+        const targetRow = event.target.closest(".step-row");
+        const targetList = event.target.closest(".step-list");
+        if (!targetList || targetList !== dragState.list) return;
+        event.preventDefault();
+        if (!targetRow || targetRow === dragState.source) return;
+        const after = event.clientY > targetRow.getBoundingClientRect().top + targetRow.offsetHeight / 2;
+        targetRow.classList.add(after ? "drag-after" : "drag-before");
+      });
+      directory.addEventListener("drop", (event) => {
+        if (!dragState) return;
+        event.preventDefault();
+        if (dragState.type === "stage") {
+          const target = event.target.closest(".teaching-point");
+          if (target && target !== dragState.source) {
+            const after = event.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+            directory.insertBefore(dragState.source, after ? target.nextSibling : target);
+          }
+        } else {
+          const targetList = event.target.closest(".step-list");
+          const targetRow = event.target.closest(".step-row");
+          if (targetList === dragState.list) {
+            if (targetRow && targetRow !== dragState.source) {
+              const after = event.clientY > targetRow.getBoundingClientRect().top + targetRow.offsetHeight / 2;
+              targetList.insertBefore(dragState.source, after ? targetRow.nextSibling : targetRow);
+            } else if (!targetRow) {
+              targetList.insertBefore(dragState.source, targetList.querySelector(".add-step-button"));
+            }
+          }
+        }
+        const typeLabel = dragState.type === "stage" ? "教学点" : "节点";
+        clearDragMarkers();
+        dragState = null;
+        renumberDirectory();
+        simulateAutoSave();
+        showToast(`${typeLabel}顺序已调整并自动保存`);
+      });
+      directory.addEventListener("dragend", () => {
+        clearDragMarkers();
+        dragState = null;
+      });
+      document.querySelectorAll("[data-toast]").forEach((button) => {
+        button.addEventListener("click", () => showToast(button.dataset.toast));
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (pendingStepStage) cancelAddingStep();
+        else if (document.body.classList.contains("recording")) stopRecording();
+      });
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== businessFrame.contentWindow || !event.data || typeof event.data !== "object") return;
+        if (
+          event.data.type === "SXPT_ELEMENT_PICK_CANCELLED" ||
+          event.data.type === "ELEMENT_PICK_CANCELLED"
+        ) {
+          if (pendingStepStage) cancelAddingStep();
+          return;
+        }
+        if (event.data.type !== "SXPT_ELEMENT_PICKED" && event.data.type !== "ELEMENT_PICKED") return;
+        const payload = event.data.payload ?? event.data;
+        if (addPickedStep(payload)) return;
+        const label = String(payload.text || payload.actionLabel || "新录制节点").trim();
+        fillTemplate("#stepTemplate", {
+          stage: activeStage,
+          name: label ? `操作：${label}` : "新录制节点",
+          summary: "刚刚完成元素选取 · 等待保存",
+          description: "请补充该操作节点的讲解说明。",
+          selector: String(payload.selector || "已绑定页面元素")
+        });
+        setDrawer("right", true);
+        showToast("元素选取完成，已自动打开节点属性");
+      });
+
+      renumberDirectory();
+      selectStage("apply", false);
+      setDrawer("right", false);
+      window.setTimeout(() => showToast("可拖动教学点或节点排序；节点支持直接添加和删除"), 500);
+    </script>
+  </body>
+</html>

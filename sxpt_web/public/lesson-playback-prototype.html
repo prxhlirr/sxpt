@@ -1,0 +1,468 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>教师讲解交互原型</title>
+    <style>
+      :root {
+        color: #263246;
+        background: #edf1f6;
+        font-family: Inter, "Microsoft YaHei", "PingFang SC", Arial, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      button { font: inherit; cursor: pointer; }
+
+      .business-frame {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        border: 0;
+        background: #edf1f6;
+      }
+
+      .edge-tools {
+        position: fixed;
+        z-index: 20;
+        top: 14px;
+        right: 14px;
+        display: flex;
+        gap: 5px;
+        border: 1px solid rgb(255 255 255 / 72%);
+        border-radius: 11px;
+        padding: 5px;
+        background: rgb(27 37 53 / 74%);
+        box-shadow: 0 10px 28px rgb(18 27 42 / 18%);
+        backdrop-filter: blur(12px);
+      }
+
+      .edge-tools a,
+      .edge-tools button {
+        display: grid;
+        min-width: 34px;
+        min-height: 30px;
+        place-items: center;
+        border: 0;
+        border-radius: 7px;
+        padding: 0 8px;
+        color: #fff;
+        background: transparent;
+        font-size: 10px;
+        font-weight: 750;
+        text-decoration: none;
+      }
+
+      .edge-tools a:hover,
+      .edge-tools button:hover,
+      .edge-tools button.active { background: rgb(255 255 255 / 15%); }
+
+      .directory {
+        position: fixed;
+        z-index: 18;
+        top: 12px;
+        bottom: 12px;
+        left: 12px;
+        width: 292px;
+        overflow: hidden;
+        border: 1px solid rgb(255 255 255 / 82%);
+        border-radius: 16px;
+        background: rgb(250 252 255 / 96%);
+        box-shadow: 0 24px 65px rgb(22 34 52 / 22%);
+        backdrop-filter: blur(18px);
+        transition: transform 200ms ease, opacity 160ms ease;
+      }
+
+      .directory.hidden {
+        transform: translateX(calc(-100% - 22px));
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .directory header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        border-bottom: 1px solid #e7ebf1;
+        padding: 15px;
+      }
+
+      .directory header small,
+      .prompt-position {
+        color: #7c6dd2;
+        font-size: 9px;
+        font-weight: 850;
+        letter-spacing: .05em;
+      }
+
+      .directory header strong { display: block; margin-top: 4px; font-size: 14px; }
+      .directory header button,
+      .prompt-header button {
+        border: 0;
+        border-radius: 7px;
+        color: inherit;
+        background: rgb(255 255 255 / 12%);
+      }
+
+      .directory-list {
+        height: calc(100% - 64px);
+        overflow: auto;
+        padding: 10px;
+      }
+
+      .directory-stage { margin-bottom: 8px; }
+      .directory-stage > strong {
+        display: block;
+        padding: 7px 9px;
+        color: #6e798a;
+        font-size: 10px;
+      }
+
+      .directory-list button {
+        display: grid;
+        width: 100%;
+        grid-template-columns: 23px minmax(0, 1fr);
+        gap: 7px;
+        align-items: center;
+        border: 0;
+        border-radius: 8px;
+        padding: 8px;
+        color: #536074;
+        background: transparent;
+        text-align: left;
+      }
+
+      .directory-list button:hover,
+      .directory-list button.active { color: #483aab; background: #ebe8ff; }
+      .directory-list button i {
+        display: grid;
+        width: 20px;
+        height: 20px;
+        place-items: center;
+        border-radius: 50%;
+        color: #7566c9;
+        background: #fff;
+        font-size: 8px;
+        font-style: normal;
+        font-weight: 850;
+      }
+
+      .directory-list button span {
+        overflow: hidden;
+        font-size: 10px;
+        font-weight: 750;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .prompt {
+        position: fixed;
+        z-index: 17;
+        top: 76px;
+        right: 18px;
+        width: min(340px, calc(100vw - 36px));
+        overflow: hidden;
+        border: 1px solid rgb(255 255 255 / 84%);
+        border-radius: 14px;
+        background: rgb(255 255 255 / 96%);
+        box-shadow: 0 22px 58px rgb(20 31 49 / 23%);
+        backdrop-filter: blur(18px);
+      }
+
+      .prompt.hidden { display: none; }
+      .prompt.collapsed { width: 210px; }
+      .prompt.collapsed .prompt-content { display: none; }
+
+      .prompt-header {
+        display: flex;
+        min-height: 40px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 7px 6px 12px;
+        color: #fff;
+        background: linear-gradient(135deg, rgb(40 49 68 / 96%), rgb(83 68 160 / 95%));
+        cursor: grab;
+        touch-action: none;
+        user-select: none;
+      }
+
+      .prompt-header:active { cursor: grabbing; }
+      .prompt-header strong { overflow: hidden; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+      .prompt-header div { display: flex; gap: 3px; }
+      .prompt-header button { min-height: 27px; padding: 0 7px; color: #fff; font-size: 9px; }
+
+      .prompt-content { padding: 15px; }
+      .prompt-position { display: block; margin-bottom: 6px; }
+      .prompt h1 { margin: 0; color: #2e3a50; font-size: 17px; line-height: 1.35; }
+      .prompt-description {
+        margin: 11px 0 0;
+        border-radius: 9px;
+        padding: 10px 11px;
+        color: #48566d;
+        background: #f3f1ff;
+        font-size: 11px;
+        line-height: 1.65;
+      }
+
+      .attachment-button {
+        display: none;
+        width: 100%;
+        margin-top: 9px;
+        border: 1px solid #e2e6ed;
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: #5f6d80;
+        background: #fafbfc;
+        font-size: 10px;
+        font-weight: 750;
+        text-align: left;
+      }
+
+      .attachment-button.visible { display: block; }
+
+      .step-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+        margin-top: 12px;
+      }
+
+      .step-actions button {
+        min-height: 34px;
+        border: 1px solid #dde3eb;
+        border-radius: 8px;
+        color: #596679;
+        background: #fff;
+        font-size: 10px;
+        font-weight: 750;
+      }
+
+      .step-actions button.primary { border-color: #6656c7; color: #fff; background: #6656c7; }
+      .step-actions button:disabled { opacity: .42; cursor: not-allowed; }
+
+      .toast {
+        position: fixed;
+        z-index: 30;
+        bottom: 18px;
+        left: 50%;
+        border-radius: 9px;
+        padding: 9px 13px;
+        color: #fff;
+        background: rgb(27 37 53 / 86%);
+        backdrop-filter: blur(10px);
+        translate: -50% 12px;
+        font-size: 10px;
+        opacity: 0;
+        transition: opacity 160ms ease, translate 160ms ease;
+      }
+
+      .toast.visible { translate: -50% 0; opacity: 1; }
+    </style>
+  </head>
+  <body>
+    <iframe id="businessFrame" class="business-frame" src="./lesson-business-capture.html" title="采购业务系统"></iframe>
+
+    <nav class="edge-tools" aria-label="讲解工具">
+      <a href="./lesson-authoring-prototype.html" title="返回编排原型">←</a>
+      <button id="directoryToggle" type="button">目录</button>
+      <button id="promptToggle" type="button" class="active">说明</button>
+    </nav>
+
+    <aside id="directory" class="directory hidden">
+      <header>
+        <div><small>TEACHING OUTLINE</small><strong>测试教案 01</strong></div>
+        <button id="directoryClose" type="button" aria-label="关闭目录">×</button>
+      </header>
+      <div class="directory-list">
+        <section class="directory-stage">
+          <strong>01 创建采购申请</strong>
+          <button type="button" data-index="0"><i>点</i><span>教学点说明</span></button>
+          <button type="button" data-index="1"><i>1</i><span>点击新建申请</span></button>
+          <button type="button" data-index="2"><i>2</i><span>保存申请草稿</span></button>
+          <button type="button" data-index="3"><i>3</i><span>提交采购申请</span></button>
+        </section>
+        <section class="directory-stage">
+          <strong>02 完成采购审批</strong>
+          <button type="button" data-index="4"><i>点</i><span>教学点说明</span></button>
+          <button type="button" data-index="5"><i>4</i><span>打开待办任务</span></button>
+          <button type="button" data-index="6"><i>5</i><span>审批通过</span></button>
+        </section>
+      </div>
+    </aside>
+
+    <aside id="prompt" class="prompt" aria-label="当前讲解说明">
+      <header id="promptHeader" class="prompt-header">
+        <strong id="promptType">教学点说明</strong>
+        <div>
+          <button id="promptCollapse" type="button">收起</button>
+          <button id="promptClose" type="button">×</button>
+        </div>
+      </header>
+      <div class="prompt-content">
+        <span id="promptPosition" class="prompt-position"></span>
+        <h1 id="promptTitle"></h1>
+        <p id="promptDescription" class="prompt-description"></p>
+        <button id="attachmentButton" class="attachment-button" type="button"></button>
+        <div class="step-actions">
+          <button id="previousButton" type="button">← 上一步</button>
+          <button id="nextButton" class="primary" type="button">下一步 →</button>
+        </div>
+      </div>
+    </aside>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+      const items = [
+        {
+          type: "教学点说明",
+          position: "教学点 1 / 2",
+          title: "创建采购申请",
+          description: "了解采购申请的创建、信息核对和提交过程。",
+          attachment: "采购申请填写规范.pdf"
+        },
+        {
+          type: "本节点说明",
+          position: "步骤 1 / 5",
+          title: "点击新建申请",
+          description: "点击页面右上角“新建申请”，进入采购申请填写页面。",
+          selector: '[data-action="create"]'
+        },
+        {
+          type: "本节点说明",
+          position: "步骤 2 / 5",
+          title: "保存申请草稿",
+          description: "填写采购信息后先保存草稿，确认页面提示保存成功。",
+          selector: '[data-action="save"]',
+          attachment: "操作注意事项.pptx"
+        },
+        {
+          type: "本节点说明",
+          position: "步骤 3 / 5",
+          title: "提交采购申请",
+          description: "核对信息无误后提交申请，进入部门审批流程。",
+          selector: '[data-action="submit"]'
+        },
+        {
+          type: "教学点说明",
+          position: "教学点 2 / 2",
+          title: "完成采购审批",
+          description: "查看采购待办，核对申请材料并完成审批。"
+        },
+        {
+          type: "本节点说明",
+          position: "步骤 4 / 5",
+          title: "打开待办任务",
+          description: "进入审批待办列表，打开需要处理的采购申请。",
+          selector: '[data-action="handle"]'
+        },
+        {
+          type: "本节点说明",
+          position: "步骤 5 / 5",
+          title: "审批通过",
+          description: "确认申请信息和材料无误后，点击“审批通过”。",
+          selector: '[data-action="approve"]'
+        }
+      ];
+
+      const frame = document.querySelector("#businessFrame");
+      const directory = document.querySelector("#directory");
+      const prompt = document.querySelector("#prompt");
+      const promptHeader = document.querySelector("#promptHeader");
+      const promptType = document.querySelector("#promptType");
+      const promptPosition = document.querySelector("#promptPosition");
+      const promptTitle = document.querySelector("#promptTitle");
+      const promptDescription = document.querySelector("#promptDescription");
+      const attachmentButton = document.querySelector("#attachmentButton");
+      const previousButton = document.querySelector("#previousButton");
+      const nextButton = document.querySelector("#nextButton");
+      const promptToggle = document.querySelector("#promptToggle");
+      const toast = document.querySelector("#toast");
+      let currentIndex = 0;
+      let toastTimer;
+      let drag;
+
+      function showToast(message) {
+        clearTimeout(toastTimer);
+        toast.textContent = message;
+        toast.classList.add("visible");
+        toastTimer = setTimeout(() => toast.classList.remove("visible"), 1800);
+      }
+
+      function render(index) {
+        currentIndex = Math.max(0, Math.min(items.length - 1, index));
+        const item = items[currentIndex];
+        promptType.textContent = item.type;
+        promptPosition.textContent = item.position;
+        promptTitle.textContent = item.title;
+        promptDescription.textContent = item.description;
+        attachmentButton.textContent = item.attachment ? `附件 · ${item.attachment}` : "";
+        attachmentButton.classList.toggle("visible", Boolean(item.attachment));
+        previousButton.disabled = currentIndex === 0;
+        nextButton.textContent = currentIndex === items.length - 1 ? "完成讲解" : "下一步 →";
+        document.querySelectorAll("[data-index]").forEach((button) => {
+          button.classList.toggle("active", Number(button.dataset.index) === currentIndex);
+        });
+        frame.contentWindow?.postMessage({ type: "SXPT_CLEAR_PREVIEW_STEP" }, "*");
+        if (item.selector) {
+          frame.contentWindow?.postMessage({ type: "SXPT_PREVIEW_STEP", selector: item.selector }, "*");
+        }
+      }
+
+      document.querySelector("#directoryToggle").addEventListener("click", () => directory.classList.toggle("hidden"));
+      document.querySelector("#directoryClose").addEventListener("click", () => directory.classList.add("hidden"));
+      promptToggle.addEventListener("click", () => {
+        prompt.classList.toggle("hidden");
+        promptToggle.classList.toggle("active", !prompt.classList.contains("hidden"));
+      });
+      document.querySelector("#promptClose").addEventListener("click", () => {
+        prompt.classList.add("hidden");
+        promptToggle.classList.remove("active");
+      });
+      document.querySelector("#promptCollapse").addEventListener("click", (event) => {
+        prompt.classList.toggle("collapsed");
+        event.currentTarget.textContent = prompt.classList.contains("collapsed") ? "展开" : "收起";
+      });
+      document.querySelectorAll("[data-index]").forEach((button) => {
+        button.addEventListener("click", () => {
+          render(Number(button.dataset.index));
+          directory.classList.add("hidden");
+          prompt.classList.remove("hidden");
+          promptToggle.classList.add("active");
+        });
+      });
+      previousButton.addEventListener("click", () => render(currentIndex - 1));
+      nextButton.addEventListener("click", () => {
+        if (currentIndex === items.length - 1) showToast("本次教师讲解已完成");
+        else render(currentIndex + 1);
+      });
+      attachmentButton.addEventListener("click", () => showToast(`打开附件预览：${items[currentIndex].attachment}`));
+
+      promptHeader.addEventListener("pointerdown", (event) => {
+        if (event.target.closest("button")) return;
+        const rect = prompt.getBoundingClientRect();
+        drag = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+        promptHeader.setPointerCapture(event.pointerId);
+      });
+      promptHeader.addEventListener("pointermove", (event) => {
+        if (!drag) return;
+        const left = Math.max(8, Math.min(innerWidth - prompt.offsetWidth - 8, event.clientX - drag.x));
+        const top = Math.max(8, Math.min(innerHeight - prompt.offsetHeight - 8, event.clientY - drag.y));
+        Object.assign(prompt.style, { left: `${left}px`, top: `${top}px`, right: "auto" });
+      });
+      promptHeader.addEventListener("pointerup", () => { drag = null; });
+      promptHeader.addEventListener("pointercancel", () => { drag = null; });
+      frame.addEventListener("load", () => render(currentIndex));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") render(currentIndex - 1);
+        if (event.key === "ArrowRight") render(currentIndex + 1);
+      });
+
+      render(0);
+      setTimeout(() => showToast("讲解浮窗仅保留必要内容，可拖动、收起或隐藏"), 450);
+    </script>
+  </body>
+</html>

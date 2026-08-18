@@ -1,0 +1,814 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>教学编排操作整合原型</title>
+    <style>
+      :root {
+        color: #172033;
+        background: #eef2f7;
+        font-family: Inter, "Microsoft YaHei", "PingFang SC", sans-serif;
+        font-size: 16px;
+        font-synthesis: none;
+        --primary: #5d4bd6;
+        --primary-soft: #f0edff;
+        --line: #e2e7ef;
+        --muted: #69758a;
+        --panel: rgb(252 253 255 / 97%);
+        --danger: #cc3d50;
+        --success: #16845f;
+        --radius: 14px;
+        --shadow: 0 22px 70px rgb(24 35 56 / 22%), 0 3px 12px rgb(24 35 56 / 8%);
+      }
+
+      * { box-sizing: border-box; }
+      html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+      button, input, textarea, select { font: inherit; }
+      button { cursor: pointer; }
+
+      .business-stage,
+      .business-frame {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+      }
+
+      .business-stage { z-index: 0; background: #eef2f7; }
+      .business-frame { display: block; border: 0; background: #eef2f7; }
+
+      .prototype-badge {
+        position: fixed;
+        z-index: 8;
+        top: 14px;
+        left: 50%;
+        translate: -50% 0;
+        border: 1px solid rgb(255 255 255 / 78%);
+        border-radius: 999px;
+        padding: 8px 14px;
+        color: #526075;
+        background: rgb(255 255 255 / 84%);
+        box-shadow: 0 8px 28px rgb(24 35 56 / 13%);
+        backdrop-filter: blur(14px);
+        font-size: 16px;
+        font-weight: 700;
+        pointer-events: none;
+      }
+
+      body.is-picking .prototype-badge { display: none; }
+
+      .panel {
+        position: fixed;
+        z-index: 20;
+        top: 14px;
+        bottom: 14px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        border: 1px solid rgb(255 255 255 / 86%);
+        border-radius: 20px;
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(18px);
+        transition: transform 220ms ease, opacity 180ms ease;
+      }
+
+      .left-panel { left: 14px; width: 350px; }
+      .right-panel { right: 14px; width: 400px; }
+      .left-panel.is-closed { transform: translateX(calc(-100% - 28px)); opacity: 0; pointer-events: none; }
+      .right-panel.is-closed { transform: translateX(calc(100% + 28px)); opacity: 0; pointer-events: none; }
+
+      .panel-header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        border-bottom: 1px solid var(--line);
+        padding: 18px;
+      }
+
+      .eyebrow {
+        display: block;
+        margin-bottom: 5px;
+        color: #8a94a5;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: .08em;
+      }
+
+      h1, h2, h3, p { margin: 0; }
+      h1 { font-size: 20px; line-height: 1.35; }
+      h2 { font-size: 20px; line-height: 1.35; }
+      h3 { font-size: 17px; }
+
+      .lesson-meta {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 16px;
+      }
+
+      .saved { color: var(--success); font-weight: 750; }
+
+      .icon-button {
+        display: grid;
+        flex: 0 0 auto;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border: 1px solid #dce2ec;
+        border-radius: 10px;
+        color: #566176;
+        background: #fff;
+        font-size: 20px;
+      }
+
+      .icon-button:hover { border-color: #b7c0cf; color: #202b3d; }
+
+      .context-strip {
+        display: grid;
+        grid-template-columns: 46px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        border-bottom: 1px solid var(--line);
+        padding: 12px 16px;
+        background: #f8f9fc;
+      }
+
+      .context-icon {
+        display: grid;
+        width: 42px;
+        height: 42px;
+        place-items: center;
+        border-radius: 11px;
+        color: var(--primary);
+        background: var(--primary-soft);
+        font-weight: 900;
+      }
+
+      .context-copy { min-width: 0; }
+      .context-copy strong,
+      .context-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .context-copy strong { font-size: 16px; }
+      .context-copy small { margin-top: 3px; color: var(--muted); font-size: 16px; }
+
+      .directory {
+        min-height: 0;
+        flex: 1;
+        overflow: auto;
+        padding: 12px;
+      }
+
+      .directory-title {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 6px 10px;
+        color: #536075;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .directory-title span:last-child { color: #929cab; font-weight: 600; }
+
+      .point-card {
+        margin-bottom: 8px;
+        overflow: hidden;
+        border: 1px solid transparent;
+        border-radius: 12px;
+        background: rgb(255 255 255 / 72%);
+      }
+
+      .point-card.is-selected { border-color: #cfc8ff; background: #f7f5ff; }
+
+      .tree-button {
+        display: grid;
+        width: 100%;
+        align-items: center;
+        border: 0;
+        color: #344054;
+        background: transparent;
+        text-align: left;
+      }
+
+      .point-button {
+        grid-template-columns: 24px 34px minmax(0, 1fr) auto;
+        gap: 9px;
+        padding: 11px;
+      }
+
+      .drag-handle { color: #a0a9b7; cursor: grab; font-size: 18px; letter-spacing: -5px; }
+      .point-index {
+        display: grid;
+        width: 34px;
+        height: 34px;
+        place-items: center;
+        border-radius: 9px;
+        color: var(--primary);
+        background: #ece9ff;
+        font-size: 16px;
+        font-weight: 900;
+      }
+
+      .tree-copy { min-width: 0; }
+      .tree-copy strong, .tree-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .tree-copy strong { font-size: 16px; }
+      .tree-copy small { margin-top: 4px; color: #7e899a; font-size: 16px; }
+      .count-badge { border-radius: 999px; padding: 4px 8px; color: #6e7889; background: #edf1f6; font-size: 16px; }
+
+      .node-list {
+        position: relative;
+        display: grid;
+        gap: 4px;
+        margin: 0 10px 10px 32px;
+        padding-left: 14px;
+      }
+
+      .node-list::before {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        width: 1px;
+        background: #ddd8fa;
+        content: "";
+      }
+
+      .node-button {
+        grid-template-columns: 20px 28px minmax(0, 1fr) 20px;
+        gap: 8px;
+        border-radius: 9px;
+        padding: 9px;
+      }
+
+      .node-button:hover,
+      .node-button.is-selected { color: #3f31a6; background: #ebe8ff; }
+
+      .node-number {
+        display: grid;
+        width: 26px;
+        height: 26px;
+        place-items: center;
+        border: 1px solid #d7dce7;
+        border-radius: 50%;
+        background: #fff;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .node-state { color: var(--success); font-size: 16px; }
+
+      .operation-hub {
+        border-top: 1px solid var(--line);
+        background: #fff;
+      }
+
+      .hub-toggle {
+        display: grid;
+        width: 100%;
+        min-height: 54px;
+        grid-template-columns: 34px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 8px;
+        border: 0;
+        padding: 9px 16px;
+        color: #2c374a;
+        background: #fff;
+        text-align: left;
+      }
+
+      .hub-toggle:hover { background: #f8f9fc; }
+      .hub-toggle .hub-icon {
+        display: grid;
+        width: 32px;
+        height: 32px;
+        place-items: center;
+        border-radius: 9px;
+        color: #fff;
+        background: var(--primary);
+        font-weight: 900;
+      }
+      .hub-toggle strong, .hub-toggle small { display: block; }
+      .hub-toggle strong { font-size: 16px; }
+      .hub-toggle small { margin-top: 2px; color: var(--muted); font-size: 16px; }
+      .hub-chevron { color: #8e98a8; transition: rotate 160ms ease; }
+      .operation-hub.is-open .hub-chevron { rotate: 180deg; }
+
+      .hub-body {
+        display: none;
+        gap: 12px;
+        max-height: 46vh;
+        overflow: auto;
+        border-top: 1px solid var(--line);
+        padding: 12px 14px 14px;
+        background: #f8f9fc;
+      }
+
+      .operation-hub.is-open .hub-body { display: grid; }
+
+      .action-group {
+        display: grid;
+        gap: 8px;
+        border: 1px solid #e3e7ef;
+        border-radius: 12px;
+        padding: 10px;
+        background: #fff;
+      }
+
+      .group-heading {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: #596579;
+        font-size: 16px;
+        font-weight: 800;
+      }
+
+      .group-heading small { color: #909aaa; font-size: 16px; font-weight: 600; }
+      .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+
+      .action-button {
+        min-height: 42px;
+        border: 1px solid #dce2eb;
+        border-radius: 10px;
+        padding: 8px 10px;
+        color: #48566b;
+        background: #fff;
+        font-size: 16px;
+        font-weight: 750;
+      }
+
+      .action-button:hover { border-color: #b9c3d2; background: #f9fafc; }
+      .action-button.primary { border-color: var(--primary); color: #fff; background: var(--primary); }
+      .action-button.danger { color: var(--danger); }
+      .action-button.full { grid-column: 1 / -1; }
+      .action-button:disabled { cursor: not-allowed; opacity: .42; }
+
+      .property-scroll { min-height: 0; flex: 1; overflow: auto; padding: 18px; }
+      .property-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+      .property-heading p { margin-top: 7px; color: var(--muted); font-size: 16px; line-height: 1.55; }
+      .type-badge { flex: 0 0 auto; border-radius: 999px; padding: 6px 9px; color: var(--primary); background: var(--primary-soft); font-size: 16px; font-weight: 800; }
+
+      .form-section { display: grid; gap: 12px; margin-top: 18px; border-top: 1px solid var(--line); padding-top: 18px; }
+      .form-section-title { color: #4d596c; font-size: 16px; font-weight: 850; }
+      .field { display: grid; gap: 7px; }
+      .field span { color: #596579; font-size: 16px; font-weight: 750; }
+      .field input, .field textarea, .field select {
+        width: 100%;
+        min-height: 44px;
+        border: 1px solid #dce2eb;
+        border-radius: 10px;
+        outline: 0;
+        padding: 10px 12px;
+        color: #253145;
+        background: #fff;
+        font-size: 16px;
+      }
+      .field textarea { min-height: 96px; resize: vertical; }
+      .field input:focus, .field textarea:focus, .field select:focus { border-color: #7869df; box-shadow: 0 0 0 3px rgb(120 105 223 / 12%); }
+      .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+      .binding-card {
+        display: grid;
+        grid-template-columns: 40px minmax(0, 1fr) auto;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid #d8d2ff;
+        border-radius: 12px;
+        padding: 11px;
+        color: #5144ad;
+        background: #f5f3ff;
+      }
+      .binding-card .binding-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 9px; background: #e7e2ff; }
+      .binding-card strong, .binding-card small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .binding-card strong { font-size: 16px; }
+      .binding-card small { margin-top: 3px; color: #8075bf; font-size: 16px; }
+      .binding-card button { border: 0; color: var(--primary); background: transparent; font-size: 16px; font-weight: 800; }
+
+      .attachment-card { border: 1px dashed #cbd3df; border-radius: 12px; padding: 12px; color: #657186; background: #f8fafc; font-size: 16px; line-height: 1.5; }
+
+      .panel-footer { display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); padding: 12px 18px; background: #fff; }
+
+      .edge-trigger {
+        position: fixed;
+        z-index: 18;
+        top: 50%;
+        width: 38px;
+        min-height: 92px;
+        border: 1px solid rgb(255 255 255 / 72%);
+        color: #fff;
+        background: rgb(34 45 64 / 75%);
+        box-shadow: 0 8px 24px rgb(24 35 56 / 18%);
+        backdrop-filter: blur(12px);
+        font-size: 16px;
+        font-weight: 850;
+        opacity: .5;
+      }
+      .edge-trigger:hover { opacity: 1; }
+      .edge-trigger.left { left: 0; border-left: 0; border-radius: 0 11px 11px 0; }
+      .edge-trigger.right { right: 0; border-right: 0; border-radius: 11px 0 0 11px; }
+      .edge-trigger span { writing-mode: vertical-rl; letter-spacing: .12em; }
+      body.is-picking .edge-trigger { display: none; }
+
+      .picking-bar {
+        position: fixed;
+        z-index: 26;
+        top: 14px;
+        left: 50%;
+        display: none;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid rgb(255 255 255 / 68%);
+        border-radius: 999px;
+        padding: 8px 9px 8px 14px;
+        color: #fff;
+        background: rgb(31 41 58 / 86%);
+        box-shadow: 0 10px 32px rgb(18 27 42 / 23%);
+        backdrop-filter: blur(14px);
+        translate: -50% 0;
+        font-size: 16px;
+      }
+      body.is-picking .picking-bar { display: flex; }
+      .picking-dot { width: 9px; height: 9px; border-radius: 50%; background: #ff5467; box-shadow: 0 0 0 5px rgb(255 84 103 / 17%); animation: pulse 1.2s infinite; }
+      .picking-bar span { color: #cbd3dd; }
+      .picking-bar button { min-height: 36px; border: 0; border-radius: 999px; padding: 7px 12px; color: #fff; background: #d83e51; font-size: 16px; font-weight: 800; }
+
+      .toast {
+        position: fixed;
+        z-index: 30;
+        bottom: 20px;
+        left: 50%;
+        max-width: min(640px, calc(100vw - 40px));
+        border: 1px solid rgb(255 255 255 / 72%);
+        border-radius: 12px;
+        padding: 11px 16px;
+        color: #fff;
+        background: rgb(31 42 58 / 88%);
+        box-shadow: 0 9px 28px rgb(17 25 39 / 20%);
+        backdrop-filter: blur(12px);
+        translate: -50% 16px;
+        font-size: 16px;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 160ms ease, translate 160ms ease;
+      }
+      .toast.is-visible { translate: -50% 0; opacity: 1; }
+
+      @keyframes pulse { 50% { opacity: .4; } }
+
+      @media (max-width: 980px) {
+        .left-panel { width: min(350px, calc(100vw - 54px)); }
+        .right-panel { width: min(400px, calc(100vw - 54px)); }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="business-stage" aria-label="全屏业务系统">
+      <iframe id="businessFrame" class="business-frame" src="./lesson-business-capture.html" title="业务系统"></iframe>
+    </main>
+
+    <div class="prototype-badge">操作整合原型 · 业务系统始终保持全屏</div>
+
+    <aside id="leftPanel" class="panel left-panel" aria-label="教学目录与操作中心">
+      <header class="panel-header">
+        <div>
+          <span class="eyebrow">LESSON AUTHORING</span>
+          <h1>测试教案 01</h1>
+          <div class="lesson-meta"><span>V1</span><span>·</span><span id="saveState" class="saved">已保存</span></div>
+        </div>
+        <button class="icon-button" type="button" data-close="left" title="收起目录">‹</button>
+      </header>
+
+      <section class="context-strip" aria-label="当前操作对象">
+        <span id="contextIcon" class="context-icon">点</span>
+        <div class="context-copy">
+          <strong id="contextTitle">申请与录入</strong>
+          <small id="contextType">当前选择：教学点</small>
+        </div>
+        <span class="count-badge" id="contextCount">2 节点</span>
+      </section>
+
+      <section id="directory" class="directory">
+        <div class="directory-title"><span>教学目录</span><span>可拖动排序</span></div>
+
+        <article class="point-card is-selected" data-point="apply">
+          <button class="tree-button point-button" type="button" data-select-point="apply">
+            <span class="drag-handle" title="拖动排序">⠿</span><span class="point-index">01</span>
+            <span class="tree-copy"><strong>申请与录入</strong><small>填写采购申请基本信息</small></span>
+            <span class="count-badge">2</span>
+          </button>
+          <div class="node-list">
+            <button class="tree-button node-button" type="button" data-select-node="create">
+              <span class="drag-handle">⠿</span><span class="node-number">1</span>
+              <span class="tree-copy"><strong>新建采购申请</strong><small>点击操作</small></span><span class="node-state">✓</span>
+            </button>
+            <button class="tree-button node-button" type="button" data-select-node="subject">
+              <span class="drag-handle">⠿</span><span class="node-number">2</span>
+              <span class="tree-copy"><strong>填写申请主题</strong><small>表单录入</small></span><span class="node-state">✓</span>
+            </button>
+          </div>
+        </article>
+
+        <article class="point-card" data-point="approve">
+          <button class="tree-button point-button" type="button" data-select-point="approve">
+            <span class="drag-handle">⠿</span><span class="point-index">02</span>
+            <span class="tree-copy"><strong>审批与确认</strong><small>完成部门审批与结果确认</small></span>
+            <span class="count-badge">2</span>
+          </button>
+          <div class="node-list">
+            <button class="tree-button node-button" type="button" data-select-node="submit">
+              <span class="drag-handle">⠿</span><span class="node-number">1</span>
+              <span class="tree-copy"><strong>提交审批</strong><small>点击操作</small></span><span class="node-state">✓</span>
+            </button>
+            <button class="tree-button node-button" type="button" data-select-node="confirm">
+              <span class="drag-handle">⠿</span><span class="node-number">2</span>
+              <span class="tree-copy"><strong>确认审批结果</strong><small>状态判断</small></span><span class="node-state">✓</span>
+            </button>
+          </div>
+        </article>
+
+        <article class="point-card" data-point="archive">
+          <button class="tree-button point-button" type="button" data-select-point="archive">
+            <span class="drag-handle">⠿</span><span class="point-index">03</span>
+            <span class="tree-copy"><strong>归档与查看</strong><small>查看业务单据并完成归档</small></span>
+            <span class="count-badge">1</span>
+          </button>
+          <div class="node-list">
+            <button class="tree-button node-button" type="button" data-select-node="archive-node">
+              <span class="drag-handle">⠿</span><span class="node-number">1</span>
+              <span class="tree-copy"><strong>归档采购单</strong><small>点击操作</small></span><span class="node-state">✓</span>
+            </button>
+          </div>
+        </article>
+      </section>
+
+      <section id="operationHub" class="operation-hub is-open" aria-label="操作中心">
+        <button id="hubToggle" class="hub-toggle" type="button">
+          <span class="hub-icon">⌘</span>
+          <span><strong>操作中心</strong><small>所有编排命令集中在这里</small></span>
+          <span class="hub-chevron">⌃</span>
+        </button>
+        <div class="hub-body">
+          <section class="action-group">
+            <div class="group-heading"><span>录制与节点</span><small>编排主流程</small></div>
+            <div class="action-grid">
+              <button id="pickNode" class="action-button primary full" type="button">选择页面元素并添加节点</button>
+              <button id="rebindNode" class="action-button" type="button" data-action="rebind" disabled>重新绑定元素</button>
+              <button id="deleteNode" class="action-button danger" type="button" data-action="delete-node" disabled>删除当前节点</button>
+            </div>
+          </section>
+          <section class="action-group">
+            <div class="group-heading"><span>教学点</span><small>目录结构</small></div>
+            <div class="action-grid">
+              <button class="action-button" type="button" data-action="add-point">新增教学点</button>
+              <button class="action-button" type="button" data-action="duplicate-point">复制当前教学点</button>
+              <button class="action-button danger full" type="button" data-action="delete-point">删除当前教学点</button>
+            </div>
+          </section>
+          <section class="action-group">
+            <div class="group-heading"><span>教案</span><small>全局操作</small></div>
+            <div class="action-grid">
+              <button class="action-button" type="button" data-action="lesson">教案设置</button>
+              <button class="action-button" type="button" data-action="preview">预览讲解</button>
+              <button class="action-button" type="button" data-action="save">立即保存</button>
+              <button class="action-button primary" type="button" data-action="publish">校验并发布</button>
+            </div>
+          </section>
+        </div>
+      </section>
+    </aside>
+
+    <aside id="rightPanel" class="panel right-panel" aria-label="属性配置">
+      <header class="panel-header">
+        <div><span class="eyebrow">PROPERTY INSPECTOR</span><h2 id="propertyPanelTitle">教学点配置</h2></div>
+        <button class="icon-button" type="button" data-close="right" title="收起属性">›</button>
+      </header>
+      <div id="propertyContent" class="property-scroll"></div>
+      <footer class="panel-footer">
+        <button class="action-button" type="button" data-close="right">取消</button>
+        <button class="action-button primary" type="button" data-action="save-property">保存属性</button>
+      </footer>
+    </aside>
+
+    <button id="leftTrigger" class="edge-trigger left" type="button"><span>目录与操作</span></button>
+    <button id="rightTrigger" class="edge-trigger right" type="button"><span>属性配置</span></button>
+
+    <div class="picking-bar">
+      <span class="picking-dot"></span><strong>正在选取页面元素</strong><span>选中后自动创建节点并打开属性</span>
+      <button id="cancelPicking" type="button">结束选取</button>
+    </div>
+    <div id="toast" class="toast" role="status"></div>
+
+    <script>
+      const points = {
+        apply: { name: "申请与录入", description: "填写采购申请基本信息，并讲解录入规范。", score: 35, role: "申请人", count: 2 },
+        approve: { name: "审批与确认", description: "完成部门审批，并判断审批结果。", score: 40, role: "部门负责人", count: 2 },
+        archive: { name: "归档与查看", description: "查看完整采购单并完成归档。", score: 25, role: "采购专员", count: 1 }
+      };
+      const nodes = {
+        create: { name: "新建采购申请", point: "apply", type: "点击", selector: "button[data-action='create']", description: "点击新建按钮，进入采购申请表单。" },
+        subject: { name: "填写申请主题", point: "apply", type: "输入", selector: "input[name='subject']", description: "填写能够清楚说明采购用途的申请主题。" },
+        submit: { name: "提交审批", point: "approve", type: "点击", selector: "button[data-action='submit']", description: "检查信息无误后提交审批。" },
+        confirm: { name: "确认审批结果", point: "approve", type: "状态判断", selector: ".approval-status", description: "确认审批状态已经变更为通过。" },
+        "archive-node": { name: "归档采购单", point: "archive", type: "点击", selector: "button[data-action='archive']", description: "点击归档并检查列表状态。" }
+      };
+
+      const leftPanel = document.querySelector("#leftPanel");
+      const rightPanel = document.querySelector("#rightPanel");
+      const operationHub = document.querySelector("#operationHub");
+      const businessFrame = document.querySelector("#businessFrame");
+      const propertyContent = document.querySelector("#propertyContent");
+      const propertyPanelTitle = document.querySelector("#propertyPanelTitle");
+      const toast = document.querySelector("#toast");
+      const saveState = document.querySelector("#saveState");
+      let activePoint = "apply";
+      let activeNode = "";
+      let toastTimer;
+
+      function setPanel(side, open) {
+        (side === "left" ? leftPanel : rightPanel).classList.toggle("is-closed", !open);
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.classList.add("is-visible");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2300);
+      }
+
+      function markChanged() {
+        saveState.textContent = "保存中…";
+        saveState.classList.remove("saved");
+        setTimeout(() => {
+          saveState.textContent = "已保存";
+          saveState.classList.add("saved");
+        }, 600);
+      }
+
+      function updateContext() {
+        const point = points[activePoint];
+        const node = activeNode ? nodes[activeNode] : null;
+        document.querySelector("#contextIcon").textContent = node ? "节" : "点";
+        document.querySelector("#contextTitle").textContent = node?.name ?? point.name;
+        document.querySelector("#contextType").textContent = node ? `所属教学点：${point.name}` : "当前选择：教学点";
+        document.querySelector("#contextCount").textContent = node ? node.type : `${point.count} 节点`;
+        document.querySelector("#rebindNode").disabled = !node;
+        document.querySelector("#deleteNode").disabled = !node;
+      }
+
+      function renderPointProperty() {
+        const point = points[activePoint];
+        propertyPanelTitle.textContent = "教学点配置";
+        propertyContent.innerHTML = `
+          <div class="property-heading">
+            <div><span class="eyebrow">TEACHING POINT</span><h2>${point.name}</h2><p>右侧只编辑当前对象的属性，新增、删除和发布等命令统一放在左侧操作中心。</p></div>
+            <span class="type-badge">教学点</span>
+          </div>
+          <section class="form-section">
+            <strong class="form-section-title">基本信息</strong>
+            <label class="field"><span>教学点名称</span><input value="${point.name}" /></label>
+            <label class="field"><span>阶段说明</span><textarea>${point.description}</textarea></label>
+            <div class="field-row">
+              <label class="field"><span>客观分值</span><input type="number" value="${point.score}" /></label>
+              <label class="field"><span>业务角色</span><input value="${point.role}" /></label>
+            </div>
+          </section>
+          <section class="form-section">
+            <strong class="form-section-title">附件资料</strong>
+            <div class="attachment-card">拖入或点击上传本教学点的讲解资料、制度文件和示例附件。</div>
+          </section>`;
+        wireInputs();
+      }
+
+      function renderNodeProperty() {
+        const node = nodes[activeNode];
+        propertyPanelTitle.textContent = "节点配置";
+        propertyContent.innerHTML = `
+          <div class="property-heading">
+            <div><span class="eyebrow">RECORDED NODE</span><h2>${node.name}</h2><p>这里只展示与当前节点相关的说明和判定信息，元素操作统一由操作中心发起。</p></div>
+            <span class="type-badge">${node.type}</span>
+          </div>
+          <section class="form-section">
+            <strong class="form-section-title">讲解内容</strong>
+            <label class="field"><span>节点名称</span><input value="${node.name}" /></label>
+            <label class="field"><span>本节点说明</span><textarea>${node.description}</textarea></label>
+          </section>
+          <section class="form-section">
+            <strong class="form-section-title">元素与完成判定</strong>
+            <div class="binding-card"><span class="binding-icon">⌖</span><span><strong>已绑定页面元素</strong><small>${node.selector}</small></span><button type="button" data-action="highlight">定位</button></div>
+            <div class="field-row">
+              <label class="field"><span>操作类型</span><select><option>${node.type}</option><option>点击</option><option>输入</option><option>选择</option></select></label>
+              <label class="field"><span>完成方式</span><select><option>操作即完成</option><option>状态判断</option></select></label>
+            </div>
+          </section>
+          <section class="form-section">
+            <strong class="form-section-title">附件资料</strong>
+            <div class="attachment-card">可上传与当前节点直接相关的截图、操作规范或示例文件。</div>
+          </section>`;
+        wireInputs();
+        propertyContent.querySelector("[data-action='highlight']")?.addEventListener("click", () => {
+          businessFrame.contentWindow?.postMessage({ type: "SXPT_PREVIEW_STEP", selector: node.selector }, "*");
+          showToast("已在业务界面定位并高亮当前绑定元素");
+        });
+      }
+
+      function wireInputs() {
+        propertyContent.querySelectorAll("input, textarea, select").forEach((element) => element.addEventListener("input", markChanged));
+      }
+
+      function selectPoint(id) {
+        activePoint = id;
+        activeNode = "";
+        document.querySelectorAll(".point-card").forEach((card) => card.classList.toggle("is-selected", card.dataset.point === id));
+        document.querySelectorAll(".node-button").forEach((button) => button.classList.remove("is-selected"));
+        updateContext();
+        renderPointProperty();
+        setPanel("right", true);
+      }
+
+      function selectNode(id) {
+        activeNode = id;
+        activePoint = nodes[id].point;
+        document.querySelectorAll(".point-card").forEach((card) => card.classList.toggle("is-selected", card.dataset.point === activePoint));
+        document.querySelectorAll(".node-button").forEach((button) => button.classList.toggle("is-selected", button.dataset.selectNode === id));
+        updateContext();
+        renderNodeProperty();
+        setPanel("right", true);
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_PREVIEW_STEP", selector: nodes[id].selector }, "*");
+      }
+
+      function startPicking(rebind = false) {
+        document.body.classList.add("is-picking");
+        setPanel("left", false);
+        setPanel("right", false);
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_SET_RECORDING", enabled: true }, "*");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_START_ELEMENT_PICK" }, "*");
+        showToast(rebind ? "请选择新的页面元素完成重新绑定" : "请选择页面元素，选中后再配置节点属性");
+      }
+
+      function stopPicking() {
+        document.body.classList.remove("is-picking");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_CANCEL_ELEMENT_PICK" }, "*");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_SET_RECORDING", enabled: false }, "*");
+        setPanel("left", true);
+      }
+
+      document.querySelectorAll("[data-close]").forEach((button) => button.addEventListener("click", () => setPanel(button.dataset.close, false)));
+      document.querySelector("#leftTrigger").addEventListener("click", () => setPanel("left", true));
+      document.querySelector("#rightTrigger").addEventListener("click", () => setPanel("right", true));
+      document.querySelector("#hubToggle").addEventListener("click", () => operationHub.classList.toggle("is-open"));
+      document.querySelector("#pickNode").addEventListener("click", () => startPicking(false));
+      document.querySelector("#cancelPicking").addEventListener("click", stopPicking);
+      document.querySelectorAll("[data-select-point]").forEach((button) => button.addEventListener("click", () => selectPoint(button.dataset.selectPoint)));
+      document.querySelectorAll("[data-select-node]").forEach((button) => button.addEventListener("click", (event) => { event.stopPropagation(); selectNode(button.dataset.selectNode); }));
+
+      document.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => {
+        const action = button.dataset.action;
+        if (action === "rebind") return startPicking(true);
+        if (action === "delete-node") return showToast(activeNode ? `原型演示：确认后删除“${nodes[activeNode].name}”` : "请先选择需要删除的节点");
+        if (action === "add-point") { activePoint = "apply"; activeNode = ""; renderPointProperty(); setPanel("right", true); return showToast("已打开新教学点属性配置"); }
+        if (action === "duplicate-point") return showToast(`原型演示：已复制教学点“${points[activePoint].name}”`);
+        if (action === "delete-point") return showToast(`原型演示：确认后删除教学点“${points[activePoint].name}”`);
+        if (action === "lesson") return showToast("原型演示：打开教案基础设置");
+        if (action === "preview") return showToast("原型演示：进入教师讲解预览");
+        if (action === "save" || action === "save-property") { markChanged(); return showToast("已保存当前编排内容"); }
+        if (action === "publish") return showToast("校验通过，原型演示：教案发布成功");
+      }));
+
+      window.addEventListener("message", (event) => {
+        if (event.source !== businessFrame.contentWindow || !event.data || typeof event.data !== "object") return;
+        if (["SXPT_ELEMENT_PICK_CANCELLED", "ELEMENT_PICK_CANCELLED"].includes(event.data.type)) return stopPicking();
+        if (!["SXPT_ELEMENT_PICKED", "ELEMENT_PICKED"].includes(event.data.type)) return;
+        const payload = event.data.payload ?? event.data;
+        const id = `picked-${Date.now()}`;
+        nodes[id] = {
+          name: String(payload.text || payload.actionLabel || "新录制节点").trim(),
+          point: activePoint,
+          type: payload.actionType || "点击",
+          selector: payload.selector || "已绑定页面元素",
+          description: "请补充本节点的讲解说明。"
+        };
+        activeNode = id;
+        document.body.classList.remove("is-picking");
+        businessFrame.contentWindow?.postMessage({ type: "SXPT_SET_RECORDING", enabled: false }, "*");
+        setPanel("left", true);
+        renderNodeProperty();
+        updateContext();
+        setPanel("right", true);
+        showToast("元素选取完成，右侧已打开节点属性配置");
+      });
+
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && document.body.classList.contains("is-picking")) stopPicking();
+      });
+
+      updateContext();
+      renderPointProperty();
+      setPanel("right", false);
+      setTimeout(() => showToast("新版原型：所有命令已集中到底部操作中心"), 500);
+    </script>
+  </body>
+</html>
