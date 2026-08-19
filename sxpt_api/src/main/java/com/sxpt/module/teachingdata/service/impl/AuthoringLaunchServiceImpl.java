@@ -48,6 +48,8 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
 
     private static final String SCENE_RECORD = "RECORD";
     private static final String SDK_MODE_CAPTURE = "CAPTURE";
+    private static final String GENERATION_SOURCE_NORMAL = "NORMAL";
+    private static final String GENERATION_SOURCE_CLASSIC_CASE = "CLASSIC_CASE";
 
     private final ConnectorSystemService connectorSystemService;
     private final BusinessModuleService businessModuleService;
@@ -107,7 +109,7 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
         TeachingDataInstance instance = requirePreparedInstance(job, requestBatchId, user);
         PlatformLaunchContextService.CreatedLaunchContext created = platformLaunchContextService.createLaunchContext(
                 buildLaunchContext(request, user, system, module, actor, instance));
-        return buildResult(system, module, instance, created);
+        return buildResult(request, system, module, instance, created);
     }
 
     private void validateRequest(CreateAuthoringLaunchRequest request) {
@@ -117,6 +119,11 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
         requireText(request.getLessonId());
         requireText(request.getConnectorSystemId());
         requireText(request.getBusinessModuleId());
+        if (StringUtils.hasText(request.getGenerationSource())
+                && !GENERATION_SOURCE_NORMAL.equalsIgnoreCase(request.getGenerationSource().trim())
+                && !GENERATION_SOURCE_CLASSIC_CASE.equalsIgnoreCase(request.getGenerationSource().trim())) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
     }
 
     private void requireTeacherOrAdmin(CurrentUserContext.CurrentUser user) {
@@ -328,7 +335,7 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
         context.setDataInstanceId(instance.getId());
         context.setSceneType(SCENE_RECORD);
         context.setSdkMode(SDK_MODE_CAPTURE);
-        context.setTargetUrl(module.getEntryUrl());
+        context.setTargetUrl(resolveAuthoringTargetUrl(request, instance, module));
         context.setSegmentNo(actor.getActorNo() == null ? null : actor.getActorNo().longValue());
         context.setActorType(actor.getActorType());
         context.setRequiredExternalOrgId(actor.getRequiredOrgCode());
@@ -342,7 +349,8 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
         return context;
     }
 
-    private AuthoringLaunchVO buildResult(ConnectorSystem system,
+    private AuthoringLaunchVO buildResult(CreateAuthoringLaunchRequest request,
+                                         ConnectorSystem system,
                                          BusinessModule module,
                                          TeachingDataInstance instance,
                                          PlatformLaunchContextService.CreatedLaunchContext created) {
@@ -352,11 +360,26 @@ public class AuthoringLaunchServiceImpl implements AuthoringLaunchService {
         result.setLaunchContextId(context.getId());
         result.setLaunchToken(created.getLaunchToken());
         result.setDataInstanceId(instance.getId());
-        result.setRedirectUrl(module.getEntryUrl());
+        String targetUrl = resolveAuthoringTargetUrl(request, instance, module);
+        result.setRedirectUrl(targetUrl);
         result.setLaunchUrl(urlBuilder.build(system.getBaseUrl(), context.getTenantId(),
-                created.getLaunchToken(), module.getEntryUrl()));
+                created.getLaunchToken(), targetUrl));
         result.setExpireTime(context.getExpireTime());
         return result;
+    }
+
+    private String resolveAuthoringTargetUrl(CreateAuthoringLaunchRequest request,
+                                             TeachingDataInstance instance,
+                                             BusinessModule module) {
+        return isClassicCaseAuthoring(request) && StringUtils.hasText(instance.getTargetUrl())
+                ? instance.getTargetUrl()
+                : module.getEntryUrl();
+    }
+
+    private boolean isClassicCaseAuthoring(CreateAuthoringLaunchRequest request) {
+        return request != null
+                && StringUtils.hasText(request.getGenerationSource())
+                && GENERATION_SOURCE_CLASSIC_CASE.equalsIgnoreCase(request.getGenerationSource().trim());
     }
 
     private String buildPrepareRequestJson(TeachingDataTemplate template, ModuleDataStrategy strategy) {

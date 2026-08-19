@@ -150,9 +150,8 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
         attempt.setExecutionId(execution.getId());
         attempt.setStudentId(execution.getStudentId());
         attempt.setTaskId(execution.getTaskId());
-        List<TaskTeachingPoint> teachingPoints = taskPublishService.listTeachingPointsByTask(
-                execution.getTenantId(), execution.getTaskId());
-        if (teachingPoints != null && teachingPoints.size() == 1) {
+        List<TaskTeachingPoint> teachingPoints = listTeachingPointsForExecution(execution);
+        if (teachingPoints.size() == 1) {
             attempt.setTeachingPointId(teachingPoints.get(0).getTeachingPointId());
         }
         attempt.setStartTime(execution.getStartTime());
@@ -187,6 +186,7 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
         List<EvaluationResult> evaluationResults = triggerAutoEvaluation(existed, operatorId, rules);
+        requirePracticeMandatoryStepsCompleted(existed, evaluationResults);
         LocalDateTime now = LocalDateTime.now();
         fillSubmitResult(existed, operatorId, now, evaluationResults);
         PracticeAttempt completedAttempt = completePracticeAttemptIfNeeded(existed, operatorId, now);
@@ -486,8 +486,7 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
      */
     private List<EvaluationRule> listEvaluationRulesForTask(TaskExecution execution) {
         Map<String, EvaluationRule> rules = new LinkedHashMap<>();
-        List<TaskTeachingPoint> teachingPoints = taskPublishService.listTeachingPointsByTask(
-                execution.getTenantId(), execution.getTaskId());
+        List<TaskTeachingPoint> teachingPoints = listTeachingPointsForExecution(execution);
         for (TaskTeachingPoint teachingPoint : teachingPoints) {
             addRules(rules, evaluationConfigService.listRules(
                     execution.getTenantId(), execution.getTaskId(), teachingPoint.getTeachingPointId()));
@@ -598,8 +597,7 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
      * @return 任务执行上下文快照。
      */
     private TaskExecutionContext buildExecutionContext(TaskExecution execution, Task task) {
-        List<TaskTeachingPoint> teachingPoints = taskPublishService.listTeachingPointsByTask(
-                execution.getTenantId(), execution.getTaskId());
+        List<TaskTeachingPoint> teachingPoints = listTeachingPointsForExecution(execution);
         if (teachingPoints.isEmpty()) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
         }
@@ -637,6 +635,109 @@ public class TaskExecutionServiceImpl implements TaskExecutionService {
         context.setCreateBy(execution.getStudentId());
         context.setUpdateBy(execution.getStudentId());
         return context;
+    }
+
+    /**
+     * 练习提交前校验全部必做评分项均已命中，防止绕过前端直接提交未完成练习。
+     */
+    private void requirePracticeMandatoryStepsCompleted(TaskExecution execution,
+                                                        List<EvaluationResult> evaluationResults) {
+        if (!PRACTICE_SDK_MODE.equals(execution.getSdkMode())) {
+            return;
+        }
+        for (EvaluationResult result : evaluationResults) {
+            Map<String, Boolean> matches = evidenceMatchesByItemId(result.getEvidenceJson());
+            List<EvaluationItem> items = evaluationConfigService.listItemsByRule(
+                    execution.getTenantId(), result.getEvaluationRuleId());
+            if (items == null) {
+                continue;
+            }
+            for (EvaluationItem item : items) {
+                if (Boolean.TRUE.equals(item.getRequired())
+                        && StringUtils.hasText(item.getRelatedTaskStepId())
+                        && !Boolean.TRUE.equals(matches.get(item.getId()))) {
+                    throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+                }
+            }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Boolean> evidenceMatchesByItemId(String evidenceJson) {
+        Map<String, Boolean> matches = new HashMap<>();
+        if (!StringUtils.hasText(evidenceJson)) {
+            return matches;
+        }
+        try {
+            Map<String, Object> root = objectMapper.readValue(evidenceJson, Map.class);
+            Object items = root.get("items");
+            if (!(items instanceof List)) {
+                return matches;
+            }
+            for (Object value : (List<?>) items) {
+                if (!(value instanceof Map)) {
+                    continue;
+                }
+                Map<Object, Object> evidence = (Map<Object, Object>) value;
+                Object itemId = evidence.get("itemId");
+                if (itemId != null) {
+                    matches.put(String.valueOf(itemId), Boolean.TRUE.equals(evidence.get("matched")));
+                }
+            }
+            return matches;
+        } catch (JsonProcessingException ex) {
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR);
+        }
+    }
+
+    /**
+     * 按执行身份中指定的教学点收窄任务发布范围。
+     *
+     * 历史版本只按展示教案编码创建远程任务，可能让多个教案的教学点落在同一个任务下。
+     * 新执行会携带 teachingPointId，仅装载当前教案的步骤与评分规则；未携带该字段的
+     * 旧调用仍保留原有的全任务行为。
+     */
+    private List<TaskTeachingPoint> listTeachingPointsForExecution(TaskExecution execution) {
+        List<TaskTeachingPoint> teachingPoints = taskPublishService.listTeachingPointsByTask(
+                execution.getTenantId(), execution.getTaskId());
+        if (teachingPoints == null) {
+            teachingPoints = new ArrayList<>();
+        }
+        String requestedTeachingPointId = readRequestedTeachingPointId(execution.getExecutionIdentityJson());
+        if (!StringUtils.hasText(requestedTeachingPointId)) {
+            return teachingPoints;
+        }
+        List<TaskTeachingPoint> scopedTeachingPoints = new ArrayList<>();
+        for (TaskTeachingPoint teachingPoint : teachingPoints) {
+            if (teachingPoint != null
+                    && requestedTeachingPointId.equals(teachingPoint.getTeachingPointId())) {
+                scopedTeachingPoints.add(teachingPoint);
+            }
+        }
+        if (scopedTeachingPoints.isEmpty()) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        return scopedTeachingPoints;
+    }
+
+    /**
+     * 从执行身份扩展信息中读取前端指定的教学点。格式异常时按旧客户端处理。
+     */
+    @SuppressWarnings("unchecked")
+    private String readRequestedTeachingPointId(String executionIdentityJson) {
+        if (!StringUtils.hasText(executionIdentityJson)) {
+            return null;
+        }
+        try {
+            Map<String, Object> identity = objectMapper.readValue(executionIdentityJson, Map.class);
+            Object teachingPointId = identity.get("teachingPointId");
+            if (teachingPointId instanceof String && StringUtils.hasText((String) teachingPointId)) {
+                return ((String) teachingPointId).trim();
+            }
+            return null;
+        } catch (JsonProcessingException ex) {
+            return null;
+        }
     }
 
     /**

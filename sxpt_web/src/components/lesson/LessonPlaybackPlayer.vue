@@ -94,6 +94,7 @@ const promptDragging = ref(false);
 const dragState = ref<OverlayDragSession | null>(null);
 const previewAttachment = ref<TrainingAttachment | null>(null);
 const attachmentPreviewMinimized = ref(false);
+const attachmentPreviewMaximized = ref(false);
 const launcherPosition = ref<PlaybackLauncherPosition | null>(null);
 const launcherDragging = ref(false);
 let launcherDragState: PlaybackLauncherDragState | null = null;
@@ -116,6 +117,18 @@ const teachingPoints = computed(() =>
 );
 const current = computed(() => steps.value[props.currentIndex] ?? steps.value[0]);
 const currentStep = computed(() => current.value?.step);
+const currentAttachments = computed(() => {
+  const unique = new Map<string, TrainingAttachment>();
+  (current.value?.stage.attachments ?? []).forEach((attachment) =>
+    unique.set(attachment.id, attachment)
+  );
+  if (!props.showStageIntroduction) {
+    (currentStep.value?.attachments ?? []).forEach((attachment) =>
+      unique.set(attachment.id, attachment)
+    );
+  }
+  return [...unique.values()];
+});
 const businessResourceBaseUrl = computed(() => {
   const platform = store.getBusinessPlatform(props.lesson.businessPlatformId);
   if (!platform || platform.baseUrl.startsWith('internal://')) return undefined;
@@ -421,6 +434,20 @@ watch(
   }
 );
 
+watch(
+  [() => props.currentIndex, () => props.showStageIntroduction],
+  () => {
+    if (
+      previewAttachment.value &&
+      !currentAttachments.value.some(
+        (attachment) => attachment.id === previewAttachment.value?.id
+      )
+    ) {
+      closeAttachmentPreview();
+    }
+  }
+);
+
 function handleViewportResize() {
   schedulePromptConstraint();
   constrainLauncherPosition();
@@ -439,17 +466,42 @@ function openAttachmentPreview(attachment: TrainingAttachment) {
   attachmentPreviewMinimized.value = false;
 }
 
-function closeAttachmentPreview() {
-  previewAttachment.value = null;
+function openAttachmentsFromMenu() {
+  const firstAttachment = currentAttachments.value[0];
+  if (!firstAttachment) return;
+  if (
+    !previewAttachment.value ||
+    !currentAttachments.value.some(
+      (attachment) => attachment.id === previewAttachment.value?.id
+    )
+  ) {
+    previewAttachment.value = firstAttachment;
+  }
   attachmentPreviewMinimized.value = false;
 }
 
+function closeAttachmentPreview() {
+  previewAttachment.value = null;
+  attachmentPreviewMinimized.value = false;
+  attachmentPreviewMaximized.value = false;
+}
+
 function minimizeAttachmentPreview() {
-  if (previewAttachment.value) attachmentPreviewMinimized.value = true;
+  if (!previewAttachment.value) return;
+  attachmentPreviewMinimized.value = true;
+  attachmentPreviewMaximized.value = false;
 }
 
 function restoreAttachmentPreview() {
   attachmentPreviewMinimized.value = false;
+}
+
+function maximizeAttachmentPreview() {
+  if (previewAttachment.value) attachmentPreviewMaximized.value = true;
+}
+
+function restoreAttachmentPreviewSize() {
+  attachmentPreviewMaximized.value = false;
 }
 </script>
 
@@ -505,6 +557,29 @@ function restoreAttachmentPreview() {
           <small>说明</small>
         </button>
         <button
+          class="playback-rail-action playback-attachment-action"
+          :class="{
+            active: Boolean(previewAttachment) && !attachmentPreviewMinimized
+          }"
+          type="button"
+          :disabled="!currentAttachments.length"
+          :aria-expanded="Boolean(previewAttachment) && !attachmentPreviewMinimized"
+          :title="
+            currentAttachments.length
+              ? `查看当前附件（${currentAttachments.length} 个）`
+              : '当前教学点和节点暂无附件'
+          "
+          @click="openAttachmentsFromMenu"
+        >
+          <span class="playback-attachment-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24">
+              <path d="M8.5 12.7 14.9 6.3a3.2 3.2 0 0 1 4.5 4.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.5-8.5" />
+            </svg>
+            <b v-if="currentAttachments.length">{{ currentAttachments.length }}</b>
+          </span>
+          <small>附件</small>
+        </button>
+        <button
           class="playback-rail-action playback-rail-collapse"
           type="button"
           title="收起全部菜单"
@@ -539,7 +614,11 @@ function restoreAttachmentPreview() {
         />
         <footer v-if="current">
           <span>{{ showStageIntroduction ? '当前教学点' : '当前节点' }}</span>
-          <strong>{{ showStageIntroduction ? current.stage.name : current.step.title }}</strong>
+          <strong
+            :title="showStageIntroduction ? current.stage.name : current.step.title"
+          >
+            {{ showStageIntroduction ? current.stage.name : current.step.title }}
+          </strong>
           <small>{{ formatDuration(elapsedDuration) }} / {{ formatDuration(totalDuration) }}</small>
         </footer>
       </aside>
@@ -752,14 +831,17 @@ function restoreAttachmentPreview() {
 
     <AttachmentPreviewLayer
       :attachment="previewAttachment"
-      :attachments="current?.stage.attachments ?? []"
+      :attachments="currentAttachments"
       :context-key="current?.stage.id ?? ''"
       :minimized="attachmentPreviewMinimized"
+      :maximized="attachmentPreviewMaximized"
       :avoid-right="false"
       @close="closeAttachmentPreview"
+      @maximize="maximizeAttachmentPreview"
       @minimize="minimizeAttachmentPreview"
       @preview="openAttachmentPreview"
       @restore="restoreAttachmentPreview"
+      @restore-size="restoreAttachmentPreviewSize"
     />
   </section>
 </template>
@@ -1376,6 +1458,42 @@ function restoreAttachmentPreview() {
 .playback-rail-action > small {
   font-size: 14px;
   font-weight: 800;
+}
+
+.playback-rail-action:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.playback-attachment-icon {
+  position: relative;
+}
+
+.playback-attachment-icon svg {
+  width: 23px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.playback-attachment-icon b {
+  position: absolute;
+  top: -7px;
+  right: -8px;
+  display: grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 2px solid #252b3a;
+  border-radius: 999px;
+  padding: 0 3px;
+  color: #fff;
+  background: #ef4444;
+  box-sizing: border-box;
+  font-size: 9px;
+  line-height: 1;
 }
 
 .playback-rail-collapse {

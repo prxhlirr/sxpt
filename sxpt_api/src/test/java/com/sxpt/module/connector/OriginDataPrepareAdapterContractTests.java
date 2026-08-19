@@ -15,16 +15,19 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.client.RestTemplate;
 
 import java.lang.reflect.Method;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -170,8 +173,8 @@ class OriginDataPrepareAdapterContractTests {
         system.setId("origin-oa");
         system.setTenantId("tenant-1");
         system.setBaseUrl("http://127.0.0.1:9527");
-        system.setAuthType("BEARER");
-        system.setConfigJson("{\"token\":\"oa-token\"}");
+        system.setAuthType("API_KEY");
+        system.setConfigJson("{\"headerName\":\"X-API-Key\",\"apiKey\":\"oa-token\"}");
 
         PlatformCapability capability = new PlatformCapability();
         capability.setEndpointUrl("/openapi/teaching-data/batch-create");
@@ -210,13 +213,38 @@ class OriginDataPrepareAdapterContractTests {
         assertFalse(participant.containsKey("studentName"));
         assertFalse(body.containsKey("tenantId"));
         assertEquals(Collections.emptyMap(), body.get("bizParams"));
-        assertEquals("Bearer oa-token", entity.getHeaders().getFirst("Authorization"));
+        assertEquals("oa-token", entity.getHeaders().getFirst("X-API-Key"));
+        assertNull(entity.getHeaders().getFirst("Authorization"));
         assertEquals("trace-1", entity.getHeaders().getFirst("X-Trace-Id"));
         assertEquals("idem-1", entity.getHeaders().getFirst("X-Idempotency-Key"));
         assertEquals("oa-batch-1", response.getExternalRequestId());
         assertEquals("oa-data-1", response.getItems().get(0).getExternalBusinessId());
         assertEquals("PENDING_REG", response.getItems().get(0).getExternalStatus());
         assertEquals("/workspace/incoming/detail/oa-data-1", response.getItems().get(0).getTargetUrl());
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void requestLogShouldExposeOnlyXApiKeyWhenLocalDebugSwitchIsEnabled() {
+        HttpOriginDataPrepareAdapter adapter = new HttpOriginDataPrepareAdapter(
+                mock(ConnectorSystemMapper.class),
+                mock(PlatformCapabilityMapper.class),
+                mock(RestTemplate.class));
+        ReflectionTestUtils.setField(adapter, "logApiKeyPlainText", true);
+
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("X-API-Key", "oa-data-center-incoming-token");
+        headers.setBearerAuth("bearer-secret");
+        headers.set("Cookie", "SESSION=secret");
+
+        Map<String, Object> loggedHeaders = ReflectionTestUtils.invokeMethod(
+                adapter, "headersForLog", headers);
+
+        assertNotNull(loggedHeaders);
+        assertEquals(Collections.singletonList("oa-data-center-incoming-token"),
+                (List<String>) loggedHeaders.get("X-API-Key"));
+        assertEquals(Collections.singletonList("******"), loggedHeaders.get("Authorization"));
+        assertEquals(Collections.singletonList("******"), loggedHeaders.get("Cookie"));
     }
 
     @Test
@@ -230,8 +258,8 @@ class OriginDataPrepareAdapterContractTests {
         system.setId("origin-oa");
         system.setTenantId("tenant-1");
         system.setBaseUrl("http://127.0.0.1:9527");
-        system.setAuthType("BEARER");
-        system.setConfigJson("{\"token\":\"oa-token\"}");
+        system.setAuthType("API_KEY");
+        system.setConfigJson("{\"headerName\":\"X-API-Key\",\"apiKey\":\"oa-token\"}");
 
         PlatformCapability capability = new PlatformCapability();
         capability.setEndpointUrl("/openapi/teaching-data/batch-create");
@@ -274,8 +302,8 @@ class OriginDataPrepareAdapterContractTests {
         system.setId("origin-oa");
         system.setTenantId("tenant-1");
         system.setBaseUrl("http://127.0.0.1:9527");
-        system.setAuthType("BEARER");
-        system.setConfigJson("{\"token\":\"oa-token\"}");
+        system.setAuthType("API_KEY");
+        system.setConfigJson("{\"headerName\":\"X-API-Key\",\"apiKey\":\"oa-token\"}");
 
         PlatformCapability capability = new PlatformCapability();
         capability.setEndpointUrl("/openapi/teaching-data/batch-create");
@@ -327,8 +355,8 @@ class OriginDataPrepareAdapterContractTests {
         system.setId("origin-oa");
         system.setTenantId("tenant-1");
         system.setBaseUrl("http://127.0.0.1:9527");
-        system.setAuthType("BEARER");
-        system.setConfigJson("{\"token\":\"oa-token\"}");
+        system.setAuthType("API_KEY");
+        system.setConfigJson("{\"headerName\":\"X-API-Key\",\"apiKey\":\"oa-token\"}");
 
         PlatformCapability capability = new PlatformCapability();
         capability.setEndpointUrl("/openapi/teaching-data/batch-create");

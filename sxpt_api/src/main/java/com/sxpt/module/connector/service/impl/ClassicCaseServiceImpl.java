@@ -59,6 +59,7 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -167,25 +168,40 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                 : null;
         validateIdentityBindingActors(request, identityBindingJson);
 
-        String contentHash = buildContentHash(request, tagsJson, supportedGenerationModesJson,
-                identityBindingJson, desensitizedPayloadJson, caseDataFormatJson);
         ClassicCaseAsset asset = findAsset(request.getTenantId(),
                 request.getSourceConnectorSystemId(), request.getCaseCode());
         boolean newAsset = asset == null;
+        String contentHash = buildContentHash(request, request.getModuleCode(), tagsJson,
+                supportedGenerationModesJson, identityBindingJson,
+                desensitizedPayloadJson, caseDataFormatJson);
         if (newAsset) {
             asset = buildNewAsset(request, sourceSystem, learningSystem, sceneTypesJson);
             classicCaseAssetMapper.insert(asset);
-        } else {
-            patchAsset(asset, request, sourceSystem, learningSystem, sceneTypesJson);
         }
 
         ClassicCaseVersion existingVersion = StringUtils.hasText(request.getCaseVersionId())
                 ? findVersionByExternalId(request.getTenantId(), asset.getId(), request.getCaseVersionId())
                 : null;
         if (existingVersion != null) {
-            if (!contentHash.equals(existingVersion.getContentHash())) {
+            boolean unchangedContentExceptModule = matchesStoredContentExceptModule(
+                    request, asset, existingVersion, tagsJson,
+                    supportedGenerationModesJson, identityBindingJson,
+                    desensitizedPayloadJson, caseDataFormatJson);
+            boolean unchangedDesensitizePolicy = jsonContentEquals(
+                    desensitizePolicyJson, existingVersion.getDesensitizePolicyJson(), false);
+            if (!unchangedDesensitizePolicy
+                    || (!contentHash.equals(existingVersion.getContentHash())
+                    && !unchangedContentExceptModule)) {
                 throw new BusinessException(ApiResultCode.IDEMPOTENCY_CONFLICT.getCode(),
                         "相同 caseVersionId 对应的案例内容不一致");
+            }
+            if (!contentHash.equals(existingVersion.getContentHash())) {
+                // 模块归属属于案例资产元数据；同步历史哈希，保证迁移完成后的重推仍然幂等。
+                existingVersion.setContentHash(contentHash);
+                classicCaseVersionMapper.updateById(existingVersion);
+            }
+            if (!newAsset) {
+                patchAsset(asset, request, sourceSystem, learningSystem, sceneTypesJson);
             }
             // 同内容重推也视为一次显式启用，便于 OA 在停用后恢复同一不可变版本。
             asset.setCurrentVersionId(existingVersion.getId());
@@ -198,6 +214,10 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
             asset.setLockVersion((asset.getLockVersion() == null ? 0L : asset.getLockVersion()) + 1L);
             classicCaseAssetMapper.updateById(asset);
             return asset;
+        }
+
+        if (!newAsset) {
+            patchAsset(asset, request, sourceSystem, learningSystem, sceneTypesJson);
         }
 
         ClassicCaseVersion version = buildVersion(
@@ -1865,13 +1885,14 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
     }
 
     private String buildContentHash(ClassicCaseImportRequest request,
+                                    String moduleCode,
                                     String tagsJson,
                                     String supportedGenerationModesJson,
                                     String identityBindingJson,
                                     String desensitizedPayloadJson,
                                     String caseDataFormatJson) {
         String canonical = firstText(request.getCaseTitle(), "") + "\n"
-                + firstText(request.getModuleCode(), "") + "\n"
+                + firstText(moduleCode, "") + "\n"
                 + firstText(request.getPayloadSchemaVersion(), DEFAULT_PAYLOAD_SCHEMA_VERSION) + "\n"
                 + firstText(request.getCaseSummary(), "") + "\n"
                 + supportedGenerationModesJson + "\n"
@@ -1881,6 +1902,45 @@ public class ClassicCaseServiceImpl implements ClassicCaseService {
                 + caseDataFormatJson + "\n"
                 + (request.getSourceUpdatedAt() == null ? "" : request.getSourceUpdatedAt().toString());
         return sha256(canonical);
+    }
+
+    /**
+     * 直接核对版本表和资产表中的不可变内容，用于修复已经完成模块迁移但仍保留旧模块哈希的数据。
+     * 模块、学习环境和业务模块属于资产归属元数据，不参与此处的内容一致性判断。
+     */
+    private boolean matchesStoredContentExceptModule(ClassicCaseImportRequest request,
+                                                     ClassicCaseAsset asset,
+                                                     ClassicCaseVersion version,
+                                                     String tagsJson,
+                                                     String supportedGenerationModesJson,
+                                                     String identityBindingJson,
+                                                     String desensitizedPayloadJson,
+                                                     String caseDataFormatJson) {
+        String payloadSchemaVersion = StringUtils.hasText(request.getPayloadSchemaVersion())
+                ? request.getPayloadSchemaVersion().trim()
+                : DEFAULT_PAYLOAD_SCHEMA_VERSION;
+        return Objects.equals(request.getCaseTitle().trim(), asset.getCaseTitle())
+                && Objects.equals(trimToNull(request.getCaseSummary()), asset.getCaseSummary())
+                && jsonContentEquals(tagsJson, asset.getTagsJson(), true)
+                && Objects.equals(request.getSourceUpdatedAt(), asset.getSourceUpdatedAt())
+                && Objects.equals(payloadSchemaVersion, version.getPayloadSchemaVersion())
+                && jsonContentEquals(
+                        supportedGenerationModesJson, version.getSupportedGenerationModesJson(), true)
+                && jsonContentEquals(identityBindingJson, version.getIdentityBindingJson(), false)
+                && jsonContentEquals(
+                        desensitizedPayloadJson, version.getDesensitizedCasePayloadJson(), false)
+                && jsonContentEquals(caseDataFormatJson, version.getCaseDataFormatJson(), false);
+    }
+
+    private boolean jsonContentEquals(String incomingJson,
+                                      String storedJson,
+                                      boolean arrayRequired) {
+        if (!StringUtils.hasText(incomingJson) || !StringUtils.hasText(storedJson)) {
+            return !StringUtils.hasText(incomingJson) && !StringUtils.hasText(storedJson);
+        }
+        return Objects.equals(
+                parseJsonNode(incomingJson, arrayRequired),
+                parseJsonNode(storedJson, arrayRequired));
     }
 
     private Set<String> supportedGenerationModes(ClassicCaseVersion version) {

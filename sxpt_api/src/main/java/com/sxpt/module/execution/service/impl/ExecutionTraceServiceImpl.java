@@ -8,6 +8,8 @@ import com.sxpt.module.execution.entity.TaskExecution;
 import com.sxpt.module.execution.mapper.ExecutionTraceMapper;
 import com.sxpt.module.execution.mapper.TaskExecutionMapper;
 import com.sxpt.module.execution.service.ExecutionTraceService;
+import com.sxpt.module.teaching.entity.TaskStep;
+import com.sxpt.module.teaching.mapper.TaskStepMapper;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,10 +47,14 @@ public class ExecutionTraceServiceImpl implements ExecutionTraceService {
 
     private final TaskExecutionMapper taskExecutionMapper;
 
+    private final TaskStepMapper taskStepMapper;
+
     public ExecutionTraceServiceImpl(ExecutionTraceMapper executionTraceMapper,
-                                     TaskExecutionMapper taskExecutionMapper) {
+                                     TaskExecutionMapper taskExecutionMapper,
+                                     TaskStepMapper taskStepMapper) {
         this.executionTraceMapper = executionTraceMapper;
         this.taskExecutionMapper = taskExecutionMapper;
+        this.taskStepMapper = taskStepMapper;
     }
 
     /**
@@ -61,7 +67,8 @@ public class ExecutionTraceServiceImpl implements ExecutionTraceService {
     @Transactional(rollbackFor = Exception.class)
     public ExecutionTrace reportExecutionTrace(ExecutionTrace executionTrace) {
         validateReportFields(executionTrace);
-        validateExecutionWritable(executionTrace);
+        TaskExecution execution = validateExecutionWritable(executionTrace);
+        validateTraceScope(executionTrace, execution);
         ExecutionTrace existed = findExistedClientTrace(executionTrace);
         if (existed != null) {
             return existed;
@@ -94,13 +101,42 @@ public class ExecutionTraceServiceImpl implements ExecutionTraceService {
      *
      * @param executionTrace 学生执行轨迹。
      */
-    private void validateExecutionWritable(ExecutionTrace executionTrace) {
+    private TaskExecution validateExecutionWritable(ExecutionTrace executionTrace) {
         TaskExecution execution = taskExecutionMapper.selectOne(new QueryWrapper<TaskExecution>()
                 .eq("tenant_id", executionTrace.getTenantId())
                 .eq("id", executionTrace.getExecutionId())
                 .eq("deleted", Boolean.FALSE));
         if (execution == null || !RUNNING_STATUS.equals(execution.getExecutionStatus())) {
             throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        return execution;
+    }
+
+    /**
+     * 校验步骤型轨迹确实属于当前执行任务。
+     *
+     * 练习完成事实由浏览器采集后上报，服务端仍需以已发布 task_step 为边界，
+     * 防止客户端把其它任务的步骤 ID 或教学点 ID 写入当前执行并误命中评分项。
+     * 不携带 taskStepId 的会话、页面状态类轨迹继续按原规则接收。
+     *
+     * @param executionTrace 待上报轨迹。
+     * @param execution 当前运行中的任务执行。
+     */
+    private void validateTraceScope(ExecutionTrace executionTrace, TaskExecution execution) {
+        if (!StringUtils.hasText(executionTrace.getTaskStepId())) {
+            return;
+        }
+        TaskStep taskStep = taskStepMapper.selectOne(new QueryWrapper<TaskStep>()
+                .eq("tenant_id", executionTrace.getTenantId())
+                .eq("id", executionTrace.getTaskStepId())
+                .eq("task_id", execution.getTaskId())
+                .eq("deleted", Boolean.FALSE));
+        if (taskStep == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        if (StringUtils.hasText(executionTrace.getTeachingPointId())
+                && !executionTrace.getTeachingPointId().equals(taskStep.getTeachingPointId())) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
         }
     }
 

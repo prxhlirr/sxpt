@@ -37,7 +37,7 @@ import { getApiConfig } from '../config/api';
 import { createDefaultBusinessPlatforms } from '../data/mockSeed';
 import { usersApi, type StudentDirectoryItem } from '../api/users';
 import {
-  isPracticeMonitorableStep,
+  isRequiredPracticeStep,
   practiceRecordedActionType
 } from '../utils/practiceStep';
 
@@ -2351,18 +2351,24 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     task: StudentTask,
     lesson: LessonPlan
   ): void {
-    const completedStepIds = new Set(task.completedPracticeStepIds ?? []);
+    const completedStepKeys = new Set(
+      (task.practiceStepResults ?? []).map(
+        (result) => `${result.stageId}\u0000${result.stepId}`
+      )
+    );
     const practiceStages = lesson.stages.filter(
       (stage) =>
         stage.visibility.PRACTICE &&
-        stage.recordedSteps.some(isPracticeMonitorableStep)
+        stage.recordedSteps.some(isRequiredPracticeStep)
     );
 
     for (const stage of practiceStages) {
-      const monitoredSteps = stage.recordedSteps.filter(isPracticeMonitorableStep);
+      const requiredSteps = stage.recordedSteps.filter(isRequiredPracticeStep);
       if (
         task.completedStageIds.includes(stage.id) ||
-        !monitoredSteps.every((step) => completedStepIds.has(step.id))
+        !requiredSteps.every((step) =>
+          completedStepKeys.has(`${stage.id}\u0000${step.id}`)
+        )
       ) {
         continue;
       }
@@ -2394,14 +2400,17 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     if (task.mode !== 'PRACTICE' || task.status !== 'DOING') {
       throw new Error('只有进行中的练习任务可以记录操作点');
     }
-    if (task.completedPracticeStepIds?.includes(stepId)) return task;
-
     const lesson = requireLesson(task.lessonId);
     const stage = requireStage(lesson, stageId);
     const step = stage.recordedSteps.find((candidate) => candidate.id === stepId);
-    if (!step || !isPracticeMonitorableStep(step)) {
-      throw new Error('未找到可评分的练习操作点');
+    if (!step || !isRequiredPracticeStep(step)) {
+      throw new Error('未找到必做的练习操作点');
     }
+    const hasRecordedEvidence = () =>
+      task.practiceStepResults?.some(
+        (result) => result.stageId === stageId && result.stepId === stepId
+      ) ?? false;
+    if (hasRecordedEvidence()) return task;
     const published = state.publishedTasks.find(
       (candidate) => candidate.id === task.publishedTaskId
     );
@@ -2426,16 +2435,18 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
               )
             )
           : {
-              clientTraceId: `${task.id}:${task.attemptNumber}:${step.id}:practice-completed`,
+              clientTraceId: `${task.id}:${task.attemptNumber}:${stage.id}:${step.id}:practice-completed`,
               traceId: ''
             };
-      if (task.completedPracticeStepIds?.includes(stepId)) return task;
+      if (hasRecordedEvidence()) return task;
 
       const recordedActionType: PracticeStepResult['recordedActionType'] =
         practiceRecordedActionType(step);
       task.completedPracticeStepIds ??= [];
       task.practiceStepResults ??= [];
-      task.completedPracticeStepIds.push(stepId);
+      if (!task.completedPracticeStepIds.includes(stepId)) {
+        task.completedPracticeStepIds.push(stepId);
+      }
       task.practiceStepResults.push({
         stepId,
         stageId,
@@ -2444,6 +2455,10 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         observedActionType: evidence.actionType,
         observedSelector: evidence.selector,
         observedUrl: evidence.url,
+        observedRect: evidence.rect,
+        recordedViewport: evidence.recordedViewport,
+        evidenceScreenshot: evidence.evidenceScreenshot,
+        pageSnapshot: evidence.pageSnapshot,
         completedAt: evidence.completedAt,
         remoteTraceId: binding.traceId || undefined
       });
@@ -2475,7 +2490,7 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
         ? lesson.stages.filter(
             (stage) =>
               stage.visibility.PRACTICE &&
-              stage.recordedSteps.some(isPracticeMonitorableStep)
+              stage.recordedSteps.some(isRequiredPracticeStep)
           )
         : lesson.stages.filter(
             (stage) =>
@@ -2484,7 +2499,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
           );
     if (
       assignedStages.some(
-        (stage) => stage.required && !task.completedStageIds.includes(stage.id)
+        (stage) =>
+          (task.mode === 'PRACTICE' || stage.required) &&
+          !task.completedStageIds.includes(stage.id)
       )
     ) {
       throw new Error('必须先完成本人负责的全部必做教学点');

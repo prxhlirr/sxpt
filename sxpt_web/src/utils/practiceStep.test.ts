@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { RecordedStep } from '../domain/models';
 import {
   isPracticeMonitorableStep,
+  isRequiredPracticeStep,
   practiceRecordedActionType
 } from './practiceStep';
 
@@ -40,6 +41,18 @@ describe('practice step semantics', () => {
     const recorded = step({ actionType: 'input', selector: '#subject' });
 
     expect(isPracticeMonitorableStep(recorded)).toBe(true);
+    expect(isRequiredPracticeStep(recorded)).toBe(true);
     expect(practiceRecordedActionType(recorded)).toBe('input');
+  });
+
+  it('does not let an explicitly optional operation block practice completion', () => {
+    const optional = step({
+      actionType: 'click',
+      selector: '[data-action="help"]',
+      required: false
+    });
+
+    expect(isPracticeMonitorableStep(optional)).toBe(true);
+    expect(isRequiredPracticeStep(optional)).toBe(false);
   });
 });

@@ -90,6 +90,24 @@ class AutoEvaluationServiceImplTests {
     }
 
     /**
+     * 验证修复前已按 CLICK 入库、但幂等键明确标识练习完成的轨迹仍可参与评分。
+     */
+    @Test
+    void generateAutoEvaluationShouldScoreLegacyPracticeCompletionTrace() {
+        when(evaluationConfigService.listItemsByRule("tenant_001", "rule_001"))
+                .thenReturn(Collections.singletonList(buildTraceExistsItem()));
+        ExecutionTrace legacyTrace = buildTrace();
+        legacyTrace.setTraceType("CLICK");
+        legacyTrace.setClientTraceId("execution_001:step_001:practice-completed");
+        when(executionTraceService.listByExecution("tenant_001", "execution_001"))
+                .thenReturn(Collections.singletonList(legacyTrace));
+
+        EvaluationResult result = service.generateAutoEvaluation(buildScope());
+
+        assertEquals(new BigDecimal("10.00"), result.getAutoScore());
+    }
+
+    /**
      * 验证没有命中轨迹时不给分。
      */
     @Test
@@ -348,7 +366,7 @@ class AutoEvaluationServiceImplTests {
         item.setRelatedResourceId("res_001");
         item.setScore(new BigDecimal("10.00"));
         item.setAssertionType("TRACE_EXISTS");
-        item.setAssertionConfigJson("{\"traceType\":\"CLICK\",\"success\":true}");
+        item.setAssertionConfigJson("{\"traceType\":\"STEP_COMPLETED\",\"success\":true}");
         item.setFailPolicy("NO_SCORE");
         return item;
     }
@@ -419,7 +437,7 @@ class AutoEvaluationServiceImplTests {
         trace.setId("trace_001");
         trace.setTaskStepId("step_001");
         trace.setResourceId("res_001");
-        trace.setTraceType("CLICK");
+        trace.setTraceType("STEP_COMPLETED");
         trace.setTraceTime(LocalDateTime.now());
         trace.setSuccess(Boolean.TRUE);
         return trace;

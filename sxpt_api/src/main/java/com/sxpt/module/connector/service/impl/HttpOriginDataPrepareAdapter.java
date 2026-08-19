@@ -13,8 +13,11 @@ import com.sxpt.module.connector.entity.PlatformCapability;
 import com.sxpt.module.connector.mapper.ConnectorSystemMapper;
 import com.sxpt.module.connector.mapper.PlatformCapabilityMapper;
 import com.sxpt.module.connector.service.OriginDataPrepareAdapter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
@@ -22,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.client.HttpStatusCodeException;
 import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
@@ -51,6 +55,8 @@ import java.util.Map;
 @Service
 @ConditionalOnProperty(name = "sxpt.origin.adapter-mode", havingValue = "http")
 public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(HttpOriginDataPrepareAdapter.class);
 
     private static final String STATUS_ACTIVE = "ACTIVE";
 
@@ -87,6 +93,13 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
     private final PlatformCapabilityMapper platformCapabilityMapper;
 
     private final RestTemplate restTemplate;
+
+    /**
+     * 本地联调时允许在第三方请求日志中显示 X-API-Key 原值。
+     * 非 dev 环境未显式开启时仍保持脱敏，避免认证凭据进入生产日志。
+     */
+    @Value("${sxpt.origin.log-api-key-plain-text:false}")
+    private boolean logApiKeyPlainText;
 
     @Autowired
     public HttpOriginDataPrepareAdapter(ConnectorSystemMapper connectorSystemMapper,
@@ -241,13 +254,65 @@ public class HttpOriginDataPrepareAdapter implements OriginDataPrepareAdapter {
                            HttpHeaders headers,
                            Class<T> responseType) {
         HttpEntity<Object> entity = new HttpEntity<>(request, headers);
+        LOGGER.info("[第三方接口请求] url={}, method={}, headers={}, body={}",
+                context.getUrl(), context.getHttpMethod(), headersForLog(headers), toJsonForLog(request));
         try {
             ResponseEntity<String> response = restTemplate.exchange(
                     context.getUrl(), context.getHttpMethod(), entity, String.class);
+            LOGGER.info("[第三方接口响应] url={}, method={}, status={}, body={}",
+                    context.getUrl(), context.getHttpMethod(), response.getStatusCodeValue(), response.getBody());
             return parseResponse(response.getBody(), responseType);
+        } catch (HttpStatusCodeException ex) {
+            String responseBody = ex.getResponseBodyAsString();
+            LOGGER.error("[第三方接口响应] url={}, method={}, status={}, body={}",
+                    context.getUrl(), context.getHttpMethod(), ex.getRawStatusCode(), responseBody);
+            String errorDetail = StringUtils.hasText(responseBody) ? responseBody : ex.getMessage();
+            throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(),
+                    "调用原平台接口失败：" + ex.getRawStatusCode() + " : " + errorDetail);
         } catch (RestClientException ex) {
+            LOGGER.error("[第三方接口异常] url={}, method={}, message={}",
+                    context.getUrl(), context.getHttpMethod(), ex.getMessage(), ex);
             throw new BusinessException(ApiResultCode.SYSTEM_ERROR.getCode(),
                     "调用原平台接口失败：" + ex.getMessage());
+        }
+    }
+
+    /**
+     * 生成请求日志头。启用本地联调开关时仅 X-API-Key 显示原值，
+     * Authorization、Cookie 及其他 Token/Secret 仍保持脱敏。
+     */
+    private Map<String, Object> headersForLog(HttpHeaders headers) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : headers.entrySet()) {
+            result.put(entry.getKey(), shouldMaskHeader(entry.getKey())
+                    ? Collections.singletonList("******") : entry.getValue());
+        }
+        return result;
+    }
+
+    private boolean shouldMaskHeader(String headerName) {
+        if (logApiKeyPlainText && "X-API-Key".equalsIgnoreCase(headerName)) {
+            return false;
+        }
+        return isSensitiveHeader(headerName);
+    }
+
+    private boolean isSensitiveHeader(String headerName) {
+        String normalized = headerName == null ? "" : headerName.toLowerCase(Locale.ROOT);
+        return normalized.contains("authorization")
+                || normalized.contains("api-key")
+                || normalized.contains("apikey")
+                || normalized.contains("token")
+                || normalized.contains("secret")
+                || normalized.contains("credential")
+                || normalized.contains("cookie");
+    }
+
+    private String toJsonForLog(Object value) {
+        try {
+            return JSON_MAPPER.writeValueAsString(value);
+        } catch (JsonProcessingException ex) {
+            return String.valueOf(value);
         }
     }
 

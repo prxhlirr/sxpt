@@ -89,20 +89,22 @@ class AuthoringLaunchServiceImplTests {
     }
 
     @Test
-    void shouldCreateFreshRecordInstanceAndBindCaptureLaunchForEveryRequest() {
+    void shouldOpenCreatedDetailForEveryClassicCaseAuthoringRequest() {
         stubRecordConfiguration();
         when(dataRequirementService.createDataRequirement(any())).thenAnswer(invocation -> invocation.getArgument(0));
         when(dataPrepareFacadeService.prepareAndExecute(any()))
                 .thenReturn(successJob("job-1", "batch-1"), successJob("job-2", "batch-2"));
         when(teachingDataInstanceMapper.selectOne(any()))
-                .thenReturn(readyInstance("instance-1"), readyInstance("instance-2"));
+                .thenReturn(
+                        readyInstance("instance-1", "https://oa.example.com/purchase/detail/business-1"),
+                        readyInstance("instance-2", "https://oa.example.com/purchase/detail/business-2"));
         when(platformLaunchContextService.createLaunchContext(any()))
                 .thenReturn(createdContext("launch-1", "ctx-one"), createdContext("launch-2", "ctx-two"));
         when(urlBuilder.build(any(), any(), any(), any()))
                 .thenReturn("sso-launch-one", "sso-launch-two");
 
-        AuthoringLaunchVO first = service.createLaunch(request());
-        AuthoringLaunchVO second = service.createLaunch(request());
+        AuthoringLaunchVO first = service.createLaunch(classicCaseRequest());
+        AuthoringLaunchVO second = service.createLaunch(classicCaseRequest());
 
         ArgumentCaptor<DataRequirement> requirementCaptor = ArgumentCaptor.forClass(DataRequirement.class);
         verify(dataRequirementService, org.mockito.Mockito.times(2))
@@ -126,11 +128,52 @@ class AuthoringLaunchServiceImplTests {
         assertEquals("instance-1", launchCaptor.getAllValues().get(0).getDataInstanceId());
         assertEquals("CAPTURE", launchCaptor.getAllValues().get(0).getSdkMode());
         assertEquals("teacher-1", launchCaptor.getAllValues().get(0).getUserId());
-        assertEquals("https://oa.example.com/purchase/apply", launchCaptor.getAllValues().get(0).getTargetUrl());
+        assertEquals("https://oa.example.com/purchase/detail/business-1",
+                launchCaptor.getAllValues().get(0).getTargetUrl());
         assertEquals("instance-1", first.getDataInstanceId());
         assertEquals("instance-2", second.getDataInstanceId());
+        assertEquals("https://oa.example.com/purchase/detail/business-1", first.getRedirectUrl());
+        verify(urlBuilder).build("https://oa.example.com/sso", "tenant-1", "ctx-one",
+                "https://oa.example.com/purchase/detail/business-1");
+    }
+
+    @Test
+    void shouldOpenConfiguredModuleEntryForNormalAuthoringEvenWhenInstanceHasDetailTarget() {
+        stubRecordConfiguration();
+        when(dataRequirementService.createDataRequirement(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(dataPrepareFacadeService.prepareAndExecute(any())).thenReturn(successJob("job-1", "batch-1"));
+        when(teachingDataInstanceMapper.selectOne(any())).thenReturn(
+                readyInstance("instance-1", "https://oa.example.com/purchase/detail/business-1"));
+        when(platformLaunchContextService.createLaunchContext(any()))
+                .thenReturn(createdContext("launch-1", "ctx-one"));
+        when(urlBuilder.build(any(), any(), any(), any())).thenReturn("sso-launch-one");
+
+        AuthoringLaunchVO result = service.createLaunch(request());
+
+        ArgumentCaptor<PlatformLaunchContext> launchCaptor = ArgumentCaptor.forClass(PlatformLaunchContext.class);
+        verify(platformLaunchContextService).createLaunchContext(launchCaptor.capture());
+        assertEquals("https://oa.example.com/purchase/apply", launchCaptor.getValue().getTargetUrl());
+        assertEquals("https://oa.example.com/purchase/apply", result.getRedirectUrl());
         verify(urlBuilder).build("https://oa.example.com/sso", "tenant-1", "ctx-one",
                 "https://oa.example.com/purchase/apply");
+    }
+
+    @Test
+    void shouldFallbackToModuleEntryWhenClassicCaseInstanceHasNoTargetUrl() {
+        stubRecordConfiguration();
+        when(dataRequirementService.createDataRequirement(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        when(dataPrepareFacadeService.prepareAndExecute(any())).thenReturn(successJob("job-1", "batch-1"));
+        when(teachingDataInstanceMapper.selectOne(any())).thenReturn(readyInstance("instance-1", null));
+        when(platformLaunchContextService.createLaunchContext(any()))
+                .thenReturn(createdContext("launch-1", "ctx-one"));
+        when(urlBuilder.build(any(), any(), any(), any())).thenReturn("sso-launch-one");
+
+        AuthoringLaunchVO result = service.createLaunch(classicCaseRequest());
+
+        ArgumentCaptor<PlatformLaunchContext> launchCaptor = ArgumentCaptor.forClass(PlatformLaunchContext.class);
+        verify(platformLaunchContextService).createLaunchContext(launchCaptor.capture());
+        assertEquals("https://oa.example.com/purchase/apply", launchCaptor.getValue().getTargetUrl());
+        assertEquals("https://oa.example.com/purchase/apply", result.getRedirectUrl());
     }
 
     @Test
@@ -233,6 +276,13 @@ class AuthoringLaunchServiceImplTests {
         request.setLessonId("lesson-1");
         request.setConnectorSystemId("system-1");
         request.setBusinessModuleId("module-1");
+        request.setGenerationSource("NORMAL");
+        return request;
+    }
+
+    private CreateAuthoringLaunchRequest classicCaseRequest() {
+        CreateAuthoringLaunchRequest request = request();
+        request.setGenerationSource("CLASSIC_CASE");
         return request;
     }
 
@@ -245,7 +295,7 @@ class AuthoringLaunchServiceImplTests {
         return job;
     }
 
-    private TeachingDataInstance readyInstance(String id) {
+    private TeachingDataInstance readyInstance(String id, String targetUrl) {
         TeachingDataInstance instance = new TeachingDataInstance();
         instance.setId(id);
         instance.setTenantId("tenant-1");
@@ -256,6 +306,7 @@ class AuthoringLaunchServiceImplTests {
         instance.setInstanceStatus("READY");
         instance.setExternalBusinessId("business-1");
         instance.setExternalBusinessNo("PUR-001");
+        instance.setTargetUrl(targetUrl);
         return instance;
     }
 

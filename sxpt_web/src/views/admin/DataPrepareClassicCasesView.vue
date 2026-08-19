@@ -128,7 +128,8 @@ async function initialize() {
   await run(async () => {
     systems.value = (await dataPrepareApi.listConnectorSystems(filters.tenantId))
       .filter((item) => !item.environmentType || item.environmentType === 'LEARNING');
-    filters.learningConnectorSystemId = systems.value[0]?.id || '';
+    // 默认查看全部学习环境，避免历史环境配置排在首位时把 OA 已推送案例过滤掉。
+    filters.learningConnectorSystemId = '';
     await loadModules();
     await loadCases();
   }, text.casesLoaded);

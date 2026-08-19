@@ -76,6 +76,10 @@ describe('后台教案编排页面', () => {
     expect(editor).toContain('authoring-left-drawer');
     expect(editor).toContain('authoring-right-drawer');
     expect(editor).toContain('closeAuthoringDrawers();');
+    expect(editor).toContain('function collapseAuthoringMenu()');
+    expect(editor).toContain('@pointerdown.capture="handleAuthoringWorkspacePointerDown"');
+    expect(editor).toContain('@business-interaction="handleBusinessFrameInteraction"');
+    expect(editor).toContain('captureFrameRef.value?.clearStepPreview()');
     expect(editor).toContain('beginDirectoryDrag');
     expect(editor).toContain('dropDirectoryItem');
     expect(editor).toContain('startAddingStep(stage.id)');
@@ -132,6 +136,7 @@ describe('后台教案编排页面', () => {
 
     expect(editor).toContain('await store.syncBusinessPlatforms()');
     expect(editor).toContain('basicForm.businessPlatformModuleId');
+    expect(editor).toContain("generationSource: currentLesson.generationSource ?? 'NORMAL'");
   });
 
   it('教案设置可从后端案例库选择并锁定 OA 经典案例版本', () => {

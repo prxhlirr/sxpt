@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import type { BusinessPageSnapshot, CaptureRect } from '../../domain/models';
+import type {
+  BusinessPageSnapshot,
+  CaptureRect,
+  PracticeEvidenceScreenshot
+} from '../../domain/models';
 import {
   calculateContainedViewport,
   DEFAULT_RECORDING_VIEWPORT,
@@ -31,6 +35,7 @@ interface BusinessActionPayload extends BusinessReadyPayload {
     height: number;
   };
   pageSnapshot?: BusinessPageSnapshot;
+  evidenceScreenshot?: PracticeEvidenceScreenshot;
 }
 
 interface TargetPayload {
@@ -65,6 +70,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   'business-ready': [payload: BusinessReadyPayload];
   'business-action': [payload: BusinessActionPayload];
+  'business-interaction': [];
   'target-resolved': [payload: TargetPayload];
   'element-picked': [payload: BusinessActionPayload];
   'element-pick-cancelled': [];
@@ -238,6 +244,10 @@ function handleMessage(event: MessageEvent) {
             pageTitle: String(message.pageTitle ?? message.title ?? props.title)
           };
     emit('business-ready', payload);
+    return;
+  }
+  if (message.type === 'BUSINESS_INTERACTION') {
+    emit('business-interaction');
     return;
   }
   if (

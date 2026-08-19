@@ -4,6 +4,7 @@ import type { RecordedStep } from '../domain/models';
 import {
   MAX_RECORDED_STEP_SNAPSHOT_JSON_LENGTH,
   backendTrainingApi,
+  buildLessonScopedBackendCode,
   buildPublishedDataPrepareSnapshot,
   distributedScore,
   findOrganizationByIdOrCode,
@@ -37,6 +38,10 @@ const dataPrepareApiMock = vi.hoisted(() => ({
   acquireDataInstance: vi.fn()
 }));
 
+const executionApiMock = vi.hoisted(() => ({
+  reportTrace: vi.fn()
+}));
+
 vi.mock('../api/connector', () => ({
   connectorApi: connectorApiMock
 }));
@@ -45,10 +50,15 @@ vi.mock('./trainingApi', () => ({
   dataPrepareApi: dataPrepareApiMock
 }));
 
+vi.mock('../api/execution', () => ({
+  executionApi: executionApiMock
+}));
+
 describe('后端训练接口映射', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dataPrepareApiMock.listAllBusinessModules.mockResolvedValue([]);
+    executionApiMock.reportTrace.mockResolvedValue({ id: 'trace-practice-1' });
   });
 
   it('把后端 ACTIVE 平台映射为前端 ENABLED 并保留本地模块', () => {
@@ -197,6 +207,21 @@ describe('后端训练接口映射', () => {
     expect(safeCode('demo-class', 64)).toBe('DEMO-CLASS');
   });
 
+  it('相同展示编码的不同教案生成不同且稳定的后端课程和任务编码', () => {
+    const firstLesson = { id: 'lesson-first', code: 'LESSON-001' };
+    const secondLesson = { id: 'lesson-second', code: 'LESSON-001' };
+
+    expect(buildLessonScopedBackendCode(firstLesson, 'COURSE')).not.toBe(
+      buildLessonScopedBackendCode(secondLesson, 'COURSE')
+    );
+    expect(buildLessonScopedBackendCode(firstLesson, 'PRACTICE')).not.toBe(
+      buildLessonScopedBackendCode(secondLesson, 'PRACTICE')
+    );
+    expect(buildLessonScopedBackendCode(firstLesson, 'PRACTICE')).toBe(
+      buildLessonScopedBackendCode(firstLesson, 'PRACTICE')
+    );
+  });
+
   it.each([
     ['click', 'CLICK'],
     ['submit', 'CLICK'],
@@ -217,6 +242,76 @@ describe('后端训练接口映射', () => {
         selector: '#query'
       } as RecordedStep)
     ).toBe('CLICK');
+  });
+
+  it('练习动作匹配成功后统一上报步骤完成事实并保留原始动作类型', async () => {
+    const step = {
+      id: 'step-1',
+      title: '提交收文',
+      actionType: 'submit',
+      selector: '[data-action="submit"]',
+      selectorCandidates: ['[data-action="submit"]'],
+      remoteResourceId: 'resource-1'
+    } as RecordedStep;
+
+    const result = await backendTrainingApi.reportStudentPracticeStep(
+      {
+        id: 'lesson-1',
+        stages: [{ id: 'stage-1', recordedSteps: [step] }]
+      } as never,
+      { id: 'stage-1' } as never,
+      step,
+      {
+        mode: 'PRACTICE',
+        remoteTeachingPointId: 'teaching-point-1',
+        remoteTaskStepIdsByStepId: { 'step-1': 'task-step-1' }
+      } as never,
+      { remoteExecutionId: 'execution-1' } as never,
+      {
+        actionType: 'submit',
+        selector: '[data-action="submit"]',
+        selectorCandidates: ['[data-action="submit"]'],
+        url: '/record/apply',
+        pageTitle: '公文收文',
+        evidenceScreenshot: {
+          dataUrl: 'data:image/jpeg;base64,student-operation',
+          mimeType: 'image/jpeg',
+          width: 1440,
+          height: 900,
+          capturedAt: '2026-08-18T10:00:00.000Z'
+        },
+        completedAt: '2026-08-18T10:00:00.000Z'
+      }
+    );
+
+    expect(executionApiMock.reportTrace).toHaveBeenCalledWith(
+      expect.objectContaining({
+        executionId: 'execution-1',
+        taskStepId: 'task-step-1',
+        teachingPointId: 'teaching-point-1',
+        traceType: 'STEP_COMPLETED',
+        success: true
+      })
+    );
+    const payload = executionApiMock.reportTrace.mock.calls[0][0];
+    expect(JSON.parse(payload.outputDataJson)).toMatchObject({
+      recordedActionType: 'submit',
+      observedActionType: 'submit',
+      observedTraceType: 'CLICK'
+    });
+    expect(JSON.parse(payload.evidenceJson)).toMatchObject({
+      screenshot: {
+        mimeType: 'image/jpeg',
+        width: 1440,
+        height: 900,
+        storage: 'training_workspace'
+      }
+    });
+    expect(payload.evidenceJson).not.toContain('student-operation');
+    expect(result).toEqual({
+      clientTraceId: 'execution-1:task-step-1:practice-completed',
+      traceId: 'trace-practice-1'
+    });
   });
 
   it('按 LocalDateTime 格式发送时间，不携带时区后缀', () => {

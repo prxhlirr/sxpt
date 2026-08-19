@@ -54,6 +54,8 @@ describe('PlaybackNavigationTree', () => {
     expect(html).not.toContain('A 节点');
     expect(html).toContain('B 节点一');
     expect(html).toContain('B 节点二');
+    expect(html).toContain('title="教学点 B"');
+    expect(html).toContain('title="B 节点一"');
     expect(html.match(/playback-tree-nodes/g)).toHaveLength(1);
   });
 });

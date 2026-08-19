@@ -11,6 +11,7 @@ import type {
 } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
 import { authApi } from '../../services/trainingApi';
+import { isRequiredPracticeStep } from '../../utils/practiceStep';
 
 type TrainingMode = 'LEARNING' | 'PRACTICE';
 type TrainingStatusFilter = 'ALL' | 'TODO' | 'DOING' | 'FINISHED';
@@ -261,7 +262,11 @@ function visibleStages(lesson: LessonPlan, mode: TrainingMode) {
 
 function visibleStepCount(lesson: LessonPlan, mode: TrainingMode) {
   return visibleStages(lesson, mode).reduce(
-    (total, stage) => total + stage.recordedSteps.length,
+    (total, stage) =>
+      total +
+      (mode === 'PRACTICE'
+        ? stage.recordedSteps.filter(isRequiredPracticeStep).length
+        : stage.recordedSteps.length),
     0
   );
 }

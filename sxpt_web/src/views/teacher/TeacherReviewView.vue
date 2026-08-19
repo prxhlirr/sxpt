@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { RouterLink } from 'vue-router';
 import ResultArchiveCard from '../../components/evaluation/ResultArchiveCard.vue';
 import PageHeader from '../../components/ui/PageHeader.vue';
 import StatusPill from '../../components/ui/StatusPill.vue';
-import type { StudentTask } from '../../domain/models';
+import type { LessonStage, StudentTask } from '../../domain/models';
 import { useTrainingStore } from '../../stores/trainingStore';
+import { isRequiredPracticeStep } from '../../utils/practiceStep';
 
 type ReviewFilter = 'DOING' | 'PENDING' | 'GRADED' | 'ALL';
 
@@ -20,6 +21,8 @@ const reviewFilters: Array<{ value: ReviewFilter; label: string }> = [
 ];
 const selectedTaskId = ref('');
 const detailOpen = ref(false);
+const evidencePreviewOpen = ref(false);
+const evidencePreviewIndex = ref(0);
 const subjectiveScore = ref(0);
 const comment = ref('');
 const message = ref('');
@@ -74,6 +77,17 @@ const selectedTask = computed(() =>
 const lesson = computed(() =>
   store.state.lessons.find((item) => item.id === selectedTask.value?.lessonId)
 );
+const reviewStages = computed(() => {
+  const stages = lesson.value?.stages ?? [];
+  return selectedTask.value?.mode === 'PRACTICE'
+    ? stages.filter((stage) => requiredPracticeStepCount(stage) > 0)
+    : stages;
+});
+const completedReviewStageCount = computed(() =>
+  reviewStages.value.filter((stage) =>
+    selectedTask.value?.completedStageIds.includes(stage.id)
+  ).length
+);
 const groupPlan = computed(() =>
   selectedTask.value
     ? store.state.groupPlans[selectedTask.value.lessonId]
@@ -102,6 +116,23 @@ const selectedPracticeSteps = computed(() =>
     (first, second) =>
       Date.parse(first.completedAt) - Date.parse(second.completedAt)
   )
+);
+const evidenceGallery = computed(() =>
+  selectedPracticeSteps.value.flatMap((result) => {
+    const screenshot = result.evidenceScreenshot;
+    if (!screenshot?.dataUrl) return [];
+    return [
+      {
+        result,
+        screenshot,
+        stepName: stepTitle(result.stepId),
+        stageName: stageTitle(result.stageId)
+      }
+    ];
+  })
+);
+const currentEvidence = computed(
+  () => evidenceGallery.value[evidencePreviewIndex.value]
 );
 
 watch(
@@ -137,6 +168,18 @@ watch(
   },
   { immediate: true }
 );
+
+watch(evidenceGallery, (items) => {
+  if (!items.length) {
+    evidencePreviewOpen.value = false;
+    evidencePreviewIndex.value = 0;
+    return;
+  }
+  evidencePreviewIndex.value = Math.min(
+    evidencePreviewIndex.value,
+    items.length - 1
+  );
+});
 
 function lessonFor(task: StudentTask) {
   return store.state.lessons.find((item) => item.id === task.lessonId);
@@ -222,16 +265,45 @@ function taskCardMetrics(task: StudentTask) {
 
 function taskSummary(task: StudentTask) {
   const taskLesson = lessonFor(task);
-  const stageCount = taskLesson?.stages.length ?? 0;
-  const stepCount = taskLesson?.stages.reduce(
-    (sum, stage) => sum + stage.recordedSteps.length,
+  const summarizedStages =
+    task.mode === 'PRACTICE'
+      ? taskLesson?.stages.filter((stage) => requiredPracticeStepCount(stage) > 0) ?? []
+      : taskLesson?.stages ?? [];
+  const stageCount = summarizedStages.length;
+  const completedStageCount = summarizedStages.filter((stage) =>
+    task.completedStageIds.includes(stage.id)
+  ).length;
+  const stepCount = summarizedStages.reduce(
+    (sum, stage) =>
+      sum +
+      (task.mode === 'PRACTICE'
+        ? requiredPracticeStepCount(stage)
+        : stage.recordedSteps.length),
     0
-  ) ?? 0;
-  const hitCount = task.practiceStepResults?.length ?? 0;
+  );
+  const requiredStepIds = new Set(
+    summarizedStages.flatMap((stage) =>
+      stage.recordedSteps
+        .filter(isRequiredPracticeStep)
+        .map((step) => step.id)
+    )
+  );
+  const hitCount =
+    task.mode === 'PRACTICE'
+      ? new Set(
+          (task.practiceStepResults ?? [])
+            .filter((result) => requiredStepIds.has(result.stepId))
+            .map((result) => result.stepId)
+        ).size
+      : task.practiceStepResults?.length ?? 0;
   if (task.status === 'DOING') {
-    return `正在练习，已完成 ${task.completedStageIds.length} / ${stageCount} 个教学点，命中 ${hitCount} 个操作点。`;
+    return `正在练习，已完成 ${completedStageCount} / ${stageCount} 个教学点，命中 ${hitCount} 个必做操作点。`;
   }
-  return `已完成 ${task.completedStageIds.length} / ${stageCount} 个教学点，命中 ${hitCount} / ${stepCount} 个录制操作点。`;
+  return `已完成 ${completedStageCount} / ${stageCount} 个教学点，命中 ${hitCount} / ${stepCount} 个必做操作点。`;
+}
+
+function requiredPracticeStepCount(stage: LessonStage) {
+  return stage.recordedSteps.filter(isRequiredPracticeStep).length;
 }
 
 function taskOwnerMeta(task: StudentTask) {
@@ -266,7 +338,53 @@ function openTask(taskId: string) {
 }
 
 function closeDetail() {
+  closeEvidencePreview();
   detailOpen.value = false;
+}
+
+function openEvidencePreview(stepId: string, completedAt: string) {
+  const index = evidenceGallery.value.findIndex(
+    ({ result }) =>
+      result.stepId === stepId && result.completedAt === completedAt
+  );
+  if (index < 0) return;
+  evidencePreviewIndex.value = index;
+  evidencePreviewOpen.value = true;
+}
+
+function closeEvidencePreview() {
+  evidencePreviewOpen.value = false;
+}
+
+function selectEvidencePreview(index: number) {
+  if (index < 0 || index >= evidenceGallery.value.length) return;
+  evidencePreviewIndex.value = index;
+}
+
+function moveEvidencePreview(direction: -1 | 1) {
+  const total = evidenceGallery.value.length;
+  if (total < 2) return;
+  evidencePreviewIndex.value =
+    (evidencePreviewIndex.value + direction + total) % total;
+}
+
+function handleReviewKeydown(event: KeyboardEvent) {
+  if (evidencePreviewOpen.value) {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault();
+      moveEvidencePreview(-1);
+    } else if (event.key === 'ArrowRight') {
+      event.preventDefault();
+      moveEvidencePreview(1);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closeEvidencePreview();
+    }
+    return;
+  }
+  if (event.key === 'Escape' && detailOpen.value) {
+    closeDetail();
+  }
 }
 
 function handleCourseChange(event: Event) {
@@ -309,7 +427,14 @@ async function scoreTask() {
   }
 }
 
-onMounted(refreshPracticeStatus);
+onMounted(() => {
+  window.addEventListener('keydown', handleReviewKeydown);
+  void refreshPracticeStatus();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleReviewKeydown);
+});
 </script>
 
 <template>
@@ -480,22 +605,22 @@ onMounted(refreshPracticeStatus);
                 <h3>教学点完成情况</h3>
                 <p>系统根据学生实际操作记录自动判定。</p>
               </div>
-              <span>{{ selectedTask.completedStageIds.length }} / {{ lesson.stages.length }}</span>
+              <span>{{ completedReviewStageCount }} / {{ reviewStages.length }}</span>
             </div>
             <div class="evidence-timeline">
               <div
-                v-for="(stage, index) in lesson.stages"
+                v-for="(stage, index) in reviewStages"
                 :key="stage.id"
                 :class="{ complete: selectedTask.completedStageIds.includes(stage.id) }"
               >
-                <span>
+                <span class="evidence-index">
                   {{ selectedTask.completedStageIds.includes(stage.id) ? '✓' : index + 1 }}
                 </span>
                 <section>
                   <strong>{{ stage.name }}</strong>
                   <p>{{ stage.description || '按照录制路径完成流程性操作' }}</p>
                   <small>
-                    {{ stage.recordedSteps.length }} 个录制步骤 · 客观分 {{ stage.score }}
+                    {{ requiredPracticeStepCount(stage) }} 个必做操作点 · 客观分 {{ stage.score }}
                   </small>
                 </section>
                 <StatusPill
@@ -516,13 +641,30 @@ onMounted(refreshPracticeStatus);
             </div>
             <div v-if="selectedPracticeSteps.length" class="practice-step-list">
               <article v-for="step in selectedPracticeSteps" :key="step.clientTraceId">
-                <span>{{ step.recordedActionType?.toUpperCase() || '操作' }}</span>
-                <div>
+                <button
+                  v-if="step.evidenceScreenshot?.dataUrl"
+                  class="practice-evidence-open"
+                  type="button"
+                  title="打开连续操作证据预览"
+                  :aria-label="`预览${stepTitle(step.stepId)}操作截屏`"
+                  @click="openEvidencePreview(step.stepId, step.completedAt)"
+                >
+                  <img
+                    :src="step.evidenceScreenshot.dataUrl"
+                    :alt="`${stepTitle(step.stepId)}操作截屏`"
+                    loading="lazy"
+                  />
+                  <span>预览</span>
+                </button>
+                <div v-else-if="step.pageSnapshot" class="practice-evidence-placeholder">
+                  <span>页面快照</span>
+                </div>
+                <div v-else class="practice-evidence-placeholder empty">
+                  <span>无截屏</span>
+                </div>
+                <div class="practice-step-meta">
                   <strong>{{ stepTitle(step.stepId) }}</strong>
                   <p>{{ stageTitle(step.stageId) }} · {{ formatTime(step.completedAt) }}</p>
-                  <small>
-                    实际操作 {{ step.observedActionType }} · 页面 {{ step.observedUrl || '未记录' }}
-                  </small>
                 </div>
                 <StatusPill status="COMPLETED" label="已完成" />
               </article>
@@ -606,6 +748,97 @@ onMounted(refreshPracticeStatus);
             <p>可以查看最新命中操作点；学生提交并完成客观判定后，才可填写主观评分。</p>
           </section>
         </div>
+      </section>
+    </div>
+
+    <div
+      v-if="evidencePreviewOpen && currentEvidence"
+      class="evidence-preview-backdrop"
+      role="dialog"
+      aria-modal="true"
+      aria-label="学生操作截屏连续预览"
+      @click.self="closeEvidencePreview"
+    >
+      <section class="evidence-preview-panel">
+        <header class="evidence-preview-heading">
+          <div>
+            <span>学生操作证据 · 连续预览</span>
+            <h2>{{ currentEvidence.stepName }}</h2>
+            <p>
+              {{ currentEvidence.stageName }} ·
+              {{ formatTime(currentEvidence.result.completedAt) }}
+            </p>
+          </div>
+          <div>
+            <strong>
+              {{ evidencePreviewIndex + 1 }} / {{ evidenceGallery.length }}
+            </strong>
+            <button
+              class="evidence-preview-close"
+              type="button"
+              aria-label="关闭截图预览"
+              @click="closeEvidencePreview"
+            >
+              ×
+            </button>
+          </div>
+        </header>
+
+        <div class="evidence-preview-stage">
+          <button
+            class="evidence-preview-arrow previous"
+            type="button"
+            aria-label="查看上一张操作截屏"
+            :disabled="evidenceGallery.length < 2"
+            @click="moveEvidencePreview(-1)"
+          >
+            ‹
+          </button>
+          <figure>
+            <img
+              :src="currentEvidence.screenshot.dataUrl"
+              :alt="`${currentEvidence.stepName}操作截屏`"
+            />
+            <figcaption>
+              <span>
+                {{ currentEvidence.screenshot.width }} ×
+                {{ currentEvidence.screenshot.height }}
+              </span>
+              <span>学生操作证据 · 第 {{ evidencePreviewIndex + 1 }} 张</span>
+            </figcaption>
+          </figure>
+          <button
+            class="evidence-preview-arrow next"
+            type="button"
+            aria-label="查看下一张操作截屏"
+            :disabled="evidenceGallery.length < 2"
+            @click="moveEvidencePreview(1)"
+          >
+            ›
+          </button>
+        </div>
+
+        <nav class="evidence-preview-strip" aria-label="全部操作截屏">
+          <button
+            v-for="(item, index) in evidenceGallery"
+            :key="`${item.result.clientTraceId}-${item.result.completedAt}`"
+            type="button"
+            :class="{ active: evidencePreviewIndex === index }"
+            :aria-current="evidencePreviewIndex === index ? 'true' : undefined"
+            @click="selectEvidencePreview(index)"
+          >
+            <img :src="item.screenshot.dataUrl" :alt="`${item.stepName}缩略图`" />
+            <span>{{ index + 1 }}. {{ item.stepName }}</span>
+            <small>{{ item.stageName }}</small>
+          </button>
+        </nav>
+
+        <footer class="evidence-preview-footer">
+          <span>可使用键盘 ← → 连续切换，Esc 退出预览</span>
+          <button class="secondary" type="button" @click="closeEvidencePreview">
+            返回评阅
+          </button>
+        </footer>
       </section>
     </div>
   </section>
@@ -761,6 +994,7 @@ onMounted(refreshPracticeStatus);
   inset: 0;
   display: grid;
   place-items: center;
+  overflow: hidden;
   padding: 24px;
   background: rgb(20 25 42 / 56%);
   backdrop-filter: blur(4px);
@@ -768,8 +1002,13 @@ onMounted(refreshPracticeStatus);
 
 .detail-panel {
   display: grid;
+  min-height: 0;
   width: min(1080px, 100%);
+  height: min(900px, calc(100vh - 48px));
+  height: min(900px, calc(100dvh - 48px));
   max-height: calc(100vh - 48px);
+  max-height: calc(100dvh - 48px);
+  grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
   border-radius: 18px;
   background: #f5f6f9;
@@ -834,7 +1073,10 @@ onMounted(refreshPracticeStatus);
 }
 
 .detail-scroll {
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 18px;
 }
 
@@ -929,7 +1171,7 @@ onMounted(refreshPracticeStatus);
 
 .evidence-timeline > div {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) auto;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(72px, auto);
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid #eef0f5;
@@ -940,7 +1182,7 @@ onMounted(refreshPracticeStatus);
   border-bottom: 0;
 }
 
-.evidence-timeline > div > span {
+.evidence-timeline > div > .evidence-index {
   display: grid;
   width: 34px;
   height: 34px;
@@ -953,7 +1195,7 @@ onMounted(refreshPracticeStatus);
   font-weight: 900;
 }
 
-.evidence-timeline > div.complete > span {
+.evidence-timeline > div.complete > .evidence-index {
   border-color: #c2e9da;
   color: #087b59;
   background: #e9f8f2;
@@ -978,39 +1220,126 @@ onMounted(refreshPracticeStatus);
 
 .practice-step-list article {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  min-height: 90px;
+  grid-template-columns: 104px minmax(0, 1fr) minmax(58px, auto);
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid #eceff4;
   padding: 13px 0;
 }
 
+.practice-evidence-open {
+  position: relative;
+  display: block;
+  width: 104px;
+  height: 68px;
+  min-height: 68px;
+  overflow: hidden;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  padding: 0;
+  background: #edf1f6;
+  cursor: zoom-in;
+}
+
+.practice-evidence-open::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 0 rgb(99 82 208 / 0%);
+  content: '';
+  pointer-events: none;
+  transition: box-shadow 160ms ease;
+}
+
+.practice-evidence-open:hover::after,
+.practice-evidence-open:focus-visible::after {
+  box-shadow: inset 0 0 0 3px rgb(99 82 208 / 68%);
+}
+
+.practice-evidence-open img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #edf1f6;
+}
+
+.practice-evidence-open > span {
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #fff;
+  background: rgb(27 34 51 / 78%);
+  box-shadow: 0 8px 24px rgb(16 22 38 / 22%);
+  backdrop-filter: blur(8px);
+  font-size: 9px;
+  font-weight: 800;
+  pointer-events: none;
+}
+
+.practice-evidence-placeholder {
+  display: grid;
+  width: 104px;
+  height: 68px;
+  place-items: center;
+  border: 1px solid #dfe4ec;
+  border-radius: 10px;
+  color: #8992a2;
+  background: #f5f7fa;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.practice-evidence-placeholder.empty {
+  border-style: dashed;
+  color: #a0a8b6;
+  background: #fafbfc;
+}
+
+.evidence-timeline > div :deep(.status-pill) {
+  min-width: 68px;
+  justify-content: center;
+  justify-self: end;
+  padding: 6px 10px;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .practice-step-list article:last-child {
   border-bottom: 0;
 }
 
-.practice-step-list article > span {
-  border-radius: 7px;
-  padding: 5px 8px;
-  color: #5a4ac9;
-  background: #efedff;
-  font-size: 10px;
-  font-weight: 900;
-}
-
-.practice-step-list article > div {
+.practice-step-meta {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 6px;
 }
 
-.practice-step-list p,
-.practice-step-list small {
+.practice-step-meta strong {
+  overflow: hidden;
+  color: #30384a;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-step-meta p {
   overflow: hidden;
   margin: 0;
   color: #8791a3;
   font-size: 11px;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.practice-step-list article :deep(.status-pill) {
+  min-width: 56px;
+  justify-content: center;
+  justify-self: end;
   white-space: nowrap;
 }
 
@@ -1104,6 +1433,253 @@ onMounted(refreshPracticeStatus);
   text-align: center;
 }
 
+.evidence-preview-backdrop {
+  position: fixed;
+  z-index: 1500;
+  inset: 0;
+  display: grid;
+  min-height: 0;
+  place-items: center;
+  overflow: hidden;
+  padding: 18px;
+  background: rgb(11 15 27 / 88%);
+  backdrop-filter: blur(10px);
+}
+
+.evidence-preview-panel {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  width: min(1440px, 100%);
+  height: min(940px, calc(100vh - 36px));
+  height: min(940px, calc(100dvh - 36px));
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 18px;
+  color: #eef2fb;
+  background: #151b28;
+  box-shadow: 0 34px 100px rgb(0 0 0 / 48%);
+}
+
+.evidence-preview-heading,
+.evidence-preview-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 15px 18px;
+  background: #1b2231;
+}
+
+.evidence-preview-heading {
+  border-bottom: 1px solid rgb(255 255 255 / 9%);
+}
+
+.evidence-preview-heading > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.evidence-preview-heading > div:last-child {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 13px;
+}
+
+.evidence-preview-heading span {
+  color: #aaa0ff;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.evidence-preview-heading h2,
+.evidence-preview-heading p {
+  overflow: hidden;
+  margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-preview-heading h2 {
+  font-size: 18px;
+}
+
+.evidence-preview-heading p,
+.evidence-preview-footer span {
+  color: #aab3c5;
+  font-size: 11px;
+}
+
+.evidence-preview-heading strong {
+  min-width: 64px;
+  color: #fff;
+  font-size: 14px;
+  text-align: center;
+}
+
+.evidence-preview-close {
+  width: 38px;
+  min-height: 38px;
+  border-color: rgb(255 255 255 / 16%);
+  border-radius: 50%;
+  padding: 0;
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+  font-size: 25px;
+  font-weight: 400;
+}
+
+.evidence-preview-stage {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  grid-template-columns: 58px minmax(0, 1fr) 58px;
+  align-items: stretch;
+  gap: 10px;
+  padding: 14px;
+  background:
+    radial-gradient(circle at 50% 42%, rgb(103 86 220 / 13%), transparent 42%),
+    #0e131e;
+}
+
+.evidence-preview-stage figure {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  grid-template-rows: minmax(0, 1fr) auto;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 10%);
+  border-radius: 12px;
+  background: #0a0e16;
+}
+
+.evidence-preview-stage figure > img {
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.evidence-preview-stage figcaption {
+  display: flex;
+  min-width: 0;
+  justify-content: space-between;
+  gap: 18px;
+  border-top: 1px solid rgb(255 255 255 / 8%);
+  padding: 9px 12px;
+  color: #aeb7c8;
+  background: #151b27;
+  font-size: 10px;
+}
+
+.evidence-preview-stage figcaption span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-preview-arrow {
+  align-self: center;
+  width: 48px;
+  min-height: 70px;
+  border-color: rgb(255 255 255 / 12%);
+  border-radius: 14px;
+  padding: 0;
+  color: #fff;
+  background: rgb(255 255 255 / 7%);
+  font-size: 40px;
+  font-weight: 300;
+}
+
+.evidence-preview-arrow:hover:not(:disabled) {
+  border-color: #8f81fa;
+  background: rgb(111 92 227 / 28%);
+}
+
+.evidence-preview-arrow:disabled {
+  cursor: default;
+  opacity: 0.28;
+}
+
+.evidence-preview-strip {
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  padding: 10px 14px;
+  background: #151b28;
+  scrollbar-color: #535d70 transparent;
+}
+
+.evidence-preview-strip button {
+  display: grid;
+  flex: 0 0 168px;
+  min-width: 0;
+  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-rows: 1fr 1fr;
+  gap: 2px 8px;
+  align-items: center;
+  border-color: rgb(255 255 255 / 10%);
+  border-radius: 10px;
+  padding: 6px;
+  color: #dce2ef;
+  background: #202838;
+  text-align: left;
+}
+
+.evidence-preview-strip button.active {
+  border-color: #9a8dff;
+  background: #302b51;
+  box-shadow: 0 0 0 2px rgb(143 129 250 / 20%);
+}
+
+.evidence-preview-strip img {
+  width: 56px;
+  height: 42px;
+  grid-row: 1 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #0d111a;
+}
+
+.evidence-preview-strip span,
+.evidence-preview-strip small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.evidence-preview-strip span {
+  align-self: end;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.evidence-preview-strip small {
+  align-self: start;
+  color: #9da7b9;
+  font-size: 9px;
+}
+
+.evidence-preview-footer {
+  border-top: 1px solid rgb(255 255 255 / 9%);
+  padding-block: 10px;
+}
+
+.evidence-preview-footer button {
+  border-color: rgb(255 255 255 / 15%);
+  color: #fff;
+  background: rgb(255 255 255 / 8%);
+}
+
 @media (max-width: 1250px) {
   .archive-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1150,12 +1726,36 @@ onMounted(refreshPracticeStatus);
 
   .detail-panel {
     width: 100%;
+    height: 100vh;
+    height: 100dvh;
     max-height: 100vh;
+    max-height: 100dvh;
     border-radius: 0;
   }
 
   .detail-heading {
     padding: 14px 16px;
+  }
+
+  .evidence-preview-backdrop {
+    padding: 0;
+  }
+
+  .evidence-preview-panel {
+    width: 100%;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+  }
+
+  .evidence-preview-stage {
+    grid-template-columns: 44px minmax(0, 1fr) 44px;
+    gap: 5px;
+    padding: 8px;
+  }
+
+  .evidence-preview-arrow {
+    width: 38px;
   }
 }
 
@@ -1175,6 +1775,56 @@ onMounted(refreshPracticeStatus);
   .evidence-timeline > div > :last-child {
     grid-column: 2;
     justify-self: start;
+  }
+
+  .practice-step-list {
+    padding-inline: 12px;
+  }
+
+  .practice-step-list article {
+    grid-template-columns: 84px minmax(0, 1fr);
+  }
+
+  .practice-evidence-open,
+  .practice-evidence-placeholder {
+    width: 84px;
+    height: 58px;
+    min-height: 58px;
+  }
+
+  .practice-step-list article :deep(.status-pill) {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .detail-scroll {
+    padding: 10px;
+  }
+
+  .evidence-preview-heading,
+  .evidence-preview-footer {
+    padding-inline: 12px;
+  }
+
+  .evidence-preview-footer > span,
+  .evidence-preview-stage figcaption span:last-child {
+    display: none;
+  }
+
+  .evidence-preview-stage {
+    grid-template-columns: 36px minmax(0, 1fr) 36px;
+  }
+
+  .evidence-preview-arrow {
+    width: 32px;
+    min-height: 56px;
+    font-size: 30px;
+  }
+
+  .practice-evidence-open > span {
+    right: 5px;
+    bottom: 5px;
+    font-size: 9px;
   }
 }
 </style>

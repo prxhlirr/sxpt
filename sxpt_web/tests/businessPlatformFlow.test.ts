@@ -313,9 +313,31 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(runner).toContain('monitor-actions');
     expect(runner).toContain(':show-resolution="false"');
     expect(runner).toContain('v-else-if="!isPractice && displayedLearningStep"');
-    expect(runner).toContain('pendingPracticeStepIds');
+    expect(runner).toContain('pendingPracticeStepKeys');
     expect(runner).toContain('recordStudentPracticeStepRemote');
     expect(runner).toContain('finishPracticeWhenEvidenceComplete');
+    expect(runner).toContain('requiredPracticeSteps');
+    expect(runner).toContain('const matched = requiredPracticeSteps.value');
+    expect(runner).toContain('hasPracticeStepEvidence(stage.id, step.id)');
+    expect(runner).toContain(
+      '(step) => !isPractice.value || isRequiredPracticeStep(step)'
+    );
+    expect(store).toContain('if (!step || !isRequiredPracticeStep(step))');
+    expect(store).toContain('`${result.stageId}\\u0000${result.stepId}`');
+    expect(runner).toContain('await store.flushAuthenticatedWorkspace()');
+    expect(runner).toContain('正在上传练习证据');
+    expect(runner).toContain('操作记录和截屏证据已全部上传');
+    expect(runner).toContain('evidenceScreenshot: payload.evidenceScreenshot');
+    expect(runner).not.toContain('practice-trace-feedback');
+    expect(runner).not.toContain('已捕获原平台操作，但未匹配到教案中的操作点');
+    expect(runner).toContain('重新加载业务平台');
+    expect(runner).toContain("task.status === 'DOING'");
+    expect(runner).toContain('!practiceBusinessUrl');
+    expect(runner).toContain('practiceActionMatchPriority');
+    expect(runner).toContain('const started = await startTask()');
+    expect(runner).toContain(
+      'questionId: safeCode(task.value.dataItemId || task.value.id, 64)'
+    );
     expect(runner).toContain('class="practice-edge-toolbar"');
     expect(runner).toContain('to="/student/tasks"');
     expect(runner).toContain("{{ showPracticeGuide ? '收起提示' : '教案提示' }}");
@@ -334,7 +356,11 @@ describe('业务平台维护、教案绑定与录制加载', () => {
     expect(captureFrame).toContain('monitorActions?: boolean');
     expect(captureFrame).toContain("type: 'SET_RECORDING_STATE', enabled: true, monitorOnly: true");
     expect(backend).toContain('reportStudentPracticeStep(');
-    expect(backend).toContain('traceType: mapPracticeStepActionType(step)');
+    expect(backend).toContain(
+      'teachingPointId: publishedTask.remoteTeachingPointId'
+    );
+    expect(backend).toContain("traceType: 'STEP_COMPLETED'");
+    expect(backend).toContain('observedTraceType: mapPracticeStepActionType(step)');
     expect(store).toContain('completedPracticeStepIds');
     expect(store).toContain('syncPracticeStagesFromEvidence');
     expect(store).toContain("task.mode === 'PRACTICE'");
@@ -350,6 +376,21 @@ describe('业务平台维护、教案绑定与录制加载', () => {
 
     expect(review).toContain('学生练习操作记录');
     expect(review).toContain('selectedPracticeSteps');
+    expect(review).toContain('学生操作截屏');
+    expect(review).toContain('step.evidenceScreenshot?.dataUrl');
+    expect(review).toContain('openEvidencePreview');
+    expect(review).toContain('学生操作证据 · 连续预览');
+    expect(review).toContain('moveEvidencePreview(-1)');
+    expect(review).toContain('moveEvidencePreview(1)');
+    expect(review).toContain("event.key === 'ArrowLeft'");
+    expect(review).toContain('grid-template-rows: auto minmax(0, 1fr)');
+    expect(review).toContain('overflow-y: auto');
+    expect(review).toContain('class="practice-evidence-placeholder');
+    expect(review).toContain('class="evidence-index"');
+    expect(review).toContain('minmax(72px, auto)');
+    expect(review).not.toContain('实际操作 {{ step.observedActionType }}');
+    expect(review).not.toContain('页面 {{ step.observedUrl');
+    expect(review).not.toContain('recordedActionType?.toUpperCase()');
     expect(review).toContain('gradeStudentTaskRemote');
     expect(workspace).toContain('practiceStepResults: Array.isArray');
     expect(store).toContain('reviewStudentTask(');

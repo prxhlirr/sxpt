@@ -27,10 +27,12 @@ const props = withDefaults(
     interactive?: boolean;
     clearFormValues?: boolean;
     fitMode?: 'fill' | 'contain';
+    snapshotLabel?: string;
     title: string;
   }>(),
   {
-    fitMode: 'fill'
+    fitMode: 'fill',
+    snapshotLabel: '录制页面快照'
   }
 );
 
@@ -391,7 +393,7 @@ onBeforeUnmount(() => {
       {{
         snapshot
           ? snapshotDocument
-            ? `录制页面快照 · ${new Date(snapshot.capturedAt).toLocaleString()}`
+            ? `${snapshotLabel} · ${new Date(snapshot.capturedAt).toLocaleString()}`
             : '录制快照缺少目标元素 · 已切换到同一业务系统操作页'
           : '旧节点无页面快照 · 正在按录制地址重建页面'
       }}

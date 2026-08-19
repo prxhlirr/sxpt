@@ -79,3 +79,9 @@ spring:
     schema:
       - classpath:db/schema/V18__classic_case_connector_contract.sql
       - classpath:db/dev/classic_case_oa_local_bootstrap.sql
+
+sxpt:
+  origin:
+    # 仅供本地 OA 联调：第三方请求日志直接显示 X-API-Key，便于核对实际传值。
+    # 部署到其他环境时默认关闭，也可通过环境变量显式覆盖。
+    log-api-key-plain-text: "${SXPT_ORIGIN_LOG_API_KEY_PLAIN_TEXT:true}"

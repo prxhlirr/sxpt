@@ -42,4 +42,40 @@ describe('业务平台启动地址', () => {
       })
     ).toBe('https://oa.example.com/sso?launchToken=ctx-token');
   });
+
+  it('经典案例返回相对详情地址时先进入原平台单点登录入口', () => {
+    const resolved = resolveLaunchedBusinessFrameUrl(
+      {
+        tenantId: 'demo-tenant',
+        launchContextId: 'launch-1',
+        launchToken: 'ctx-token',
+        dataInstanceId: 'instance-1',
+        launchUrl: '/workspace/incoming/detail/biz-1',
+        targetUrl: '/workspace/incoming/detail/biz-1'
+      },
+      'http://localhost:3000/teaching-launch'
+    );
+
+    expect(resolved).toBe(
+      'http://localhost:3000/teaching-launch?tenantId=demo-tenant&launchToken=ctx-token&redirect=%2Fworkspace%2Fincoming%2Fdetail%2Fbiz-1'
+    );
+  });
+
+  it('平台只配置根地址时仍进入 teaching-launch 并保留启动参数', () => {
+    const resolved = resolveLaunchedBusinessFrameUrl(
+      {
+        tenantId: 'demo-tenant',
+        launchContextId: 'launch-1',
+        launchToken: 'ctx-token',
+        dataInstanceId: 'instance-1',
+        launchUrl: '/workspace/incoming/detail/biz-1',
+        targetUrl: '/workspace/incoming/detail/biz-1'
+      },
+      'http://localhost:3000/'
+    );
+
+    expect(resolved).toBe(
+      'http://localhost:3000/teaching-launch?tenantId=demo-tenant&launchToken=ctx-token&redirect=%2Fworkspace%2Fincoming%2Fdetail%2Fbiz-1'
+    );
+  });
 });

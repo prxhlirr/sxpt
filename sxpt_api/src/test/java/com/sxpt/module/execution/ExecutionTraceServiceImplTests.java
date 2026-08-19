@@ -7,6 +7,9 @@ import com.sxpt.module.execution.mapper.ExecutionTraceMapper;
 import com.sxpt.module.execution.mapper.TaskExecutionMapper;
 import com.sxpt.module.execution.service.ExecutionTraceService;
 import com.sxpt.module.execution.service.impl.ExecutionTraceServiceImpl;
+import com.sxpt.module.teaching.entity.TaskStep;
+import com.sxpt.module.teaching.mapper.TaskStepMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -40,7 +43,15 @@ class ExecutionTraceServiceImplTests {
 
     private final TaskExecutionMapper taskExecutionMapper = mock(TaskExecutionMapper.class);
 
-    private final ExecutionTraceService service = new ExecutionTraceServiceImpl(mapper, taskExecutionMapper);
+    private final TaskStepMapper taskStepMapper = mock(TaskStepMapper.class);
+
+    private final ExecutionTraceService service = new ExecutionTraceServiceImpl(
+            mapper, taskExecutionMapper, taskStepMapper);
+
+    @BeforeEach
+    void stubPublishedTaskStep() {
+        when(taskStepMapper.selectOne(any())).thenReturn(buildTaskStep("tp_001"));
+    }
 
     /**
      * 校验轨迹首次上报时插入 Mapper 并补齐默认值。
@@ -93,6 +104,36 @@ class ExecutionTraceServiceImplTests {
 
         assertThrows(BusinessException.class, () -> service.reportExecutionTrace(executionTrace));
         verify(taskExecutionMapper).selectOne(any());
+        verify(mapper, times(0)).insert(executionTrace);
+    }
+
+    /**
+     * 校验步骤型轨迹只能引用当前执行任务已经发布的步骤。
+     */
+    @Test
+    void reportExecutionTraceShouldRejectTaskStepOutsideExecutionTask() {
+        ExecutionTrace executionTrace = buildValidTrace();
+        when(taskExecutionMapper.selectOne(any())).thenReturn(buildExecution("RUNNING"));
+        when(taskStepMapper.selectOne(any())).thenReturn(null);
+
+        assertThrows(BusinessException.class, () -> service.reportExecutionTrace(executionTrace));
+
+        verify(taskStepMapper).selectOne(any());
+        verify(mapper, times(0)).insert(executionTrace);
+    }
+
+    /**
+     * 校验轨迹教学点必须与已发布步骤所属教学点一致。
+     */
+    @Test
+    void reportExecutionTraceShouldRejectMismatchedTeachingPoint() {
+        ExecutionTrace executionTrace = buildValidTrace();
+        when(taskExecutionMapper.selectOne(any())).thenReturn(buildExecution("RUNNING"));
+        when(taskStepMapper.selectOne(any())).thenReturn(buildTaskStep("tp_other"));
+
+        assertThrows(BusinessException.class, () -> service.reportExecutionTrace(executionTrace));
+
+        verify(taskStepMapper).selectOne(any());
         verify(mapper, times(0)).insert(executionTrace);
     }
 
@@ -188,5 +229,15 @@ class ExecutionTraceServiceImplTests {
         execution.setStudentId("student_001");
         execution.setExecutionStatus(executionStatus);
         return execution;
+    }
+
+    private TaskStep buildTaskStep(String teachingPointId) {
+        TaskStep taskStep = new TaskStep();
+        taskStep.setId("step_001");
+        taskStep.setTenantId("tenant_001");
+        taskStep.setTaskId("task_001");
+        taskStep.setTeachingPointId(teachingPointId);
+        taskStep.setDeleted(Boolean.FALSE);
+        return taskStep;
     }
 }
