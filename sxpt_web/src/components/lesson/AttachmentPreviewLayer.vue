@@ -17,15 +17,11 @@ import type { TrainingAttachment } from '../../domain/models';
 import { formatAttachmentSize } from '../../utils/trainingAttachments';
 import {
   beginOverlayDrag,
+  clampOverlayPosition,
   updateOverlayDrag,
   type OverlayDragSession,
   type OverlayPosition
 } from '../../utils/draggableOverlay';
-import {
-  attachmentStackOffset,
-  buildAttachmentDockItems,
-  resolveAttachmentDockPosition
-} from '../../utils/playbackPresentation';
 
 const props = withDefaults(
   defineProps<{
@@ -33,6 +29,7 @@ const props = withDefaults(
     attachments?: TrainingAttachment[];
     contextKey?: string;
     minimized?: boolean;
+    maximized?: boolean;
     avoidRight?: boolean;
   }>(),
   {
@@ -40,6 +37,7 @@ const props = withDefaults(
     attachments: () => [],
     contextKey: '',
     minimized: false,
+    maximized: false,
     avoidRight: false
   }
 );
@@ -47,36 +45,32 @@ const props = withDefaults(
 const emit = defineEmits<{
   close: [];
   minimize: [];
+  maximize: [];
+  restoreSize: [];
   restore: [];
   preview: [attachment: TrainingAttachment];
 }>();
 
 const viewerHost = ref<HTMLElement | null>(null);
+const minimizedButton = ref<HTMLButtonElement | null>(null);
 const viewerError = ref('');
-const dockElement = ref<HTMLElement | null>(null);
-const hiddenAttachmentIds = ref<Set<string>>(new Set());
-const dockPosition = ref<OverlayPosition | null>(null);
-const dockPositionManual = ref(false);
-const dockDragging = ref(false);
-const dockDragState = ref<OverlayDragSession | null>(null);
+const minimizedPosition = ref<OverlayPosition | null>(null);
+const minimizedDragging = ref(false);
 const downloadSource = computed(
   () => props.attachment?.downloadUrl || props.attachment?.dataUrl || ''
 );
-const dockAttachments = computed(() =>
-  buildAttachmentDockItems({
-    stageAttachments: props.attachments,
-    activeAttachment: props.attachment,
-    minimized: props.minimized,
-    hiddenIds: hiddenAttachmentIds.value
-  })
-);
-const dockStyle = computed(() =>
-  dockPosition.value
+const previewAttachments = computed(() => {
+  const unique = new Map<string, TrainingAttachment>();
+  props.attachments.forEach((attachment) => unique.set(attachment.id, attachment));
+  if (props.attachment) unique.set(props.attachment.id, props.attachment);
+  return [...unique.values()];
+});
+const minimizedStyle = computed(() =>
+  minimizedPosition.value
     ? {
-        left: `${dockPosition.value.x}px`,
-        top: `${dockPosition.value.y}px`,
+        left: `${minimizedPosition.value.x}px`,
+        top: `${minimizedPosition.value.y}px`,
         right: 'auto',
-        bottom: 'auto',
         transform: 'none'
       }
     : undefined
@@ -85,11 +79,13 @@ const dockStyle = computed(() =>
 let viewer: FileViewer | undefined;
 let renderGeneration = 0;
 let resizeObserver: ResizeObserver | undefined;
+let viewerResizeTimer: number | undefined;
+let minimizedDragState: OverlayDragSession | null = null;
+let suppressMinimizedClick = false;
+const VIEWER_RESIZE_SETTLE_MS = 260;
 
 function buildPlugins(): PreviewPlugin[] {
-  const pdfOptions = {
-    useFetchData: true
-  };
+  const pdfOptions = { useFetchData: true };
   return [
     imagePlugin(),
     videoPlugin(),
@@ -101,12 +97,121 @@ function buildPlugins(): PreviewPlugin[] {
   ];
 }
 
+function resolvePreviewFit(attachment: TrainingAttachment): 'contain' | 'width' {
+  const mimeType = attachment.mimeType.toLowerCase();
+  const fileName = attachment.name.toLowerCase();
+  const isPdfOrWord =
+    mimeType === 'application/pdf' ||
+    mimeType === 'application/msword' ||
+    mimeType.includes('wordprocessingml') ||
+    /\.(?:pdf|doc|docx|docm|dot|dotx|dotm)$/.test(fileName);
+  return isPdfOrWord ? 'width' : 'contain';
+}
+
 function destroyViewer() {
+  if (viewerResizeTimer !== undefined && typeof window !== 'undefined') {
+    window.clearTimeout(viewerResizeTimer);
+    viewerResizeTimer = undefined;
+  }
   resizeObserver?.disconnect();
   resizeObserver = undefined;
   viewer?.destroy();
   viewer = undefined;
   viewerHost.value?.replaceChildren();
+}
+
+function scheduleViewerResize() {
+  if (viewerResizeTimer !== undefined && typeof window !== 'undefined') {
+    window.clearTimeout(viewerResizeTimer);
+    viewerResizeTimer = undefined;
+  }
+
+  void nextTick(() => {
+    viewer?.resize();
+    if (typeof window === 'undefined') return;
+    viewerResizeTimer = window.setTimeout(() => {
+      viewerResizeTimer = undefined;
+      viewer?.resize();
+    }, VIEWER_RESIZE_SETTLE_MS);
+  });
+}
+
+function handlePreviewTransitionEnd(event: TransitionEvent) {
+  if (event.target !== event.currentTarget || event.propertyName !== 'width') return;
+  scheduleViewerResize();
+}
+
+function startMinimizedDrag(event: PointerEvent) {
+  if (
+    !event.isPrimary ||
+    (event.pointerType === 'mouse' && event.button !== 0) ||
+    !minimizedButton.value
+  ) {
+    return;
+  }
+  const rect = minimizedButton.value.getBoundingClientRect();
+  minimizedDragState = beginOverlayDrag(
+    event.pointerId,
+    { x: event.clientX, y: event.clientY },
+    { x: rect.left, y: rect.top }
+  );
+  try {
+    minimizedButton.value.setPointerCapture(event.pointerId);
+  } catch {
+    // Pointer capture is optional.
+  }
+}
+
+function moveMinimizedDrag(event: PointerEvent) {
+  if (!minimizedDragState || !minimizedButton.value) return;
+  const rect = minimizedButton.value.getBoundingClientRect();
+  const update = updateOverlayDrag(
+    minimizedDragState,
+    event.pointerId,
+    { x: event.clientX, y: event.clientY },
+    { width: rect.width, height: rect.height },
+    { width: window.innerWidth, height: window.innerHeight },
+    4
+  );
+  minimizedDragState = update.session;
+  if (!update.position) return;
+  minimizedPosition.value = update.position;
+  minimizedDragging.value = true;
+  event.preventDefault();
+}
+
+function finishMinimizedDrag(event: PointerEvent) {
+  if (!minimizedDragState || minimizedDragState.pointerId !== event.pointerId) return;
+  const moved = minimizedDragState.moved;
+  try {
+    if (minimizedButton.value?.hasPointerCapture(event.pointerId)) {
+      minimizedButton.value.releasePointerCapture(event.pointerId);
+    }
+  } catch {
+    // Ignore browsers without pointer capture state.
+  }
+  minimizedDragState = null;
+  minimizedDragging.value = false;
+  if (moved && event.type === 'pointerup') suppressMinimizedClick = true;
+}
+
+function restoreFromMinimized(event: MouseEvent) {
+  if (suppressMinimizedClick) {
+    suppressMinimizedClick = false;
+    event.preventDefault();
+    return;
+  }
+  emit('restore');
+}
+
+function constrainMinimizedPosition() {
+  if (!minimizedPosition.value || !minimizedButton.value) return;
+  const rect = minimizedButton.value.getBoundingClientRect();
+  minimizedPosition.value = clampOverlayPosition(
+    minimizedPosition.value,
+    { width: rect.width, height: rect.height },
+    { width: window.innerWidth, height: window.innerHeight }
+  );
 }
 
 async function renderViewer() {
@@ -128,7 +233,7 @@ async function renderViewer() {
       mimeType: attachment.mimeType,
       width: '100%',
       height: '100%',
-      fit: 'contain',
+      fit: resolvePreviewFit(attachment),
       locale: 'zh-CN',
       theme: 'light',
       fallback: 'inline',
@@ -136,13 +241,16 @@ async function renderViewer() {
         zoom: true,
         rotate: true,
         download: false,
-        fullscreen: true,
+        fullscreen: false,
         print: true,
         search: true
       },
       plugins: buildPlugins(),
       onLoad: () => {
-        if (generation === renderGeneration) viewerError.value = '';
+        if (generation === renderGeneration) {
+          viewerError.value = '';
+          scheduleViewerResize();
+        }
       },
       onError: (error) => {
         if (generation === renderGeneration) {
@@ -166,94 +274,6 @@ async function renderViewer() {
   }
 }
 
-function updateDockPosition() {
-  if (typeof window === 'undefined' || !dockElement.value) return;
-  const rect = dockElement.value.getBoundingClientRect();
-  dockPosition.value = resolveAttachmentDockPosition({
-    viewport: { width: window.innerWidth, height: window.innerHeight },
-    dock: { width: rect.width, height: rect.height },
-    avoidRight: props.avoidRight,
-    manual: dockPositionManual.value ? dockPosition.value : null
-  });
-}
-
-function scheduleDockPosition() {
-  void nextTick(updateDockPosition);
-}
-
-function stackCardStyle(index: number) {
-  const offset = attachmentStackOffset(index, dockAttachments.value.length);
-  return {
-    transform: `translate(${offset.x}px, ${offset.y}px)`,
-    zIndex: offset.zIndex
-  };
-}
-
-function openDockAttachment(attachment: TrainingAttachment) {
-  if (props.minimized && props.attachment?.id === attachment.id) {
-    emit('restore');
-    return;
-  }
-  emit('preview', attachment);
-}
-
-function hideDockAttachment(id: string) {
-  hiddenAttachmentIds.value = new Set([...hiddenAttachmentIds.value, id]);
-  if (props.minimized && props.attachment?.id === id) emit('close');
-}
-
-function startDockDrag(event: PointerEvent) {
-  if (
-    !event.isPrimary ||
-    (event.pointerType === 'mouse' && event.button !== 0) ||
-    (event.target as HTMLElement | null)?.closest('button, a') ||
-    !dockElement.value
-  ) {
-    return;
-  }
-  const rect = dockElement.value.getBoundingClientRect();
-  dockDragState.value = beginOverlayDrag(
-    event.pointerId,
-    { x: event.clientX, y: event.clientY },
-    { x: rect.left, y: rect.top }
-  );
-  dockDragging.value = true;
-  (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId);
-  event.preventDefault();
-}
-
-function moveDockDrag(event: PointerEvent) {
-  if (!dockDragState.value || !dockElement.value) return;
-  const rect = dockElement.value.getBoundingClientRect();
-  const update = updateOverlayDrag(
-    dockDragState.value,
-    event.pointerId,
-    { x: event.clientX, y: event.clientY },
-    { width: rect.width, height: rect.height },
-    { width: window.innerWidth, height: window.innerHeight }
-  );
-  dockDragState.value = update.session;
-  if (!update.position) return;
-  dockPosition.value = update.position;
-  dockPositionManual.value = true;
-  event.preventDefault();
-}
-
-function finishDockDrag(event: PointerEvent) {
-  if (
-    !dockDragState.value ||
-    dockDragState.value.pointerId !== event.pointerId
-  ) {
-    return;
-  }
-  const handle = event.currentTarget as HTMLElement;
-  if (handle.hasPointerCapture(event.pointerId)) {
-    handle.releasePointerCapture(event.pointerId);
-  }
-  dockDragState.value = null;
-  dockDragging.value = false;
-}
-
 watch(
   [() => props.attachment, () => props.minimized],
   () => void renderViewer(),
@@ -263,36 +283,27 @@ watch(
 watch(
   () => props.contextKey,
   () => {
-    hiddenAttachmentIds.value = new Set();
-    dockPosition.value = null;
-    dockPositionManual.value = false;
-    dockDragState.value = null;
-    dockDragging.value = false;
-    scheduleDockPosition();
+    viewerError.value = '';
   },
   { flush: 'post' }
 );
 
 watch(
-  [dockAttachments, () => props.avoidRight],
-  () => {
-    if (!dockPositionManual.value) scheduleDockPosition();
-  },
-  { immediate: true, flush: 'post' }
+  () => props.maximized,
+  scheduleViewerResize,
+  { flush: 'post' }
 );
 
 function handleKeydown(event: KeyboardEvent) {
   if (event.key !== 'Escape' || !props.attachment) return;
-  if (props.minimized) {
-    emit('close');
-  } else {
-    emit('minimize');
-  }
+  if (props.minimized) emit('close');
+  else if (props.maximized) emit('restoreSize');
+  else emit('minimize');
 }
 
 function handleResize() {
   viewer?.resize();
-  updateDockPosition();
+  constrainMinimizedPosition();
 }
 
 onMounted(() => {
@@ -312,28 +323,42 @@ onUnmounted(() => {
   <Teleport to="body">
     <div
       v-if="attachment && !minimized"
-      class="attachment-preview-modal"
+      class="attachment-preview-layer"
+      :class="{ maximized }"
       role="dialog"
-      aria-modal="true"
+      :aria-modal="maximized ? 'true' : 'false'"
       :aria-label="`预览附件：${attachment.name}`"
-      @click.self="emit('minimize')"
+      @click.self="maximized ? emit('restoreSize') : undefined"
     >
-      <section class="attachment-preview-window">
+      <section
+        class="attachment-preview-window"
+        @transitionend="handlePreviewTransitionEnd"
+      >
         <header>
           <div class="attachment-preview-title">
             <span>附件预览</span>
             <strong :title="attachment.name">{{ attachment.name }}</strong>
           </div>
           <div class="attachment-preview-actions">
-            <a
-              :href="downloadSource"
-              :download="attachment.name"
-              title="下载附件"
-            >
-              下载
-            </a>
-            <button type="button" title="最小化到右侧栏" @click="emit('minimize')">
+            <a :href="downloadSource" :download="attachment.name" title="下载附件">下载</a>
+            <button type="button" title="最小化到附件图标" @click="emit('minimize')">
               最小化
+            </button>
+            <button
+              v-if="!maximized"
+              type="button"
+              title="最大化附件预览"
+              @click="emit('maximize')"
+            >
+              最大化
+            </button>
+            <button
+              v-else
+              type="button"
+              title="还原附件预览"
+              @click="emit('restoreSize')"
+            >
+              还原
             </button>
             <button type="button" title="关闭附件预览" @click="emit('close')">
               关闭
@@ -341,95 +366,107 @@ onUnmounted(() => {
           </div>
         </header>
 
+        <nav
+          v-if="previewAttachments.length > 1"
+          class="attachment-preview-list"
+          aria-label="当前教学附件"
+        >
+          <button
+            v-for="item in previewAttachments"
+            :key="item.id"
+            type="button"
+            :class="{ active: item.id === attachment.id }"
+            :title="`预览 ${item.name}`"
+            @click="emit('preview', item)"
+          >
+            <span aria-hidden="true">📎</span>
+            <strong>{{ item.name }}</strong>
+          </button>
+        </nav>
+
         <div class="attachment-preview-content">
           <div ref="viewerHost" class="open-file-viewer-host"></div>
           <div v-if="viewerError" class="attachment-viewer-error" role="alert">
             <strong>附件预览加载失败</strong>
             <p>{{ viewerError }}</p>
-            <a :href="downloadSource" :download="attachment.name">
-              下载原文件
-            </a>
+            <a :href="downloadSource" :download="attachment.name">下载原文件</a>
           </div>
         </div>
 
         <footer>
           <span>{{ attachment.mimeType || '未知类型' }}</span>
           <span>{{ formatAttachmentSize(attachment.size) }}</span>
-          <small>Open File Viewer · 浏览器本地解析；按 Esc 可最小化</small>
+          <small>
+            Open File Viewer · 浏览器本地解析；按 Esc
+            {{ maximized ? '还原' : '最小化' }}
+          </small>
         </footer>
       </section>
     </div>
 
-    <aside
-      v-else-if="dockAttachments.length"
-      ref="dockElement"
-      class="attachment-preview-stack"
-      :class="{ dragging: dockDragging }"
-      :style="dockStyle"
-      aria-label="教学点附件"
+    <button
+      v-else-if="attachment && minimized"
+      ref="minimizedButton"
+      class="attachment-preview-minimized"
+      :class="{
+        'avoid-right': avoidRight && !minimizedPosition,
+        dragging: minimizedDragging
+      }"
+      :style="minimizedStyle"
+      type="button"
+      :title="`拖动调整位置，点击恢复附件预览：${attachment.name}`"
+      :aria-label="`恢复附件预览：${attachment.name}`"
+      @pointerdown="startMinimizedDrag"
+      @pointermove="moveMinimizedDrag"
+      @pointerup="finishMinimizedDrag"
+      @pointercancel="finishMinimizedDrag"
+      @click="restoreFromMinimized"
     >
-      <article
-        v-for="(dockAttachment, index) in dockAttachments"
-        :key="dockAttachment.id"
-        class="attachment-preview-dock attachment-preview-dock-card"
-        :style="stackCardStyle(index)"
-        @pointerdown="startDockDrag"
-        @pointermove="moveDockDrag"
-        @pointerup="finishDockDrag"
-        @pointercancel="finishDockDrag"
-      >
-        <span class="attachment-dock-drag-handle" title="拖动全部附件">
-          ⋮⋮
-        </span>
-        <button
-          class="attachment-dock-main"
-          type="button"
-          :title="`继续查看 ${dockAttachment.name}`"
-          @click="openDockAttachment(dockAttachment)"
-        >
-          <span>附件</span>
-          <strong>{{ dockAttachment.name }}</strong>
-          <small>继续查看</small>
-        </button>
-        <button
-          class="attachment-dock-close"
-          type="button"
-          :title="`隐藏附件 ${dockAttachment.name}`"
-          :aria-label="`隐藏附件 ${dockAttachment.name}`"
-          @click="hideDockAttachment(dockAttachment.id)"
-        >
-          ×
-        </button>
-      </article>
-    </aside>
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M8.5 12.7 14.9 6.3a3.2 3.2 0 0 1 4.5 4.5l-8.6 8.6a5 5 0 0 1-7.1-7.1l8.5-8.5" />
+      </svg>
+      <span v-if="previewAttachments.length > 1">{{ previewAttachments.length }}</span>
+    </button>
   </Teleport>
 </template>
 
 <style scoped>
-.attachment-preview-modal {
+.attachment-preview-layer {
   position: fixed;
   z-index: 10000;
   inset: 0;
-  display: grid;
-  padding: 16px;
-  place-items: center;
+  pointer-events: none;
+}
+
+.attachment-preview-layer.maximized {
+  pointer-events: auto;
   background: rgb(15 23 42 / 68%);
   backdrop-filter: blur(3px);
 }
 
 .attachment-preview-window {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  bottom: 16px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(1120px, calc(100vw - 32px));
-  height: min(820px, calc(100vh - 32px));
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  width: clamp(420px, 42vw, 620px);
   overflow: hidden;
+  pointer-events: auto;
   border: 1px solid rgb(255 255 255 / 40%);
   border-radius: 16px;
   background: #f8fafc;
   box-shadow: 0 24px 70px rgb(15 23 42 / 42%);
+  transition: inset 180ms ease, width 180ms ease, border-radius 180ms ease;
+}
+
+.attachment-preview-layer.maximized .attachment-preview-window {
+  width: calc(100vw - 32px);
 }
 
 .attachment-preview-window > header {
+  grid-row: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -453,10 +490,14 @@ onUnmounted(() => {
 
 .attachment-preview-title strong {
   overflow: hidden;
-  max-width: min(600px, 48vw);
+  max-width: min(360px, 28vw);
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 14px;
+}
+
+.attachment-preview-layer.maximized .attachment-preview-title strong {
+  max-width: min(600px, 48vw);
 }
 
 .attachment-preview-actions {
@@ -483,7 +524,48 @@ onUnmounted(() => {
   background: rgb(255 255 255 / 18%);
 }
 
+.attachment-preview-list {
+  grid-row: 2;
+  display: flex;
+  min-width: 0;
+  gap: 7px;
+  overflow-x: auto;
+  border-bottom: 1px solid #e2e8f0;
+  padding: 8px 10px;
+  background: #fff;
+}
+
+.attachment-preview-list button {
+  display: flex;
+  min-width: 0;
+  max-width: 230px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: #475569;
+  background: #f8fafc;
+  cursor: pointer;
+  font: inherit;
+}
+
+.attachment-preview-list button.active {
+  border-color: #7767e9;
+  color: #5745cc;
+  background: #f0edff;
+}
+
+.attachment-preview-list strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
 .attachment-preview-content {
+  grid-row: 3;
   position: relative;
   min-width: 0;
   min-height: 0;
@@ -534,6 +616,7 @@ onUnmounted(() => {
 }
 
 .attachment-preview-window > footer {
+  grid-row: 4;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -550,108 +633,73 @@ onUnmounted(() => {
   color: #94a3b8;
 }
 
-.attachment-preview-stack {
+.attachment-preview-minimized {
   position: fixed;
   z-index: 10001;
   top: 50%;
-  right: 12px;
+  right: 18px;
   display: grid;
-  width: min(306px, calc(100vw - 24px));
-  gap: 4px;
-  padding: 0 22px 22px 0;
-  transform: translateY(-50%);
-  touch-action: none;
-}
-
-.attachment-preview-dock {
-  position: relative;
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
-  width: min(284px, calc(100vw - 46px));
-  overflow: hidden;
-  border: 1px solid rgb(255 255 255 / 42%);
-  border-radius: 13px;
-  background: #172033;
-  box-shadow: 0 14px 38px rgb(15 23 42 / 34%);
-  transition: box-shadow 160ms ease;
-}
-
-.attachment-preview-stack.dragging .attachment-preview-dock {
-  box-shadow: 0 18px 46px rgb(15 23 42 / 44%);
-}
-
-.attachment-dock-drag-handle {
-  display: grid;
+  width: 58px;
+  height: 58px;
   place-items: center;
-  color: #8e9ab0;
-  background: rgb(255 255 255 / 5%);
-  cursor: grab;
-  font-size: 12px;
-  user-select: none;
-}
-
-.attachment-preview-stack.dragging .attachment-dock-drag-handle {
-  cursor: grabbing;
-}
-
-.attachment-dock-main {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
-  gap: 2px 9px;
-  min-width: 0;
-  border: 0;
-  padding: 10px 12px;
+  border: 1px solid rgb(255 255 255 / 50%);
+  border-radius: 50%;
+  padding: 0;
   color: #fff;
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
+  background: linear-gradient(145deg, #7c6cf2, #5b4bd2);
+  box-shadow: 0 15px 36px rgb(53 41 151 / 38%);
+  transform: translateY(-50%);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
-.attachment-dock-main > span {
-  grid-row: 1 / 3;
-  border-radius: 7px;
-  padding: 7px 6px;
-  color: #5b4ad5;
-  background: #ede9fe;
-  font-size: 9px;
+.attachment-preview-minimized.dragging {
+  cursor: grabbing;
+  transition: none;
+}
+
+.attachment-preview-minimized:hover {
+  transform: translateY(-50%) scale(1.06);
+  box-shadow: 0 18px 42px rgb(53 41 151 / 48%);
+}
+
+.attachment-preview-minimized.avoid-right {
+  right: 390px;
+}
+
+.attachment-preview-minimized svg {
+  width: 27px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.attachment-preview-minimized > span {
+  position: absolute;
+  top: -4px;
+  right: -3px;
+  display: grid;
+  min-width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  padding: 0 4px;
+  color: #fff;
+  background: #ef4444;
+  box-sizing: border-box;
+  font-size: 10px;
   font-weight: 900;
 }
 
-.attachment-dock-main strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11px;
-}
-
-.attachment-dock-main small {
-  color: #aeb9cc;
-  font-size: 9px;
-}
-
-.attachment-dock-close {
-  align-self: stretch;
-  border: 0;
-  border-left: 1px solid rgb(255 255 255 / 12%);
-  padding: 0 12px;
-  color: #cbd5e1;
-  background: transparent;
-  cursor: pointer;
-  font-size: 18px;
-}
-
-.attachment-dock-main:hover,
-.attachment-dock-close:hover {
-  background: rgb(255 255 255 / 8%);
-}
-
 @media (max-width: 640px) {
-  .attachment-preview-modal {
-    padding: 0;
-  }
-
-  .attachment-preview-window {
+  .attachment-preview-window,
+  .attachment-preview-layer.maximized .attachment-preview-window {
+    inset: 0;
     width: 100vw;
     height: 100vh;
     border: 0;
@@ -667,20 +715,16 @@ onUnmounted(() => {
   }
 
   .attachment-preview-title strong {
-    max-width: 44vw;
+    max-width: 34vw;
   }
 
   .attachment-preview-window > footer small {
     display: none;
   }
 
-  .attachment-preview-stack {
-    width: min(252px, calc(100vw - 16px));
-    padding: 0 14px 14px 0;
-  }
-
-  .attachment-preview-dock {
-    width: min(238px, calc(100vw - 30px));
+  .attachment-preview-minimized,
+  .attachment-preview-minimized.avoid-right {
+    right: 12px;
   }
 }
 </style>

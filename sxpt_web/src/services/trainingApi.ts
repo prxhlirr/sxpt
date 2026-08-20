@@ -4,6 +4,7 @@ import {
 } from '../data/mockSeed';
 import { clearApiToken, setApiToken } from '../api/http';
 import type {
+  DataPrepareMode,
   PortalRole,
   StorageLike,
   TrainingState
@@ -672,6 +673,7 @@ export interface CreateAuthoringLaunchRequest {
   lessonId: string;
   connectorSystemId: string;
   businessModuleId: string;
+  generationSource?: DataPrepareMode;
 }
 
 export interface AuthoringLaunchResult {

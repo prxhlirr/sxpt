@@ -441,7 +441,8 @@ describe('教师编排单点启动接口', () => {
     const result = await dataPrepareApi.createAuthoringLaunch({
       lessonId: 'lesson-001',
       connectorSystemId: 'system-001',
-      businessModuleId: 'module-001'
+      businessModuleId: 'module-001',
+      generationSource: 'CLASSIC_CASE'
     });
 
     expect(result.dataInstanceId).toBe('instance-001');
@@ -452,7 +453,8 @@ describe('教师编排单点启动接口', () => {
         body: JSON.stringify({
           lessonId: 'lesson-001',
           connectorSystemId: 'system-001',
-          businessModuleId: 'module-001'
+          businessModuleId: 'module-001',
+          generationSource: 'CLASSIC_CASE'
         })
       })
     );

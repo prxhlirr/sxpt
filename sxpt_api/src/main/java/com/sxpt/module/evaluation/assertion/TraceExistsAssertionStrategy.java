@@ -26,6 +26,10 @@ public class TraceExistsAssertionStrategy implements EvaluationAssertionStrategy
 
     private static final String NO_SCORE_POLICY = "NO_SCORE";
 
+    private static final String STEP_COMPLETED = "STEP_COMPLETED";
+
+    private static final String LEGACY_PRACTICE_COMPLETION_SUFFIX = ":practice-completed";
+
     @Override
     public boolean supports(String assertionType) {
         return TRACE_EXISTS.equals(assertionType);
@@ -54,7 +58,7 @@ public class TraceExistsAssertionStrategy implements EvaluationAssertionStrategy
         if (!StringUtils.hasText(traceType)) {
             traceType = textConfig(config, "eventType");
         }
-        if (StringUtils.hasText(traceType) && !traceType.equals(trace.getTraceType())) {
+        if (StringUtils.hasText(traceType) && !matchesTraceType(traceType, trace)) {
             return false;
         }
         String taskStepId = StringUtils.hasText(item.getRelatedTaskStepId())
@@ -69,6 +73,26 @@ public class TraceExistsAssertionStrategy implements EvaluationAssertionStrategy
         }
         Boolean success = booleanConfig(config, "success");
         return success == null || success.equals(trace.getSuccess());
+    }
+
+    /**
+     * 兼容本次修复前已经入库的练习完成轨迹。
+     *
+     * 旧前端使用 CLICK/INPUT/SELECT 作为轨迹类型，但 clientTraceId 已明确标记
+     * practice-completed。兼容范围只覆盖该稳定幂等键，普通点击轨迹不能冒充步骤完成。
+     */
+    private boolean matchesTraceType(String expectedTraceType, ExecutionTrace trace) {
+        if (expectedTraceType.equals(trace.getTraceType())) {
+            return true;
+        }
+        if (!STEP_COMPLETED.equals(expectedTraceType)
+                || !StringUtils.hasText(trace.getClientTraceId())
+                || !trace.getClientTraceId().endsWith(LEGACY_PRACTICE_COMPLETION_SUFFIX)) {
+            return false;
+        }
+        return "CLICK".equals(trace.getTraceType())
+                || "INPUT".equals(trace.getTraceType())
+                || "SELECT".equals(trace.getTraceType());
     }
 
     private String textConfig(Map<String, Object> config, String key) {

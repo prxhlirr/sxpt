@@ -15,10 +15,13 @@ import { teachingApi } from '../api/teaching';
 import { usersApi } from '../api/users';
 import { getApiConfig } from '../config/api';
 import type {
+  BusinessPageSnapshot,
   BusinessPlatform,
   BusinessPlatformModule,
+  CaptureRect,
   LessonPlan,
   LessonStage,
+  PracticeEvidenceScreenshot,
   PublishedTask,
   RecordedStep,
   RunMode,
@@ -33,6 +36,7 @@ import {
 } from './trainingApi';
 import {
   isPracticeMonitorableStep,
+  isRequiredPracticeStep,
   practiceRecordedActionType
 } from '../utils/practiceStep';
 
@@ -76,6 +80,13 @@ export interface PracticeActionEvidence {
   selectorCandidates?: string[];
   url?: string;
   pageTitle?: string;
+  rect?: CaptureRect;
+  recordedViewport?: {
+    width: number;
+    height: number;
+  };
+  evidenceScreenshot?: PracticeEvidenceScreenshot;
+  pageSnapshot?: BusinessPageSnapshot;
   completedAt: string;
 }
 
@@ -620,7 +631,8 @@ export const backendTrainingApi: BackendTrainingApi = {
         localStudentId: studentTask.studentId,
         localStudentName: studentTask.studentName,
         localGroupKeys: studentTask.groupKeys,
-        authenticatedUserId: config.currentUserId
+        authenticatedUserId: config.currentUserId,
+        teachingPointId: publishedTask.remoteTeachingPointId
       })
     });
     await executionApi.context(
@@ -714,7 +726,10 @@ export const backendTrainingApi: BackendTrainingApi = {
       taskStepId,
       teachingPointId: publishedTask.remoteTeachingPointId,
       resourceId: step.remoteResourceId,
-      traceType: mapPracticeStepActionType(step),
+      // 练习页已经按录制动作类型、页面和稳定选择器完成匹配。
+      // 后端评分规则统一消费 STEP_COMPLETED；原始动作类型保留在证据中，
+      // 避免出现“前端教学点已完成，但 TRACE_EXISTS 评分无法命中”的分裂状态。
+      traceType: 'STEP_COMPLETED',
       traceTime: toLocalDateTime(new Date(evidence.completedAt)),
       sequenceNo,
       retryCount: 0,
@@ -724,7 +739,8 @@ export const backendTrainingApi: BackendTrainingApi = {
         localStepId: step.id,
         mode: publishedTask.mode,
         recordedActionType: practiceRecordedActionType(step),
-        observedActionType: evidence.actionType
+        observedActionType: evidence.actionType,
+        observedTraceType: mapPracticeStepActionType(step)
       }),
       evidenceJson: JSON.stringify({
         source: 'sxpt_web_practice_monitor',
@@ -732,7 +748,17 @@ export const backendTrainingApi: BackendTrainingApi = {
         observedSelector: evidence.selector,
         observedSelectorCandidates: evidence.selectorCandidates ?? [],
         observedUrl: evidence.url,
-        observedPageTitle: evidence.pageTitle
+        observedPageTitle: evidence.pageTitle,
+        screenshot: evidence.evidenceScreenshot
+          ? {
+              mimeType: evidence.evidenceScreenshot.mimeType,
+              width: evidence.evidenceScreenshot.width,
+              height: evidence.evidenceScreenshot.height,
+              capturedAt: evidence.evidenceScreenshot.capturedAt,
+              storage: 'training_workspace'
+            }
+          : undefined,
+        pageSnapshotCapturedAt: evidence.pageSnapshot?.capturedAt
       }),
       success: true
     });
@@ -932,6 +958,19 @@ export function safeCode(value: string, maxLength: number): string {
   return `${prefix}-${hash}`.slice(0, maxLength);
 }
 
+/**
+ * 生成教案维度唯一且可重复计算的后端编码。
+ *
+ * 教案可使用相同的展示编码（例如 LESSON-001），因此后端资源编码必须同时包含
+ * 本地教案 ID，避免不同教案复用同一课程或任务并串入彼此的教学点。
+ */
+export function buildLessonScopedBackendCode(
+  lesson: Pick<LessonPlan, 'id' | 'code'>,
+  resourceScope: string
+): string {
+  return safeCode(`${resourceScope}-${lesson.code}-${lesson.id}`, 64);
+}
+
 function stableCodeHash(value: string): string {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -950,7 +989,7 @@ async function ensureCourse(
   publishOrgId: string
 ): Promise<Course> {
   const config = getApiConfig();
-  const courseCode = safeCode(`COURSE-${lesson.code}`, 64);
+  const courseCode = buildLessonScopedBackendCode(lesson, 'COURSE');
   const existing = (
     await courseApi.listCourses(config.tenantId, publishOrgId)
   ).find(
@@ -977,7 +1016,7 @@ async function ensureTeachingTask(
   publishOrgId: string
 ): Promise<TeachingTask> {
   const config = getApiConfig();
-  const taskCode = safeCode(`${lesson.code}-${mode}`, 64);
+  const taskCode = buildLessonScopedBackendCode(lesson, mode);
   const existing = (
     await courseApi.listTasks(config.tenantId, course.id, publishOrgId)
   ).find((task) => task.taskCode === taskCode);
@@ -1130,7 +1169,7 @@ async function ensureEvaluation(
           .filter(
             (step) =>
               mode !== 'PRACTICE' ||
-              isPracticeMonitorableStep(step)
+              isRequiredPracticeStep(step)
           )
           .map((step) => ({ stage, step }))
       : []
@@ -1358,7 +1397,7 @@ function buildPublishDataParticipant(
           .filter(
             (step) =>
               publishedTask.mode !== 'PRACTICE' ||
-              isPracticeMonitorableStep(step)
+              isRequiredPracticeStep(step)
           )
           .map((step) => ({
             stageId: stage.id,

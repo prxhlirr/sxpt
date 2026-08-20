@@ -75,6 +75,15 @@ export interface BusinessPageSnapshot {
   };
 }
 
+/** 学生命中练习操作点时，由原业务页面采集的可视区域截图。 */
+export interface PracticeEvidenceScreenshot {
+  dataUrl: string;
+  mimeType: 'image/jpeg' | 'image/png';
+  width: number;
+  height: number;
+  capturedAt: string;
+}
+
 export interface TrainingAttachment {
   id: string;
   name: string;
@@ -279,6 +288,13 @@ export interface PracticeStepResult {
   observedActionType: 'click' | 'input' | 'select' | 'submit';
   observedSelector: string;
   observedUrl?: string;
+  observedRect?: CaptureRect;
+  recordedViewport?: {
+    width: number;
+    height: number;
+  };
+  evidenceScreenshot?: PracticeEvidenceScreenshot;
+  pageSnapshot?: BusinessPageSnapshot;
   completedAt: string;
   remoteTraceId?: string;
 }

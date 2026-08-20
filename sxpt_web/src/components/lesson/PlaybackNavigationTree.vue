@@ -45,6 +45,7 @@ const currentStageStepEntries = computed(() =>
         class="playback-tree-stage"
         type="button"
         :disabled="disabled"
+        :title="stage.name"
         @click="emit('selectStage', stage.id)"
       >
         <span>{{ index + 1 }}</span>
@@ -58,6 +59,7 @@ const currentStageStepEntries = computed(() =>
           :key="entry.item.step.id"
           type="button"
           :disabled="disabled"
+          :title="entry.item.step.title"
           :class="{
             active:
               entry.globalIndex === currentIndex && !showStageIntroduction
@@ -75,6 +77,7 @@ const currentStageStepEntries = computed(() =>
 .playback-navigation-tree {
   display: grid;
   min-height: 0;
+  align-content: start;
   gap: 9px;
   overflow-y: auto;
   padding: 14px;
@@ -88,6 +91,7 @@ const currentStageStepEntries = computed(() =>
 }
 
 .playback-tree-item.active {
+  max-height: 380px;
   border-color: #786bd4;
   background: #f7f5ff;
 }
@@ -129,7 +133,9 @@ const currentStageStepEntries = computed(() =>
 }
 
 .playback-tree-stage strong {
+  display: block;
   min-width: 0;
+  max-width: 100%;
   overflow: hidden;
   font-size: 16px;
   text-overflow: ellipsis;
@@ -143,11 +149,29 @@ const currentStageStepEntries = computed(() =>
 
 .playback-tree-nodes {
   display: grid;
+  max-height: 300px;
+  align-content: start;
   gap: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 0 10px 11px 52px;
+  scrollbar-color: #c6bfef transparent;
+  scrollbar-width: thin;
+}
+
+.playback-tree-nodes::-webkit-scrollbar {
+  width: 6px;
+}
+
+.playback-tree-nodes::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #c6bfef;
 }
 
 .playback-tree-nodes button {
+  display: block;
+  width: 100%;
+  min-width: 0;
   overflow: hidden;
   border: 0;
   min-height: 42px;

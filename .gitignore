@@ -2,6 +2,23 @@
 /sxpt_api/target/
 /sxpt_api/data/
 /sxpt_api/src/test/
+## Keep regression tests for the OA classic-case integration versioned.
+!/sxpt_api/src/test/
+/sxpt_api/src/test/*
+!/sxpt_api/src/test/java/
+/sxpt_api/src/test/java/*
+!/sxpt_api/src/test/java/com/
+/sxpt_api/src/test/java/com/*
+!/sxpt_api/src/test/java/com/sxpt/
+/sxpt_api/src/test/java/com/sxpt/*
+!/sxpt_api/src/test/java/com/sxpt/config/
+/sxpt_api/src/test/java/com/sxpt/config/*
+!/sxpt_api/src/test/java/com/sxpt/config/ClassicCaseOaLocalBootstrapTests.java
+!/sxpt_api/src/test/java/com/sxpt/module/
+/sxpt_api/src/test/java/com/sxpt/module/*
+!/sxpt_api/src/test/java/com/sxpt/module/connector/
+/sxpt_api/src/test/java/com/sxpt/module/connector/*
+!/sxpt_api/src/test/java/com/sxpt/module/connector/ClassicCaseModuleRelocationTests.java
 target/
 *.class
 *.jar

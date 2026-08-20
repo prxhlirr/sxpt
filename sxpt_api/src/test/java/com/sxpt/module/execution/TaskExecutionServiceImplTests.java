@@ -31,6 +31,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -144,6 +145,46 @@ class TaskExecutionServiceImplTests {
         assertEquals(saved.getStartTime(), attempt.getStartTime());
         assertEquals("student_001", attempt.getCreateBy());
         assertEquals("student_001", attempt.getUpdateBy());
+    }
+
+    /**
+     * 验证历史任务即使残留其他教案的空教学点，也只装载本次执行明确指定的教学点。
+     */
+    @Test
+    void startExecutionShouldScopeContextAndAttemptToRequestedTeachingPoint() {
+        TaskTeachingPoint staleTeachingPoint = buildTaskTeachingPoint();
+        staleTeachingPoint.setTeachingPointId("tp_stale");
+        staleTeachingPoint.setSequenceNo(1L);
+        TaskTeachingPoint requestedTeachingPoint = buildTaskTeachingPoint();
+        requestedTeachingPoint.setSequenceNo(2L);
+
+        when(taskMapper.selectOne(any())).thenReturn(buildPublishedTask());
+        when(taskPublishService.listTeachingPointsByTask("tenant_001", "task_001"))
+                .thenReturn(Arrays.asList(staleTeachingPoint, requestedTeachingPoint));
+        when(taskStepService.listByTaskAndTeachingPoint("tenant_001", "task_001", "tp_001"))
+                .thenReturn(Collections.singletonList(buildTaskStep()));
+        when(evaluationConfigService.listRules("tenant_001", "task_001", "tp_001"))
+                .thenReturn(Collections.singletonList(buildEvaluationRule()));
+        when(evaluationConfigService.listItemsByRule("tenant_001", "rule_001"))
+                .thenReturn(Collections.singletonList(buildEvaluationItem()));
+
+        TaskExecution execution = buildStartExecution();
+        execution.setExecutionIdentityJson(
+                "{\"identityMode\":\"STUDENT\",\"teachingPointId\":\"tp_001\"}");
+
+        service.startExecution(execution);
+
+        ArgumentCaptor<TaskExecutionContext> contextCaptor = ArgumentCaptor.forClass(TaskExecutionContext.class);
+        verify(taskExecutionContextService).createContext(contextCaptor.capture());
+        assertTeachingPointSnapshot(contextCaptor.getValue().getTeachingPointSnapshotJson());
+        verify(taskStepService, times(0))
+                .listByTaskAndTeachingPoint("tenant_001", "task_001", "tp_stale");
+        verify(evaluationConfigService, times(0))
+                .listRules("tenant_001", "task_001", "tp_stale");
+
+        ArgumentCaptor<PracticeAttempt> attemptCaptor = ArgumentCaptor.forClass(PracticeAttempt.class);
+        verify(practiceAttemptService).startAttempt(attemptCaptor.capture());
+        assertEquals("tp_001", attemptCaptor.getValue().getTeachingPointId());
     }
 
     /**
@@ -277,6 +318,34 @@ class TaskExecutionServiceImplTests {
         assertEquals("task_001", summary.getTaskId());
         assertEquals("tp_001", summary.getTeachingPointId());
         assertEquals("student_001", summary.getCreateBy());
+    }
+
+    /** 必做操作点缺少命中证据时，后端拒绝把练习执行标记为完成。 */
+    @Test
+    void submitExecutionShouldRejectPracticeWithMissingMandatoryStep() {
+        TaskExecution running = buildRunningExecution();
+        when(taskExecutionMapper.selectOne(any())).thenReturn(running);
+        when(taskPublishService.listTeachingPointsByTask("tenant_001", "task_001"))
+                .thenReturn(Collections.singletonList(buildTaskTeachingPoint()));
+        when(evaluationConfigService.listRules("tenant_001", "task_001", "tp_001"))
+                .thenReturn(Collections.singletonList(buildEvaluationRule()));
+        when(evaluationConfigService.listRules("tenant_001", "task_001", null))
+                .thenReturn(Collections.emptyList());
+        EvaluationResult missing = buildEvaluationResult(
+                "result_001", "rule_001", BigDecimal.ZERO);
+        missing.setEvidenceJson(
+                "{\"items\":[{\"itemId\":\"item_001\",\"matched\":false,\"score\":0}]}"
+        );
+        when(autoEvaluationService.generateAutoEvaluation(any(EvaluationResult.class)))
+                .thenReturn(missing);
+        when(evaluationConfigService.listItemsByRule("tenant_001", "rule_001"))
+                .thenReturn(Collections.singletonList(buildEvaluationItem()));
+
+        assertThrows(BusinessException.class,
+                () -> service.submitExecution("tenant_001", "execution_001", "student_001"));
+
+        verify(taskExecutionMapper, times(0)).updateById(any());
+        verify(practiceAttemptService, times(0)).finishAttempt(any());
     }
 
     /**

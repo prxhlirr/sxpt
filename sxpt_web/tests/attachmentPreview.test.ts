@@ -15,7 +15,7 @@ describe('讲解与学习附件预览', () => {
     expect(panel).toContain('预览');
   });
 
-  it('共享播放组件统一管理附件弹窗及最小化状态', () => {
+  it('共享播放组件统一管理菜单入口、最小化及最大化状态', () => {
     const playback = source(
       'src/components/lesson/LessonPlaybackPlayer.vue'
     );
@@ -27,10 +27,20 @@ describe('讲解与学习附件预览', () => {
     expect(playback).toContain(
       'const attachmentPreviewMinimized = ref(false)'
     );
+    expect(playback).toContain(
+      'const attachmentPreviewMaximized = ref(false)'
+    );
+    expect(playback).toContain('const currentAttachments = computed');
+    expect(playback).toContain('@click="openAttachmentsFromMenu"');
+    expect(playback).toContain('<small>附件</small>');
     expect(playback.match(/@preview="openAttachmentPreview"/g)).toHaveLength(3);
     expect(playback).toContain(':attachment="previewAttachment"');
+    expect(playback).toContain(':attachments="currentAttachments"');
+    expect(playback).toContain(':maximized="attachmentPreviewMaximized"');
+    expect(playback).toContain('@maximize="maximizeAttachmentPreview"');
     expect(playback).toContain('@minimize="minimizeAttachmentPreview"');
     expect(playback).toContain('@restore="restoreAttachmentPreview"');
+    expect(playback).toContain('@restore-size="restoreAttachmentPreviewSize"');
   });
 
   it('使用 Open File Viewer 统一预览 Office、PDF 和常用附件格式', () => {
@@ -40,8 +50,9 @@ describe('讲解与学习附件预览', () => {
 
     expect(preview).toContain("from '@open-file-viewer/core'");
     expect(preview).toContain("import '@open-file-viewer/core/style.css'");
-    expect(preview).toContain('pdf.worker.mjs?url');
     expect(preview).toContain('createViewer({');
+    expect(preview).toContain('resolvePreviewFit(attachment)');
+    expect(preview).toContain("return isPdfOrWord ? 'width' : 'contain'");
     expect(preview).toContain('officePlugin({ pdf: pdfOptions })');
     expect(preview).toContain('pdfPlugin(pdfOptions)');
     expect(preview).toContain('fallbackPlugin()');
@@ -49,10 +60,19 @@ describe('讲解与学习附件预览', () => {
     expect(preview).toContain('fileName: attachment.name');
     expect(preview).toContain('mimeType: attachment.mimeType');
     expect(preview).toContain('viewer?.destroy()');
-    expect(preview).toContain('class="attachment-preview-stack"');
-    expect(preview).toContain('attachment-preview-dock-card');
-    expect(preview).toContain('最小化到右侧栏');
-    expect(preview).toContain('继续查看');
+    expect(preview).toContain('class="attachment-preview-layer"');
+    expect(preview).toContain('class="attachment-preview-list"');
+    expect(preview).toContain('class="attachment-preview-minimized"');
+    expect(preview).toContain('最小化到附件图标');
+    expect(preview).toContain('beginOverlayDrag');
+    expect(preview).toContain('@pointermove="moveMinimizedDrag"');
+    expect(preview).toContain('@click="restoreFromMinimized"');
+    expect(preview).toContain('suppressMinimizedClick');
+    expect(preview).toContain('最大化附件预览');
+    expect(preview).toContain("emit('restoreSize')");
+    expect(preview).toContain('VIEWER_RESIZE_SETTLE_MS');
+    expect(preview).toContain('@transitionend="handlePreviewTransitionEnd"');
+    expect(preview).toContain('width: calc(100vw - 32px)');
     expect(preview).toContain(':download="attachment.name"');
     expect(preview).not.toContain('v-html');
   });
@@ -67,7 +87,7 @@ describe('讲解与学习附件预览', () => {
     );
 
     expect(packageJson).toContain('"@open-file-viewer/core": "0.1.32"');
-    expect(packageJson).toContain('"pdfjs-dist": "5.7.284"');
+    expect(packageJson).toContain('"pdfjs-dist": "4.10.38"');
     expect(models).toContain('downloadUrl?: string');
     expect(models).not.toContain('previewUrl?: string');
     expect(models).not.toContain('previewStatus?:');

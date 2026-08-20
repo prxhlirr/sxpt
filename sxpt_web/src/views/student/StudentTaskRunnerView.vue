@@ -6,7 +6,12 @@ import BusinessCaptureFrame from '../../components/lesson/BusinessCaptureFrame.v
 import BusinessSnapshotFrame from '../../components/lesson/BusinessSnapshotFrame.vue';
 import LessonPlaybackPlayer from '../../components/lesson/LessonPlaybackPlayer.vue';
 import PlaybackNavigationTree from '../../components/lesson/PlaybackNavigationTree.vue';
-import type { RecordedStep } from '../../domain/models';
+import type {
+  BusinessPageSnapshot,
+  CaptureRect,
+  PracticeEvidenceScreenshot,
+  RecordedStep
+} from '../../domain/models';
 import StatusPill from '../../components/ui/StatusPill.vue';
 import {
   dataPrepareApi,
@@ -17,7 +22,12 @@ import {
 import { useTrainingStore } from '../../stores/trainingStore';
 import { authApi } from '../../services/trainingApi';
 import { resolveLaunchedBusinessFrameUrl } from '../../utils/businessLaunch';
-import { isPracticeMonitorableStep } from '../../utils/practiceStep';
+import { isRequiredPracticeStep } from '../../utils/practiceStep';
+import {
+  actionMatchesRecordedStep,
+  practiceActionMatchPriority
+} from '../../utils/practiceActionMatching';
+import { safeCode } from '../../services/backendTrainingApi';
 
 interface BusinessActionPayload {
   actionType: 'click' | 'input' | 'select' | 'submit';
@@ -27,6 +37,13 @@ interface BusinessActionPayload {
   url?: string;
   pageTitle?: string;
   valueMasked?: string;
+  rect?: CaptureRect;
+  recordedViewport?: {
+    width: number;
+    height: number;
+  };
+  evidenceScreenshot?: PracticeEvidenceScreenshot;
+  pageSnapshot?: BusinessPageSnapshot;
 }
 
 const store = useTrainingStore();
@@ -124,7 +141,11 @@ const practiceBusinessBaseUrl = computed(() => {
   }
 });
 const practiceBusinessUrl = computed(
-  () => resolveLaunchedBusinessFrameUrl(launchResult.value)
+  () =>
+    resolveLaunchedBusinessFrameUrl(
+      launchResult.value,
+      practiceBusinessPlatform.value?.baseUrl
+    )
 );
 const practiceAllowedOrigins = computed(() =>
   [
@@ -159,7 +180,7 @@ const assignedStageIds = computed(() => {
 const playbackStages = computed(() =>
   visibleStages.value.filter((stage) =>
     stage.recordedSteps.some(
-      (step) => !isPractice.value || isPracticeMonitorableStep(step)
+      (step) => !isPractice.value || isRequiredPracticeStep(step)
     )
   )
 );
@@ -188,7 +209,10 @@ const learningSteps = computed(() =>
         stepIndex
       }))
     )
-    .filter(({ step }) => !isPractice.value || isPracticeMonitorableStep(step))
+    .filter(({ step }) => !isPractice.value || isRequiredPracticeStep(step))
+);
+const requiredPracticeSteps = computed(() =>
+  learningSteps.value.filter(({ step }) => isRequiredPracticeStep(step))
 );
 const currentLearningStep = computed(
   () => learningSteps.value[learningStepIndex.value]
@@ -458,7 +482,7 @@ async function prepareClassicCaseLaunch(openInNewWindow: boolean) {
       sceneType: task.value.mode,
       taskId,
       ownerUserId: currentStudentId,
-      questionId: task.value.dataItemId || task.value.id,
+      questionId: safeCode(task.value.dataItemId || task.value.id, 64),
       requestBatchId: requestId,
       requestItemId: task.value.id,
       traceId: requestId,
@@ -573,9 +597,15 @@ async function ensurePracticeRuntime() {
   }
   practiceRuntimeLoading.value = true;
   practiceRuntimeReady.value = false;
+  launchErrorMessage.value = '';
   try {
     if (task.value.status === 'TODO') {
-      await startTask();
+      const started = await startTask();
+      if (!started) {
+        launchErrorMessage.value =
+          errorMessage.value || '练习任务启动失败，请稍后重试。';
+        return;
+      }
     }
     if (
       task.value.status === 'DOING' &&
@@ -584,6 +614,9 @@ async function ensurePracticeRuntime() {
     ) {
       await prepareOriginPlatformLaunch(false);
     }
+  } catch (error) {
+    launchErrorMessage.value =
+      error instanceof Error ? error.message : '原业务系统加载失败。';
   } finally {
     practiceRuntimeReady.value = true;
     practiceRuntimeLoading.value = false;
@@ -721,8 +754,8 @@ function syncLearningProgress(introduceStage = false) {
     Boolean(learningSteps.value[learningStepIndex.value]);
 }
 
-async function startTask() {
-  if (!task.value) return;
+async function startTask(): Promise<boolean> {
+  if (!task.value) return false;
   message.value = '';
   errorMessage.value = '';
   try {
@@ -738,9 +771,11 @@ async function startTask() {
         : task.value.mode === 'LEARNING'
           ? '学习已开始，可自由选择任意教学点或节点，学习内容与教师讲解一致。'
           : '';
+    return true;
   } catch (error) {
     errorMessage.value =
       error instanceof Error ? error.message : '任务启动失败。';
+    return false;
   } finally {
     syncing.value = false;
   }
@@ -831,63 +866,15 @@ async function restartAttempt() {
   }
 }
 
-function selectorToken(selector: string) {
-  const normalized = selector.replace(/\s+/g, '');
-  const action = normalized.match(/data-action=["']([^"']+)["']/)?.[1];
-  if (action) return `action:${action}`;
-  const businessField = normalized.match(
-    /data-business-field=["']([^"']+)["']/
-  )?.[1];
-  if (businessField) return `field:${businessField}`;
-  const trainingId = normalized.match(
-    /data-training-id=["']([^"']+)["']/
-  )?.[1];
-  const trainingAliases: Record<string, string> = {
-    supplier: 'counterparty',
-    category: 'category',
-    amount: 'amount',
-    'arrival-date': 'date',
-    reason: 'reason',
-    subject: 'subject'
-  };
-  if (trainingId && trainingAliases[trainingId]) {
-    return `field:${trainingAliases[trainingId]}`;
-  }
-  return normalized;
-}
-
 function actionMatchesStep(
   payload: BusinessActionPayload,
   step: RecordedStep
 ) {
-  const expectedActionType =
-    step.actionType && step.actionType !== 'guide' ? step.actionType : 'click';
-  const compatibleAction =
-    payload.actionType === expectedActionType ||
-    ((expectedActionType === 'click' || expectedActionType === 'submit') &&
-      (payload.actionType === 'click' || payload.actionType === 'submit'));
-  if (!compatibleAction) return false;
-
-  const expectedUrl = step.url || step.pageSnapshot?.pageUrl;
-  if (expectedUrl && payload.url) {
-    try {
-      const baseUrl = practiceBusinessBaseUrl.value || window.location.href;
-      const expectedPath = new URL(expectedUrl, baseUrl).pathname.replace(/\/$/, '');
-      const observedPath = new URL(payload.url, baseUrl).pathname.replace(/\/$/, '');
-      if (expectedPath && observedPath && expectedPath !== observedPath) {
-        return false;
-      }
-    } catch {
-      // URL 只作为辅助条件；无法规范化时继续使用稳定元素选择器判定。
-    }
-  }
-  const expected = [step.selector, ...(step.selectorCandidates ?? [])]
-    .filter(Boolean)
-    .map(selectorToken);
-  const actual = [payload.selector, ...(payload.selectorCandidates ?? [])]
-    .filter(Boolean)
-    .map(selectorToken);
-  return actual.some((selector) => expected.includes(selector));
+  return actionMatchesRecordedStep(
+    payload,
+    step,
+    practiceBusinessBaseUrl.value || window.location.href
+  );
 }
 
 async function advanceLearningStep() {
@@ -1026,8 +1013,20 @@ async function finishLearningTask() {
   }
 }
 
-const pendingPracticeStepIds = new Set<string>();
+const pendingPracticeStepKeys = new Set<string>();
 let practiceTraceQueue: Promise<void> = Promise.resolve();
+
+function practiceStepKey(stageId: string, stepId: string) {
+  return `${stageId}\u0000${stepId}`;
+}
+
+function hasPracticeStepEvidence(stageId: string, stepId: string) {
+  return Boolean(
+    task.value?.practiceStepResults?.some(
+      (result) => result.stageId === stageId && result.stepId === stepId
+    )
+  );
+}
 
 async function finishPracticeWhenEvidenceComplete() {
   if (
@@ -1035,16 +1034,29 @@ async function finishPracticeWhenEvidenceComplete() {
     task.value.mode !== 'PRACTICE' ||
     task.value.status !== 'DOING' ||
     practiceSubmitting.value ||
-    !learningSteps.value.length ||
-    !learningSteps.value.every(({ step }) =>
-      task.value?.completedPracticeStepIds?.includes(step.id)
+    !requiredPracticeSteps.value.length ||
+    !requiredPracticeSteps.value.every(({ stage, step }) =>
+      hasPracticeStepEvidence(stage.id, step.id)
     )
   ) {
     return;
   }
   practiceSubmitting.value = true;
+  message.value = '全部必做操作点已完成，正在上传本次练习的全部操作证据…';
+  errorMessage.value = '';
   try {
+    // 最后一个必做点的截屏会随当前工作区快照一并上传。
+    // 必须等待证据上传成功后才提交执行，避免教师端出现
+    // “练习已完成但证据尚未到达”的短暂不一致。
+    await store.flushAuthenticatedWorkspace();
     await store.submitStudentTaskRemote(task.value.id, {});
+    message.value = '练习完成：全部必做操作点及操作证据已上传。';
+  } catch (error) {
+    errorMessage.value =
+      error instanceof Error
+        ? error.message
+        : '练习证据上传或提交失败，请重试最后一个操作。';
+    throw error;
   } finally {
     practiceSubmitting.value = false;
   }
@@ -1059,12 +1071,22 @@ function handleRecordedBusinessAction(payload: BusinessActionPayload) {
   ) {
     return;
   }
-  const matched = learningSteps.value.find(
-    ({ step }) =>
-      !task.value?.completedPracticeStepIds?.includes(step.id) &&
-      !pendingPracticeStepIds.has(step.id) &&
-      actionMatchesStep(payload, step)
-  );
+  const matched = requiredPracticeSteps.value
+    .filter(
+      ({ stage, step }) =>
+        !hasPracticeStepEvidence(stage.id, step.id) &&
+        !pendingPracticeStepKeys.has(practiceStepKey(stage.id, step.id)) &&
+        actionMatchesStep(payload, step)
+    )
+    .map((candidate) => ({
+      candidate,
+      priority: practiceActionMatchPriority(
+        payload,
+        candidate.step,
+        practiceBusinessBaseUrl.value || window.location.href
+      )
+    }))
+    .sort((left, right) => right.priority - left.priority)[0]?.candidate;
   if (!matched) {
     void finishPracticeWhenEvidenceComplete().catch((error) => {
       console.warn('练习任务自动提交失败，将在后续操作时重试。', error);
@@ -1072,12 +1094,13 @@ function handleRecordedBusinessAction(payload: BusinessActionPayload) {
     return;
   }
 
-  pendingPracticeStepIds.add(matched.step.id);
+  const matchedStepKey = practiceStepKey(matched.stage.id, matched.step.id);
+  pendingPracticeStepKeys.add(matchedStepKey);
   const work = practiceTraceQueue.then(async () => {
     if (
       !task.value ||
       task.value.status !== 'DOING' ||
-      task.value.completedPracticeStepIds?.includes(matched.step.id)
+      hasPracticeStepEvidence(matched.stage.id, matched.step.id)
     ) {
       return;
     }
@@ -1091,6 +1114,10 @@ function handleRecordedBusinessAction(payload: BusinessActionPayload) {
         selectorCandidates: payload.selectorCandidates,
         url: payload.url,
         pageTitle: payload.pageTitle,
+        rect: payload.rect,
+        recordedViewport: payload.recordedViewport,
+        evidenceScreenshot: payload.evidenceScreenshot,
+        pageSnapshot: payload.pageSnapshot,
         completedAt: new Date().toISOString()
       }
     );
@@ -1102,7 +1129,7 @@ function handleRecordedBusinessAction(payload: BusinessActionPayload) {
       console.warn('练习操作点轨迹记录失败，学生可再次执行该操作重试。', error);
     })
     .finally(() => {
-      pendingPracticeStepIds.delete(matched.step.id);
+      pendingPracticeStepKeys.delete(matchedStepKey);
     });
 }
 
@@ -1873,6 +1900,19 @@ async function restartTrainingTask() {
             v-else-if="
               isPractice &&
               task.status === 'DOING' &&
+              practiceSubmitting
+            "
+            class="training-state-overlay success"
+          >
+            <span>↑</span>
+            <h3>正在上传练习证据</h3>
+            <p>全部必做操作点已完成，系统正在上传操作记录和截屏，请稍候。</p>
+          </div>
+
+          <div
+            v-else-if="
+              isPractice &&
+              task.status === 'DOING' &&
               (!practiceRuntimeReady || practiceRuntimeLoading)
             "
             class="training-state-overlay practice-runtime-state"
@@ -1885,8 +1925,8 @@ async function restartTrainingTask() {
           <div
             v-else-if="
               isPractice &&
-              task.status === 'DOING' &&
               practiceRuntimeReady &&
+              task.status === 'DOING' &&
               !practiceBusinessUrl
             "
             class="training-state-overlay"
@@ -1894,9 +1934,19 @@ async function restartTrainingTask() {
             <span>!</span>
             <h3>原业务系统暂时无法打开</h3>
             <p>{{ launchErrorMessage || '请检查业务平台及业务模块入口配置。' }}</p>
-            <RouterLink class="button secondary" to="/student/tasks">
-              返回任务中心
-            </RouterLink>
+            <div>
+              <RouterLink class="button secondary" to="/student/tasks">
+                返回任务中心
+              </RouterLink>
+              <button
+                class="primary"
+                type="button"
+                :disabled="practiceRuntimeLoading"
+                @click="ensurePracticeRuntime"
+              >
+                {{ practiceRuntimeLoading ? '正在重试…' : '重新加载业务平台' }}
+              </button>
+            </div>
           </div>
 
           <div
@@ -1904,8 +1954,11 @@ async function restartTrainingTask() {
             class="training-state-overlay success"
           >
             <span>✓</span>
-            <h3>本次{{ modeLabel }}已经完成</h3>
-            <p>
+            <h3>{{ isPractice ? '练习完成' : `本次${modeLabel}已经完成` }}</h3>
+            <p v-if="isPractice">
+              全部必做操作点已完成，操作记录和截屏证据已全部上传，教师可在评阅中查看。
+            </p>
+            <p v-else>
               系统已保存完整业务操作轨迹。你可以返回任务中心，也可以从第一步重新开始。
             </p>
             <div>

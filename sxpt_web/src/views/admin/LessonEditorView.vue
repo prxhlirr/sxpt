@@ -114,6 +114,7 @@ interface BusinessCaptureFrameApi {
     url?: string,
     selectorCandidates?: string[]
   ) => void;
+  clearStepPreview: () => void;
 }
 
 const route = useRoute();
@@ -171,6 +172,8 @@ const authoringLaunchContextKey = computed(() => {
   const currentLessonId = lesson.value?.id ?? '';
   const platformId = businessPlatform.value?.id ?? '';
   const moduleId = businessPlatformModule.value?.id ?? '';
+  const generationSource = lesson.value?.generationSource ?? 'NORMAL';
+  const classicCaseVersionId = lesson.value?.classicCaseConfig?.caseVersionId ?? '';
   if (
     !currentLessonId ||
     !platformId ||
@@ -179,7 +182,7 @@ const authoringLaunchContextKey = computed(() => {
   ) {
     return '';
   }
-  return `${currentLessonId}\u0000${platformId}\u0000${moduleId}`;
+  return `${currentLessonId}\u0000${platformId}\u0000${moduleId}\u0000${generationSource}\u0000${classicCaseVersionId}`;
 });
 const selectedStageId = ref('');
 const selectedStepId = ref('');
@@ -510,7 +513,8 @@ async function initializeAuthoringLaunch() {
   await authoringLaunch.start({
     lessonId: currentLesson.id,
     connectorSystemId: platform.id,
-    businessModuleId: businessModule.id
+    businessModuleId: businessModule.id,
+    generationSource: currentLesson.generationSource ?? 'NORMAL'
   });
 }
 
@@ -738,8 +742,7 @@ function openAuthoringMenuFromLauncher(event: MouseEvent) {
 }
 
 function collapseAuthoringMenu() {
-  showStagePanel.value = false;
-  showAuthoringMoreMenu.value = false;
+  closeAuthoringDrawers();
 }
 
 onMounted(async () => {
@@ -1069,6 +1072,9 @@ function handleBusinessPlatformMessage(event: MessageEvent) {
     pageTitle,
     actionLabel,
     selector: String(payload.selector ?? ''),
+    selectorCandidates: Array.isArray(payload.selectorCandidates)
+      ? payload.selectorCandidates.map(String).filter(Boolean)
+      : undefined,
     durationSeconds: Number(payload.durationSeconds ?? 8),
     note: String(payload.note ?? `在${platform.name}中完成“${actionLabel}”。`),
     kind: 'action',
@@ -1106,11 +1112,26 @@ function handleBusinessFrameLoad() {
   activityText.value = '业务页面已恢复，请继续选择要绑定的目标元素。';
 }
 
+function clearSelectedStepPreview() {
+  selectedStepPreviewStyle.value = {};
+  captureFrameRef.value?.clearStepPreview();
+}
+
+function handleAuthoringWorkspacePointerDown() {
+  if (elementPicking.value) return;
+  clearSelectedStepPreview();
+}
+
+function handleBusinessFrameInteraction() {
+  if (elementPicking.value) return;
+  clearSelectedStepPreview();
+}
+
 async function selectRecordedStep(step: RecordedStep) {
   selectedStepId.value = step.id;
   panelTab.value = 'step';
   showConfigPanel.value = true;
-  selectedStepPreviewStyle.value = {};
+  clearSelectedStepPreview();
   if (!step.selector) return;
   if (!useEmbeddedBusinessSimulation.value) {
     captureFrameRef.value?.previewStep(
@@ -1817,7 +1838,12 @@ function numberValue(event: Event) {
 </script>
 
 <template>
-  <section v-if="lesson" ref="workspaceRef" class="authoring-workspace">
+  <section
+    v-if="lesson"
+    ref="workspaceRef"
+    class="authoring-workspace"
+    @pointerdown.capture="handleAuthoringWorkspacePointerDown"
+  >
     <main
       ref="businessLayerRef"
       class="business-layer"
@@ -1836,6 +1862,8 @@ function numberValue(event: Event) {
           :allowed-origins="authoringAllowedOrigins"
           :title="`${businessPlatform.name}${businessPlatformModule ? ` / ${businessPlatformModule.name}` : ''}业务界面`"
           @frame-load="handleBusinessFrameLoad"
+          @business-interaction="handleBusinessFrameInteraction"
+          @business-action="handleBusinessFrameInteraction"
           @element-picked="handleElementPicked"
           @element-pick-cancelled="handleElementPickCancelled"
         />

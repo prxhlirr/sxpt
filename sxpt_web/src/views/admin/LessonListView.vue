@@ -546,135 +546,171 @@ async function withdrawLesson(lesson: LessonPlan) {
       </div>
     </section>
 
-    <dialog ref="createDialog" class="native-dialog" @cancel="closeCreateDialog">
-      <form method="dialog" @submit.prevent="createLesson">
-        <div class="dialog-header">
+    <dialog
+      ref="createDialog"
+      class="native-dialog"
+      aria-labelledby="create-lesson-title"
+      @cancel="closeCreateDialog"
+    >
+      <form class="create-lesson-form" method="dialog" @submit.prevent="createLesson">
+        <div class="dialog-header create-lesson-header">
           <div>
             <span class="eyebrow">NEW LESSON</span>
-            <h2>新建教案</h2>
+            <h2 id="create-lesson-title">新建教案</h2>
+            <p>快速完成教案基础配置，创建后即可进入编排</p>
           </div>
           <button class="icon-button" type="button" aria-label="关闭" @click="closeCreateDialog">×</button>
         </div>
-        <div class="dialog-body">
+        <div class="dialog-body create-lesson-body">
           <div v-if="feedback && feedbackTone === 'danger'" class="notice danger">{{ feedback }}</div>
-          <div class="form-grid">
-            <label>
-              <span>教案编号 *</span>
-              <input v-model="createForm.code" required />
-            </label>
-            <fieldset class="wide generation-source-fieldset">
-              <legend>数据生成方式 *</legend>
-              <div class="generation-source-grid">
-                <label :class="['generation-source-card', { selected: createForm.generationSource === 'NORMAL' }]">
-                  <input v-model="createForm.generationSource" type="radio" value="NORMAL" />
-                  <span><strong>普通数据</strong><small>按模块造数模板生成练习数据</small></span>
-                </label>
-                <label :class="['generation-source-card', { selected: createForm.generationSource === 'CLASSIC_CASE' }]">
-                  <input v-model="createForm.generationSource" type="radio" value="CLASSIC_CASE" />
-                  <span><strong>经典案例</strong><small>锁定 OA 已推送的脱敏案例版本</small></span>
-                </label>
-              </div>
-            </fieldset>
-            <template v-if="createForm.generationSource === 'CLASSIC_CASE'">
+          <section class="create-lesson-section" aria-labelledby="create-basic-info">
+            <div class="create-section-heading">
+              <span id="create-basic-info" class="create-section-kicker">01 基本信息</span>
+              <p>填写便于检索与识别的教案资料</p>
+            </div>
+            <div class="form-grid">
+              <label>
+                <span>教案编号 *</span>
+                <input v-model="createForm.code" required />
+              </label>
+              <label>
+                <span>教案名称 *</span>
+                <input v-model="createForm.title" required placeholder="例如：采购申请与审批全流程" />
+              </label>
               <label class="wide">
-                <span>经典案例 *</span>
-                <select v-model="createForm.classicCaseId" :disabled="classicCaseLoading" required>
-                  <option value="" disabled>{{ classicCaseLoading ? '正在加载案例' : '请选择可用经典案例' }}</option>
-                  <option v-for="option in classicCaseChoices" :key="option.classicCaseId" :value="option.classicCaseId">
-                    {{ option.caseName }} · {{ option.caseCode }}
+                <span>教学简介</span>
+                <textarea v-model="createForm.description" rows="3" placeholder="简要说明教学目标与适用场景" />
+              </label>
+            </div>
+          </section>
+
+          <section class="create-lesson-section" aria-labelledby="create-business-context">
+            <div class="create-section-heading">
+              <span id="create-business-context" class="create-section-kicker">02 业务场景</span>
+              <p>选择录制和案例数据所归属的平台模块</p>
+            </div>
+            <div class="form-grid">
+              <label class="wide">
+                <span>业务平台 *</span>
+                <select v-model="createForm.businessPlatformId" required>
+                  <option value="" disabled>请选择录制时打开的业务平台</option>
+                  <option
+                    v-for="platform in enabledBusinessPlatforms"
+                    :key="platform.id"
+                    :value="platform.id"
+                  >
+                    {{ platform.name }} · {{ platform.baseUrl }}
                   </option>
                 </select>
-                <small v-if="classicCaseError" class="field-warning">{{ classicCaseError }}</small>
-                <small v-else-if="!classicCaseLoading && !classicCaseChoices.length" class="field-warning">
-                  当前平台模块暂无可用经典案例，请先由 OA 推送并审核案例。
+                <small v-if="!enabledBusinessPlatforms.length" class="field-warning">
+                  暂无已启用业务平台，请管理员先到“业务平台管理”中维护。
                 </small>
               </label>
-              <label>
-                <span>案例版本 *</span>
-                <select v-model="createForm.caseVersionId" :disabled="!createForm.classicCaseId" required>
-                  <option value="" disabled>请选择锁定版本</option>
-                  <option v-for="option in selectedClassicCaseVersions" :key="option.caseVersionId" :value="option.caseVersionId">
-                    V{{ option.versionNo }} · {{ option.caseVersionId }}
+              <label class="wide">
+                <span>平台模块 *</span>
+                <select
+                  v-model="createForm.businessPlatformModuleId"
+                  :disabled="!createForm.businessPlatformId"
+                  required
+                >
+                  <option value="" disabled>
+                    {{
+                      createForm.businessPlatformId
+                        ? '请选择录制时进入的平台模块'
+                        : '请先选择业务平台'
+                    }}
                   </option>
-                </select>
-              </label>
-              <label>
-                <span>生成模式 *</span>
-                <select v-model="createForm.generationMode" :disabled="!selectedClassicCaseOption" required>
                   <option
-                    v-for="mode in selectedClassicCaseOption?.supportedGenerationModes ?? []"
-                    :key="mode"
-                    :value="mode"
+                    v-for="businessModule in enabledBusinessPlatformModules"
+                    :key="businessModule.id"
+                    :value="businessModule.id"
                   >
-                    {{ mode === 'REPLAY_CASE' ? '复刻脱敏案例' : '按格式生成 Demo' }}
+                    {{ businessModule.name }} · {{ businessModule.path }}
                   </option>
                 </select>
+                <small
+                  v-if="
+                    createForm.businessPlatformId &&
+                    !enabledBusinessPlatformModules.length
+                  "
+                  class="field-warning"
+                >
+                  当前平台暂无已启用模块，请管理员先为该平台新增模块。
+                </small>
               </label>
-              <div v-if="selectedClassicCaseOption" class="wide classic-case-summary">
-                <strong>{{ selectedClassicCaseOption.caseName }}</strong>
-                <span>{{ selectedClassicCaseOption.summary || '暂无案例摘要' }}</span>
-                <small>保存后锁定版本 {{ selectedClassicCaseOption.caseVersionId }}；浏览器不会提交完整案例内容。</small>
-              </div>
-            </template>
-            <label class="wide">
-              <span>业务平台 *</span>
-              <select v-model="createForm.businessPlatformId" required>
-                <option value="" disabled>请选择录制时打开的业务平台</option>
-                <option
-                  v-for="platform in enabledBusinessPlatforms"
-                  :key="platform.id"
-                  :value="platform.id"
-                >
-                  {{ platform.name }} · {{ platform.baseUrl }}
-                </option>
-              </select>
-              <small v-if="!enabledBusinessPlatforms.length" class="field-warning">
-                暂无已启用业务平台，请管理员先到“业务平台管理”中维护。
-              </small>
-            </label>
-            <label class="wide">
-              <span>平台模块 *</span>
-              <select
-                v-model="createForm.businessPlatformModuleId"
-                :disabled="!createForm.businessPlatformId"
-                required
-              >
-                <option value="" disabled>
-                  {{
-                    createForm.businessPlatformId
-                      ? '请选择录制时进入的平台模块'
-                      : '请先选择业务平台'
-                  }}
-                </option>
-                <option
-                  v-for="businessModule in enabledBusinessPlatformModules"
-                  :key="businessModule.id"
-                  :value="businessModule.id"
-                >
-                  {{ businessModule.name }} · {{ businessModule.path }}
-                </option>
-              </select>
-              <small
-                v-if="
-                  createForm.businessPlatformId &&
-                  !enabledBusinessPlatformModules.length
-                "
-                class="field-warning"
-              >
-                当前平台暂无已启用模块，请管理员先为该平台新增模块。
-              </small>
-            </label>
-            <label class="wide">
-              <span>教案名称 *</span>
-              <input v-model="createForm.title" required placeholder="例如：采购申请与审批全流程" />
-            </label>
-            <label class="wide">
-              <span>教学简介</span>
-              <textarea v-model="createForm.description" rows="3" />
-            </label>
-          </div>
+            </div>
+          </section>
+
+          <section
+            :class="[
+              'create-lesson-section generation-section',
+              { 'has-classic-case': createForm.generationSource === 'CLASSIC_CASE' }
+            ]"
+            aria-labelledby="create-generation-source"
+          >
+            <div class="create-section-heading">
+              <span id="create-generation-source" class="create-section-kicker">03 数据生成方式</span>
+              <p>使用常规造数，或锁定 OA 推送的经典案例版本</p>
+            </div>
+            <div class="form-grid">
+              <fieldset class="wide generation-source-fieldset">
+                <legend class="sr-only">数据生成方式 *</legend>
+                <div class="generation-source-grid">
+                  <label :class="['generation-source-card', { selected: createForm.generationSource === 'NORMAL' }]">
+                    <input v-model="createForm.generationSource" type="radio" value="NORMAL"  style="width: auto;"/>
+                    <span><strong>普通数据</strong><small>按模块造数模板生成练习数据</small></span>
+                  </label>
+                  <label :class="['generation-source-card', { selected: createForm.generationSource === 'CLASSIC_CASE' }]">
+                    <input v-model="createForm.generationSource" type="radio" value="CLASSIC_CASE" style="width: auto;" />
+                    <span><strong>经典案例</strong><small>锁定 OA 已推送的脱敏案例版本</small></span>
+                  </label>
+                </div>
+              </fieldset>
+              <template v-if="createForm.generationSource === 'CLASSIC_CASE'">
+                <label class="wide classic-case-field">
+                  <span>经典案例 *</span>
+                  <select v-model="createForm.classicCaseId" :disabled="classicCaseLoading" required>
+                    <option value="" disabled>{{ classicCaseLoading ? '正在加载案例' : '请选择可用经典案例' }}</option>
+                    <option v-for="option in classicCaseChoices" :key="option.classicCaseId" :value="option.classicCaseId">
+                      {{ option.caseName }} · {{ option.caseCode }}
+                    </option>
+                  </select>
+                  <small v-if="classicCaseError" class="field-warning">{{ classicCaseError }}</small>
+                  <small v-else-if="!classicCaseLoading && !classicCaseChoices.length" class="field-warning">
+                    当前平台模块暂无可用经典案例，请先由 OA 推送并审核案例。
+                  </small>
+                </label>
+                <label>
+                  <span>案例版本 *</span>
+                  <select v-model="createForm.caseVersionId" :disabled="!createForm.classicCaseId" required>
+                    <option value="" disabled>请选择锁定版本</option>
+                    <option v-for="option in selectedClassicCaseVersions" :key="option.caseVersionId" :value="option.caseVersionId">
+                      V{{ option.versionNo }} · {{ option.caseVersionId }}
+                    </option>
+                  </select>
+                </label>
+                <label>
+                  <span>生成模式 *</span>
+                  <select v-model="createForm.generationMode" :disabled="!selectedClassicCaseOption" required>
+                    <option
+                      v-for="mode in selectedClassicCaseOption?.supportedGenerationModes ?? []"
+                      :key="mode"
+                      :value="mode"
+                    >
+                      {{ mode === 'REPLAY_CASE' ? '复刻脱敏案例' : '按格式生成 Demo' }}
+                    </option>
+                  </select>
+                </label>
+                <div v-if="selectedClassicCaseOption" class="wide classic-case-summary">
+                  <strong>{{ selectedClassicCaseOption.caseName }}</strong>
+                  <span>{{ selectedClassicCaseOption.summary || '暂无案例摘要' }}</span>
+                  <small>保存后锁定版本 {{ selectedClassicCaseOption.caseVersionId }}；浏览器不会提交完整案例内容。</small>
+                </div>
+              </template>
+            </div>
+          </section>
         </div>
-        <div class="dialog-footer">
+        <div class="dialog-footer create-lesson-footer">
           <button type="button" :disabled="creatingLesson" @click="closeCreateDialog">取消</button>
           <button class="primary" type="submit" :disabled="creatingLesson">
             {{ creatingLesson ? '正在保存...' : '创建并开始编排' }}
@@ -715,6 +751,110 @@ async function withdrawLesson(lesson: LessonPlan) {
   white-space: nowrap;
 }
 
+.create-lesson-form {
+  display: grid;
+  max-height: min(90vh, 860px);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.create-lesson-header {
+  align-items: flex-start;
+  padding: 22px 26px 18px;
+  background: linear-gradient(135deg, #ffffff 0%, #f6f7ff 100%);
+}
+
+.create-lesson-header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.create-lesson-header h2 {
+  font-size: 22px;
+}
+
+.create-lesson-header p,
+.create-section-heading p {
+  margin: 0;
+  color: #7d8798;
+}
+
+.create-lesson-header p {
+  font-size: 12px;
+}
+
+.create-lesson-body {
+  display: grid;
+  overflow-y: auto;
+  gap: 16px;
+  padding: 20px 24px 24px;
+  background: #f5f7fb;
+  scrollbar-gutter: stable;
+}
+
+.create-lesson-section {
+  display: grid;
+  gap: 16px;
+  border: 1px solid #e4e8f0;
+  border-radius: 14px;
+  padding: 18px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgb(31 42 68 / 5%);
+}
+
+.create-lesson-section.generation-section {
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.create-lesson-section.has-classic-case {
+  border-color: #cfc9ff;
+  box-shadow: 0 8px 24px rgb(92 75 196 / 10%);
+}
+
+.create-section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #eef1f6;
+  padding-bottom: 11px;
+}
+
+.create-section-kicker {
+  color: #2f3950;
+  font-size: 14px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.create-section-heading p {
+  font-size: 11px;
+  text-align: right;
+}
+
+.create-lesson-section .form-grid {
+  gap: 14px;
+}
+
+.create-lesson-section .wide {
+  grid-column: 1 / -1;
+}
+
+.create-lesson-footer {
+  padding: 16px 24px;
+  background: #fff;
+  box-shadow: 0 -8px 20px rgb(31 42 68 / 4%);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  margin: -1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
 .generation-source-fieldset {
   margin: 0;
   border: 0;
@@ -738,14 +878,18 @@ async function withdrawLesson(lesson: LessonPlan) {
   align-items: flex-start;
   gap: 10px;
   border: 1px solid #dfe4ec;
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px;
+  background: #fff;
   cursor: pointer;
+  transition: border-color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 }
 
 .generation-source-card.selected {
   border-color: #315efb;
   background: #f4f7ff;
+  box-shadow: 0 0 0 3px rgb(49 94 251 / 9%);
+  transform: translateY(-1px);
 }
 
 .generation-source-card span,
@@ -762,10 +906,10 @@ async function withdrawLesson(lesson: LessonPlan) {
 }
 
 .classic-case-summary {
-  border: 1px solid #e3e8f1;
-  border-radius: 10px;
-  background: #f8fafc;
-  padding: 12px;
+  border: 1px solid #d9d4ff;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8f7ff 0%, #f4f7ff 100%);
+  padding: 14px;
 }
 
 .lesson-name {
@@ -890,11 +1034,11 @@ async function withdrawLesson(lesson: LessonPlan) {
 }
 
 .native-dialog {
-  width: min(680px, calc(100vw - 28px));
-  max-height: 92vh;
-  overflow: auto;
+  width: min(820px, calc(100vw - 28px));
+  max-height: 90vh;
+  overflow: hidden;
   border: 0;
-  border-radius: 16px;
+  border-radius: 18px;
   padding: 0;
   color: var(--ink);
   box-shadow: 0 30px 80px rgb(15 19 40 / 28%);
@@ -926,6 +1070,40 @@ async function withdrawLesson(lesson: LessonPlan) {
 
   .search-field {
     grid-column: auto;
+  }
+
+  .native-dialog {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    border-radius: 14px;
+  }
+
+  .create-lesson-form {
+    max-height: calc(100dvh - 16px);
+  }
+
+  .create-lesson-header,
+  .create-lesson-body,
+  .create-lesson-footer {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .create-lesson-section {
+    padding: 15px;
+  }
+
+  .create-section-heading {
+    display: grid;
+    gap: 3px;
+  }
+
+  .create-section-heading p {
+    text-align: left;
+  }
+
+  .generation-source-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

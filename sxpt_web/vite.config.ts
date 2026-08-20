@@ -6,7 +6,9 @@ export default defineConfig({
   plugins: [vue()],
   optimizeDeps: {
     // 该依赖发布包内的 index.js.map 存在未闭合字符串，dev 预构建会被 esbuild 解析失败；跳过预构建后由浏览器按 ESM 加载。
-    exclude: ['@open-file-viewer/core']
+    exclude: ['@open-file-viewer/core'],
+    // open-file-viewer 的 ESM 包默认导入 jszip；单独预构建可避免浏览器把 jszip 的 UMD browser 入口当成原生 ESM 加载。
+    include: ['jszip']
   },
   resolve: {
     alias: {

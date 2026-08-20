@@ -14,6 +14,9 @@ public class CreateAuthoringLaunchRequest {
     @NotBlank
     private String businessModuleId;
 
+    /** NORMAL opens the configured module entry; CLASSIC_CASE opens the created case detail. */
+    private String generationSource;
+
     public String getLessonId() {
         return lessonId;
     }
@@ -36,5 +39,13 @@ public class CreateAuthoringLaunchRequest {
 
     public void setBusinessModuleId(String businessModuleId) {
         this.businessModuleId = businessModuleId;
+    }
+
+    public String getGenerationSource() {
+        return generationSource;
+    }
+
+    public void setGenerationSource(String generationSource) {
+        this.generationSource = generationSource;
     }
 }

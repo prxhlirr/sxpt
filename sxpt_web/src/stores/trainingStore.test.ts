@@ -295,7 +295,6 @@ describe('lesson authoring', () => {
     const lesson = editableLesson(store);
     const first = store.addStage(lesson.id, recordedStage('handler', 40, '经办'));
     const second = store.addStage(lesson.id, recordedStage('reviewer', 40, '审核'));
-
     store.updateStage(lesson.id, second.id, { description: '审核提交内容' });
     store.moveStage(lesson.id, second.id, 'up');
     expect(store.getLesson(lesson.id)?.stages.map((stage) => stage.id)).toEqual([
@@ -911,6 +910,24 @@ describe('published exam business chain', () => {
     const lesson = editableLesson(store);
     const first = store.addStage(lesson.id, recordedStage('handler', 40, '经办'));
     const second = store.addStage(lesson.id, recordedStage('reviewer', 40, '审核'));
+    // 历史教案可能在不同教学点内复用了相同节点 ID；完成判定必须同时包含教学点 ID。
+    second.recordedSteps[0].id = first.recordedSteps[0].id;
+    first.recordedSteps.push(
+      {
+        ...first.recordedSteps[0],
+        id: 'record-handler-confirm',
+        title: '确认收文',
+        selector: '[data-action="confirm"]',
+        required: true
+      },
+      {
+        ...first.recordedSteps[0],
+        id: 'record-handler-help',
+        title: '查看帮助',
+        selector: '[data-action="help"]',
+        required: false
+      }
+    );
     const taskId = 'student-practice-legacy-role';
     store.state.publishedTasks.push({
       id: 'published-practice',
@@ -958,6 +975,46 @@ describe('published exam business chain', () => {
         completedAt: '2026-07-25T08:10:00.000Z'
       }
     );
+    expect(store.state.studentTasks.at(-1)?.completedStageIds).toEqual([]);
+    await expect(
+      store.recordStudentPracticeStepRemote(
+        taskId,
+        first.id,
+        'record-handler-help',
+        {
+          actionType: 'click',
+          selector: '[data-action="help"]',
+          completedAt: '2026-07-25T08:11:00.000Z'
+        }
+      )
+    ).rejects.toThrow('未找到必做的练习操作点');
+    expect(store.state.studentTasks.at(-1)?.completedStageIds).toEqual([]);
+    expect(
+      store.state.studentTasks.at(-1)?.practiceStepResults?.some(
+        (result) => result.stepId === 'record-handler-help'
+      )
+    ).toBe(false);
+    await store.recordStudentPracticeStepRemote(
+      taskId,
+      first.id,
+      'record-handler-confirm',
+      {
+        actionType: 'click',
+        selector: '[data-action="confirm"]',
+        evidenceScreenshot: {
+          dataUrl: 'data:image/jpeg;base64,student-evidence',
+          mimeType: 'image/jpeg',
+          width: 1280,
+          height: 720,
+          capturedAt: '2026-07-25T08:12:00.000Z'
+        },
+        completedAt: '2026-07-25T08:12:00.000Z'
+      }
+    );
+    expect(store.state.studentTasks.at(-1)?.completedStageIds).toEqual([
+      first.id
+    ]);
+    expect(store.state.studentTasks.at(-1)?.status).toBe('DOING');
     await store.recordStudentPracticeStepRemote(
       taskId,
       second.id,
@@ -973,6 +1030,16 @@ describe('published exam business chain', () => {
       first.id,
       second.id
     ]);
+    expect(
+      store.state.studentTasks.at(-1)?.practiceStepResults?.filter(
+        (result) => result.stepId === first.recordedSteps[0].id
+      )
+    ).toHaveLength(2);
+    expect(
+      store.state.studentTasks.at(-1)?.practiceStepResults?.find(
+        (result) => result.stepId === 'record-handler-confirm'
+      )?.evidenceScreenshot
+    ).toMatchObject({ width: 1280, height: 720 });
     expect(store.submitStudentTask(taskId)).toMatchObject({
       status: 'SUBMITTED',
       objectiveScore: 80
