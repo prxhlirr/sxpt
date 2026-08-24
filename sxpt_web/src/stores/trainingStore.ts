@@ -1394,9 +1394,9 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
     stageId: string,
     stepId: string
   ): Promise<RecordedStep> {
-    const lesson = requireLesson(lessonId);
-    const stage = requireStage(lesson, stageId);
-    const step = stage.recordedSteps.find(
+    let lesson = requireLesson(lessonId);
+    let stage = requireStage(lesson, stageId);
+    let step = stage.recordedSteps.find(
       (candidate) => candidate.id === stepId
     );
     if (!step) throw new Error(`未找到录制步骤：${stepId}`);
@@ -1406,6 +1406,18 @@ export function createTrainingStore(options: TrainingStoreOptions = {}) {
       return step;
     }
     if (step.remoteDraftId && step.syncStatus === 'SYNCED') return step;
+
+    if (!lesson.captureSessionId || lesson.captureSessionFinished) {
+      const platform = requireBusinessPlatform(lesson.businessPlatformId);
+      await startCaptureSessionRemote(
+        lessonId,
+        resolveLessonCaptureStartUrl(lesson, platform)
+      );
+      lesson = requireLesson(lessonId);
+      stage = requireStage(lesson, stageId);
+      step = stage.recordedSteps.find((candidate) => candidate.id === stepId);
+      if (!step) throw new Error(`未找到录制步骤：${stepId}`);
+    }
 
     step.syncStatus = 'SYNCING';
     delete step.syncError;

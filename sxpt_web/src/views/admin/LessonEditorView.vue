@@ -1277,26 +1277,6 @@ function addAuthoringStage() {
   addStage();
 }
 
-function saveAuthoringChanges() {
-  showAuthoringMoreMenu.value = false;
-  if (configurationLocked.value) {
-    showFeedback('当前教案已发布任务，不能继续修改。', 'danger');
-    return;
-  }
-  if (panelTab.value === 'stage' && stageForm.value) {
-    saveStage();
-    return;
-  }
-  if (selectedStep.value && lesson.value && selectedStage.value) {
-    if (store.remote.enabled) {
-      queueStepSync(selectedStage.value.id, selectedStep.value.id);
-    }
-    showFeedback(`节点“${selectedStep.value.title}”已保存。`);
-    return;
-  }
-  showFeedback('当前教案改动已保存。');
-}
-
 function cyclePickerToolbarPosition() {
   const positions: PickerToolbarPosition[] = [
     'top-right',
@@ -2150,15 +2130,13 @@ function numberValue(event: Event) {
         </div>
 
         <div class="authoring-rail-stack authoring-rail-bottom">
-          <button
+          <RouterLink
             class="authoring-rail-action"
-            type="button"
-            :disabled="configurationLocked"
-            @click="saveAuthoringChanges"
+            :to="{ name: 'lesson-list' }"
           >
-            <span class="authoring-rail-icon" aria-hidden="true">✓</span>
-            <span>保存</span>
-          </button>
+            <span class="authoring-rail-icon" aria-hidden="true">←</span>
+            <span>返回教案列表</span>
+          </RouterLink>
           <button class="authoring-rail-action publish" type="button" @click="openPublishModal">
             <span class="authoring-rail-icon" aria-hidden="true">↑</span>
             <span>发布</span>
@@ -2305,9 +2283,6 @@ function numberValue(event: Event) {
           type="button"
           @click="pauseRecording(); showAuthoringMoreMenu = false"
         ><span>Ⅱ</span><span><strong>暂停录制</strong><small>保留当前进度，稍后继续选取</small></span></button>
-        <RouterLink :to="{ name: 'lesson-list' }">
-          <span>←</span><span><strong>返回教案列表</strong><small>离开当前教案编排页面</small></span>
-        </RouterLink>
       </section>
     </aside>
 

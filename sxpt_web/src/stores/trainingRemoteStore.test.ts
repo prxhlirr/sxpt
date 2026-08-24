@@ -82,7 +82,7 @@ describe('训练 Store 后端同步', () => {
     );
   });
 
-  it('同步平台 ID 后保持教案关联，并完成采集会话与节点上报', async () => {
+  it('同步平台 ID 后保持教案关联，同步节点时自动补建采集会话', async () => {
     const seed = createMockTrainingState();
     const sourceLesson = seed.lessons[0];
     const sourcePlatform = seed.businessPlatforms.find(
@@ -126,18 +126,14 @@ describe('训练 Store 后端同步', () => {
     const lesson = store.getLesson(sourceLesson.id)!;
     expect(lesson.businessPlatformId).toBe('platform-server-1');
 
-    await store.startCaptureSessionRemote(
-      lesson.id,
-      'https://business.example.com/approval'
-    );
-    expect(lesson.captureSessionId).toBe('capture-server-1');
-
     const stage = lesson.stages.find(
       (candidate) => candidate.recordedSteps.length > 0
     )!;
     const step = stage.recordedSteps[0];
     await store.syncRecordedStep(lesson.id, stage.id, step.id);
 
+    expect(backend.startCaptureSession).toHaveBeenCalledOnce();
+    expect(lesson.captureSessionId).toBe('capture-server-1');
     expect(reportRecordedStep).toHaveBeenCalledOnce();
     expect(step).toMatchObject({
       syncStatus: 'SYNCED',

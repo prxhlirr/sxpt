@@ -99,6 +99,15 @@ describe('后台教案编排页面', () => {
     expect(editor).toContain('.config-content input:focus');
   });
 
+  it('编排菜单直接提供返回入口并移除保存按钮', () => {
+    const editor = source('src/views/admin/LessonEditorView.vue');
+
+    expect(editor).toContain('<span>返回教案列表</span>');
+    expect(editor).toContain(":to=\"{ name: 'lesson-list' }\"");
+    expect(editor).not.toContain('@click="saveAuthoringChanges"');
+    expect(editor).not.toContain('<span>保存</span>');
+  });
+
   it('发布中心可直接进入教师讲解并返回发布中心', () => {
     const publishCenter = source('src/views/admin/PublishCenterView.vue');
     const preview = source('src/views/admin/RecordingPreviewView.vue');
