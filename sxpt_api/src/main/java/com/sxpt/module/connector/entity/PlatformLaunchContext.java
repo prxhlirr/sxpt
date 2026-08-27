@@ -37,6 +37,14 @@ public class PlatformLaunchContext {
 
     private String executionId;
 
+    private String captureSessionId;
+
+    private String practiceAttemptId;
+
+    private String examAttemptId;
+
+    private String questionAttemptId;
+
     private String dataInstanceId;
 
     private String sceneType;
@@ -44,6 +52,10 @@ public class PlatformLaunchContext {
     private String sdkMode;
 
     private String targetUrl;
+
+    private String launchEntryType;
+
+    private String originHomeUrl;
 
     private Long segmentNo;
 
@@ -157,6 +169,38 @@ public class PlatformLaunchContext {
         this.executionId = executionId;
     }
 
+    public String getCaptureSessionId() {
+        return captureSessionId;
+    }
+
+    public void setCaptureSessionId(String captureSessionId) {
+        this.captureSessionId = captureSessionId;
+    }
+
+    public String getPracticeAttemptId() {
+        return practiceAttemptId;
+    }
+
+    public void setPracticeAttemptId(String practiceAttemptId) {
+        this.practiceAttemptId = practiceAttemptId;
+    }
+
+    public String getExamAttemptId() {
+        return examAttemptId;
+    }
+
+    public void setExamAttemptId(String examAttemptId) {
+        this.examAttemptId = examAttemptId;
+    }
+
+    public String getQuestionAttemptId() {
+        return questionAttemptId;
+    }
+
+    public void setQuestionAttemptId(String questionAttemptId) {
+        this.questionAttemptId = questionAttemptId;
+    }
+
     public String getDataInstanceId() {
         return dataInstanceId;
     }
@@ -187,6 +231,22 @@ public class PlatformLaunchContext {
 
     public void setTargetUrl(String targetUrl) {
         this.targetUrl = targetUrl;
+    }
+
+    public String getLaunchEntryType() {
+        return launchEntryType;
+    }
+
+    public void setLaunchEntryType(String launchEntryType) {
+        this.launchEntryType = launchEntryType;
+    }
+
+    public String getOriginHomeUrl() {
+        return originHomeUrl;
+    }
+
+    public void setOriginHomeUrl(String originHomeUrl) {
+        this.originHomeUrl = originHomeUrl;
     }
 
     public Long getSegmentNo() {

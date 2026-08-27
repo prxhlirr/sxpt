@@ -36,6 +36,14 @@ public class ExecutionTrace {
 
     private String resourceId;
 
+    private String dataSessionId;
+
+    private String dataInstanceId;
+
+    private String businessSceneCode;
+
+    private String externalBusinessId;
+
     private String traceType;
 
     private LocalDateTime traceTime;
@@ -138,6 +146,38 @@ public class ExecutionTrace {
 
     public void setResourceId(String resourceId) {
         this.resourceId = resourceId;
+    }
+
+    public String getDataSessionId() {
+        return dataSessionId;
+    }
+
+    public void setDataSessionId(String dataSessionId) {
+        this.dataSessionId = dataSessionId;
+    }
+
+    public String getDataInstanceId() {
+        return dataInstanceId;
+    }
+
+    public void setDataInstanceId(String dataInstanceId) {
+        this.dataInstanceId = dataInstanceId;
+    }
+
+    public String getBusinessSceneCode() {
+        return businessSceneCode;
+    }
+
+    public void setBusinessSceneCode(String businessSceneCode) {
+        this.businessSceneCode = businessSceneCode;
+    }
+
+    public String getExternalBusinessId() {
+        return externalBusinessId;
+    }
+
+    public void setExternalBusinessId(String externalBusinessId) {
+        this.externalBusinessId = externalBusinessId;
     }
 
     public String getTraceType() {

@@ -43,6 +43,14 @@ public class CaptureEventVO {
 
     private String inputValueMasked;
 
+    private String dataSessionId;
+
+    private String dataInstanceId;
+
+    private String businessSceneCode;
+
+    private String externalBusinessId;
+
     private String archiveStatus;
 
     private String status;
@@ -159,6 +167,38 @@ public class CaptureEventVO {
 
     public void setInputValueMasked(String inputValueMasked) {
         this.inputValueMasked = inputValueMasked;
+    }
+
+    public String getDataSessionId() {
+        return dataSessionId;
+    }
+
+    public void setDataSessionId(String dataSessionId) {
+        this.dataSessionId = dataSessionId;
+    }
+
+    public String getDataInstanceId() {
+        return dataInstanceId;
+    }
+
+    public void setDataInstanceId(String dataInstanceId) {
+        this.dataInstanceId = dataInstanceId;
+    }
+
+    public String getBusinessSceneCode() {
+        return businessSceneCode;
+    }
+
+    public void setBusinessSceneCode(String businessSceneCode) {
+        this.businessSceneCode = businessSceneCode;
+    }
+
+    public String getExternalBusinessId() {
+        return externalBusinessId;
+    }
+
+    public void setExternalBusinessId(String externalBusinessId) {
+        this.externalBusinessId = externalBusinessId;
     }
 
     public String getArchiveStatus() {

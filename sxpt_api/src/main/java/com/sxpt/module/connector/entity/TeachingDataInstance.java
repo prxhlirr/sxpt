@@ -78,6 +78,20 @@ public class TeachingDataInstance {
 
     private String targetUrl;
 
+    private String generationSource;
+
+    private String businessSceneCode;
+
+    private String businessSceneName;
+
+    private String sourceDataSessionId;
+
+    private String sourceExternalBusinessId;
+
+    private String dataSpecSnapshotJson;
+
+    private String entryUrl;
+
     private String requirementSnapshotJson;
 
     private String validationStatus;
@@ -342,6 +356,62 @@ public class TeachingDataInstance {
 
     public void setTargetUrl(String targetUrl) {
         this.targetUrl = targetUrl;
+    }
+
+    public String getGenerationSource() {
+        return generationSource;
+    }
+
+    public void setGenerationSource(String generationSource) {
+        this.generationSource = generationSource;
+    }
+
+    public String getBusinessSceneCode() {
+        return businessSceneCode;
+    }
+
+    public void setBusinessSceneCode(String businessSceneCode) {
+        this.businessSceneCode = businessSceneCode;
+    }
+
+    public String getBusinessSceneName() {
+        return businessSceneName;
+    }
+
+    public void setBusinessSceneName(String businessSceneName) {
+        this.businessSceneName = businessSceneName;
+    }
+
+    public String getSourceDataSessionId() {
+        return sourceDataSessionId;
+    }
+
+    public void setSourceDataSessionId(String sourceDataSessionId) {
+        this.sourceDataSessionId = sourceDataSessionId;
+    }
+
+    public String getSourceExternalBusinessId() {
+        return sourceExternalBusinessId;
+    }
+
+    public void setSourceExternalBusinessId(String sourceExternalBusinessId) {
+        this.sourceExternalBusinessId = sourceExternalBusinessId;
+    }
+
+    public String getDataSpecSnapshotJson() {
+        return dataSpecSnapshotJson;
+    }
+
+    public void setDataSpecSnapshotJson(String dataSpecSnapshotJson) {
+        this.dataSpecSnapshotJson = dataSpecSnapshotJson;
+    }
+
+    public String getEntryUrl() {
+        return entryUrl;
+    }
+
+    public void setEntryUrl(String entryUrl) {
+        this.entryUrl = entryUrl;
     }
 
     public String getRequirementSnapshotJson() {

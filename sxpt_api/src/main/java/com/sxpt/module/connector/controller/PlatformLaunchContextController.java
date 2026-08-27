@@ -7,9 +7,11 @@ import com.sxpt.module.connector.dto.MarkPlatformLaunchFailedRequest;
 import com.sxpt.module.connector.dto.MarkPlatformLaunchUsedRequest;
 import com.sxpt.module.connector.dto.VerifyPlatformLaunchTokenRequest;
 import com.sxpt.module.connector.entity.PlatformLaunchContext;
+import com.sxpt.module.connector.service.OriginBusinessSceneService;
 import com.sxpt.module.connector.service.PlatformLaunchContextService;
 import com.sxpt.module.connector.vo.PlatformLaunchContextVO;
 import com.sxpt.module.connector.vo.VerifiedPlatformLaunchContextVO;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -39,8 +41,12 @@ public class PlatformLaunchContextController {
 
     private final PlatformLaunchContextService platformLaunchContextService;
 
-    public PlatformLaunchContextController(PlatformLaunchContextService platformLaunchContextService) {
+    private final ObjectProvider<OriginBusinessSceneService> originBusinessSceneServiceProvider;
+
+    public PlatformLaunchContextController(PlatformLaunchContextService platformLaunchContextService,
+                                           ObjectProvider<OriginBusinessSceneService> originBusinessSceneServiceProvider) {
         this.platformLaunchContextService = platformLaunchContextService;
+        this.originBusinessSceneServiceProvider = originBusinessSceneServiceProvider;
     }
 
     /**
@@ -145,9 +151,15 @@ public class PlatformLaunchContextController {
         vo.setTaskId(launchContext.getTaskId());
         vo.setTeachingPointId(launchContext.getTeachingPointId());
         vo.setExecutionId(launchContext.getExecutionId());
+        vo.setCaptureSessionId(launchContext.getCaptureSessionId());
+        vo.setPracticeAttemptId(launchContext.getPracticeAttemptId());
+        vo.setExamAttemptId(launchContext.getExamAttemptId());
+        vo.setQuestionAttemptId(launchContext.getQuestionAttemptId());
         vo.setSceneType(launchContext.getSceneType());
         vo.setSdkMode(launchContext.getSdkMode());
         vo.setTargetUrl(launchContext.getTargetUrl());
+        vo.setLaunchEntryType(launchContext.getLaunchEntryType());
+        vo.setOriginHomeUrl(launchContext.getOriginHomeUrl());
         vo.setLaunchStatus(launchContext.getLaunchStatus());
         vo.setExpireTime(launchContext.getExpireTime());
         vo.setCreateTime(launchContext.getCreateTime());
@@ -169,10 +181,16 @@ public class PlatformLaunchContextController {
         vo.setTaskId(launchContext.getTaskId());
         vo.setTeachingPointId(launchContext.getTeachingPointId());
         vo.setExecutionId(launchContext.getExecutionId());
+        vo.setCaptureSessionId(launchContext.getCaptureSessionId());
+        vo.setPracticeAttemptId(launchContext.getPracticeAttemptId());
+        vo.setExamAttemptId(launchContext.getExamAttemptId());
+        vo.setQuestionAttemptId(launchContext.getQuestionAttemptId());
         vo.setDataInstanceId(launchContext.getDataInstanceId());
         vo.setSceneType(launchContext.getSceneType());
         vo.setSdkMode(launchContext.getSdkMode());
         vo.setTargetUrl(launchContext.getTargetUrl());
+        vo.setLaunchEntryType(launchContext.getLaunchEntryType());
+        vo.setOriginHomeUrl(launchContext.getOriginHomeUrl());
         vo.setSegmentNo(launchContext.getSegmentNo());
         vo.setActorType(launchContext.getActorType());
         vo.setRequiredExternalOrgId(launchContext.getRequiredExternalOrgId());
@@ -187,6 +205,10 @@ public class PlatformLaunchContextController {
         vo.setLaunchStatus(launchContext.getLaunchStatus());
         vo.setVerifiedTime(launchContext.getVerifiedTime());
         vo.setExpireTime(launchContext.getExpireTime());
+        OriginBusinessSceneService sceneService = originBusinessSceneServiceProvider.getIfAvailable();
+        if (sceneService != null) {
+            vo.setBusinessScenes(sceneService.listScenesForLaunch(launchContext));
+        }
         return vo;
     }
 

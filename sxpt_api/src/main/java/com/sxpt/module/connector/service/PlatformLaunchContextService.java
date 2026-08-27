@@ -25,6 +25,23 @@ public interface PlatformLaunchContextService {
     CreatedLaunchContext createLaunchContext(PlatformLaunchContext launchContext);
 
     /**
+     * 创建进入原平台首页的启动上下文并返回本次明文 launchToken。
+     *
+     * 业务功能：
+     * 1. 支撑 v2 方案中“教学平台只进入原平台首页”的新链路。
+     * 2. 不要求启动前已经存在 TeachingDataInstance，避免教学平台继续维护原平台模块路径和造数结果。
+     *
+     * 关键流程：
+     * 1. 调用方提交用户、原平台、场景、SDK 模式和原平台首页地址。
+     * 2. Service 生成明文 token、保存 token hash，并把 targetUrl 固定为原平台首页。
+     * 3. 原平台后续通过 verify 获取教学上下文，再在用户点击页面时复制或生成业务数据。
+     *
+     * @param launchContext 平台首页启动上下文，必须包含租户、用户、原平台、场景、SDK 模式和原平台首页地址。
+     * @return 已保存上下文与本次明文 launchToken。
+     */
+    CreatedLaunchContext createPlatformHomeLaunchContext(PlatformLaunchContext launchContext);
+
+    /**
      * 校验原平台提交的明文 launchToken 并返回启动上下文。
      *
      * @param tenantId 租户 ID，用于隔离不同租户下的 token。
@@ -32,6 +49,24 @@ public interface PlatformLaunchContextService {
      * @return 已校验的启动上下文。
      */
     PlatformLaunchContext verifyLaunchToken(String tenantId, String launchToken);
+
+    /**
+     * 解析原平台提交的明文 launchToken，但不推进启动上下文状态。
+     *
+     * 业务功能：
+     * 1. 支撑原平台在已建立 teachingSession 后继续使用 launchToken 注册 DataSession。
+     * 2. 避免 DataSession 注册重复调用 verify 导致 CREATED 之外的状态被拒绝。
+     *
+     * 关键流程：
+     * 1. 根据租户和 token hash 定位启动上下文。
+     * 2. 校验未删除、未过期、未失败。
+     * 3. 返回启动上下文，不更新 verifiedTime、verifyRequestId 和 launchStatus。
+     *
+     * @param tenantId 租户 ID。
+     * @param launchToken 明文 launchToken。
+     * @return 可用于运行时注册的启动上下文。
+     */
+    PlatformLaunchContext resolveLaunchToken(String tenantId, String launchToken);
 
     /**
      * 标记原平台已完成 session 建立。

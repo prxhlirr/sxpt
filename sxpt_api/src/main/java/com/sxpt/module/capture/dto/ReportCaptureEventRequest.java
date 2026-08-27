@@ -63,6 +63,18 @@ public class ReportCaptureEventRequest {
     @Size(max = 32768, message = "事件摘要 JSON 长度不能超过 32768")
     private String eventPayloadJson;
 
+    @Size(max = 64, message = "数据会话 ID 长度不能超过 64")
+    private String dataSessionId;
+
+    @Size(max = 64, message = "教学数据实例 ID 长度不能超过 64")
+    private String dataInstanceId;
+
+    @Size(max = 128, message = "业务场景编码长度不能超过 128")
+    private String businessSceneCode;
+
+    @Size(max = 128, message = "原平台业务数据 ID 长度不能超过 128")
+    private String externalBusinessId;
+
     public String getTenantId() {
         return tenantId;
     }
@@ -173,5 +185,37 @@ public class ReportCaptureEventRequest {
 
     public void setEventPayloadJson(String eventPayloadJson) {
         this.eventPayloadJson = eventPayloadJson;
+    }
+
+    public String getDataSessionId() {
+        return dataSessionId;
+    }
+
+    public void setDataSessionId(String dataSessionId) {
+        this.dataSessionId = dataSessionId;
+    }
+
+    public String getDataInstanceId() {
+        return dataInstanceId;
+    }
+
+    public void setDataInstanceId(String dataInstanceId) {
+        this.dataInstanceId = dataInstanceId;
+    }
+
+    public String getBusinessSceneCode() {
+        return businessSceneCode;
+    }
+
+    public void setBusinessSceneCode(String businessSceneCode) {
+        this.businessSceneCode = businessSceneCode;
+    }
+
+    public String getExternalBusinessId() {
+        return externalBusinessId;
+    }
+
+    public void setExternalBusinessId(String externalBusinessId) {
+        this.externalBusinessId = externalBusinessId;
     }
 }

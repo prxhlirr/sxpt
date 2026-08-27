@@ -47,6 +47,10 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
 
     private static final String VERIFY_REQUEST_PREFIX = "verify_";
 
+    private static final String LAUNCH_ENTRY_TYPE_PLATFORM_HOME = "PLATFORM_HOME";
+
+    private static final String LAUNCH_ENTRY_TYPE_MODULE_ENTRY = "MODULE_ENTRY";
+
     private final PlatformLaunchContextMapper platformLaunchContextMapper;
 
     private final TeachingDataInstanceMapper teachingDataInstanceMapper;
@@ -78,6 +82,26 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     }
 
     /**
+     * 创建进入原平台首页的启动上下文。
+     *
+     * @param launchContext 平台首页启动上下文，必须包含原平台首页地址，不要求预先绑定数据实例。
+     * @return 已保存上下文与本次明文 launchToken。
+     */
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public CreatedLaunchContext createPlatformHomeLaunchContext(PlatformLaunchContext launchContext) {
+        validatePlatformHomeCreateFields(launchContext);
+        launchContext.setLaunchEntryType(LAUNCH_ENTRY_TYPE_PLATFORM_HOME);
+        launchContext.setTargetUrl(launchContext.getOriginHomeUrl());
+        launchContext.setSdkConfigSnapshotJson(buildSdkConfigSnapshot(launchContext));
+        String launchToken = generateLaunchToken();
+        launchContext.setLaunchTokenHash(hashToken(launchToken));
+        fillCreateDefaults(launchContext);
+        platformLaunchContextMapper.insert(launchContext);
+        return new CreatedLaunchContext(launchContext, launchToken);
+    }
+
+    /**
      * 校验原平台提交的明文 launchToken 并返回启动上下文。
      *
      * @param tenantId 租户 ID，用于隔离不同租户下的 token。
@@ -89,13 +113,7 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     public PlatformLaunchContext verifyLaunchToken(String tenantId, String launchToken) {
         requireText(tenantId);
         requireText(launchToken);
-        PlatformLaunchContext launchContext = platformLaunchContextMapper.selectOne(new QueryWrapper<PlatformLaunchContext>()
-                .eq("tenant_id", tenantId)
-                .eq("launch_token_hash", hashToken(launchToken))
-                .eq("deleted", Boolean.FALSE));
-        if (launchContext == null) {
-            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
-        }
+        PlatformLaunchContext launchContext = getLaunchContextByToken(tenantId, launchToken);
         ensureLaunchContextCanBeVerified(launchContext);
         validateLaunchDataInstance(launchContext);
         LocalDateTime now = LocalDateTime.now();
@@ -105,6 +123,22 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
         launchContext.setVerifyRequestId(generateVerifyRequestId());
         launchContext.setUpdateTime(now);
         platformLaunchContextMapper.updateById(launchContext);
+        return launchContext;
+    }
+
+    /**
+     * 解析明文 launchToken，但不推进启动上下文状态。
+     *
+     * @param tenantId 租户 ID。
+     * @param launchToken 原平台提交的明文 launchToken。
+     * @return 可用于运行时注册的启动上下文。
+     */
+    @Override
+    public PlatformLaunchContext resolveLaunchToken(String tenantId, String launchToken) {
+        requireText(tenantId);
+        requireText(launchToken);
+        PlatformLaunchContext launchContext = getLaunchContextByToken(tenantId, launchToken);
+        ensureLaunchContextCanBeResolved(launchContext);
         return launchContext;
     }
 
@@ -166,6 +200,29 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
         requireText(launchContext.getSceneType());
         requireText(launchContext.getSdkMode());
         requireText(launchContext.getTargetUrl());
+        if (!StringUtils.hasText(launchContext.getLaunchEntryType())) {
+            launchContext.setLaunchEntryType(LAUNCH_ENTRY_TYPE_MODULE_ENTRY);
+        }
+    }
+
+    /**
+     * 校验平台首页启动上下文所需的最小字段。
+     * <p>
+     * 新链路的数据是在原平台页面点击后才复制或生成，因此这里不能要求 dataInstanceId。
+     *
+     * @param launchContext 原平台首页启动上下文实体。
+     */
+    private void validatePlatformHomeCreateFields(PlatformLaunchContext launchContext) {
+        if (launchContext == null) {
+            throw new BusinessException(ApiResultCode.PARAM_ERROR);
+        }
+        requireText(launchContext.getId());
+        requireText(launchContext.getTenantId());
+        requireText(launchContext.getUserId());
+        requireText(launchContext.getConnectorSystemId());
+        requireText(launchContext.getSceneType());
+        requireText(launchContext.getSdkMode());
+        requireText(launchContext.getOriginHomeUrl());
     }
 
     /**
@@ -174,6 +231,9 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
      * @param launchContext 原平台启动上下文实体。
      */
     private void validateLaunchDataInstance(PlatformLaunchContext launchContext) {
+        if (isPlatformHomeLaunch(launchContext)) {
+            return;
+        }
         TeachingDataInstance instance = teachingDataInstanceMapper.selectById(launchContext.getDataInstanceId());
         if (instance == null || Boolean.TRUE.equals(instance.getDeleted())) {
             throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
@@ -231,6 +291,17 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     private boolean isLaunchableInstanceStatus(String instanceStatus) {
         return DataInstanceStatus.READY.getValue().equals(instanceStatus)
                 || DataInstanceStatus.ALLOCATED.getValue().equals(instanceStatus);
+    }
+
+    /**
+     * 判断启动上下文是否属于进入原平台首页的新模式。
+     *
+     * @param launchContext 原平台启动上下文实体。
+     * @return true 表示该上下文不应在启动阶段绑定数据实例。
+     */
+    private boolean isPlatformHomeLaunch(PlatformLaunchContext launchContext) {
+        return launchContext != null
+                && LAUNCH_ENTRY_TYPE_PLATFORM_HOME.equals(launchContext.getLaunchEntryType());
     }
 
     /**
@@ -307,6 +378,43 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
     }
 
     /**
+     * 按明文 token 查询未删除启动上下文。
+     *
+     * @param tenantId 租户 ID。
+     * @param launchToken 明文 launchToken。
+     * @return 启动上下文。
+     */
+    private PlatformLaunchContext getLaunchContextByToken(String tenantId, String launchToken) {
+        PlatformLaunchContext launchContext = platformLaunchContextMapper.selectOne(new QueryWrapper<PlatformLaunchContext>()
+                .eq("tenant_id", tenantId)
+                .eq("launch_token_hash", hashToken(launchToken))
+                .eq("deleted", Boolean.FALSE));
+        if (launchContext == null) {
+            throw new BusinessException(ApiResultCode.DATA_NOT_FOUND);
+        }
+        return launchContext;
+    }
+
+    /**
+     * 校验启动上下文是否可用于运行时注册。
+     *
+     * @param launchContext 原平台启动上下文实体。
+     */
+    private void ensureLaunchContextCanBeResolved(PlatformLaunchContext launchContext) {
+        LocalDateTime now = LocalDateTime.now();
+        if (launchContext.getExpireTime() == null || !launchContext.getExpireTime().isAfter(now)) {
+            launchContext.setLaunchStatus(LaunchStatus.EXPIRED.getValue());
+            launchContext.setUpdateTime(now);
+            platformLaunchContextMapper.updateById(launchContext);
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+        if (LaunchStatus.FAILED.getValue().equals(launchContext.getLaunchStatus())
+                || LaunchStatus.EXPIRED.getValue().equals(launchContext.getLaunchStatus())) {
+            throw new BusinessException(ApiResultCode.STATE_NOT_ALLOWED);
+        }
+    }
+
+    /**
      * 生成高熵短 token。
      *
      * @return URL 安全的明文 launchToken。
@@ -346,8 +454,13 @@ public class PlatformLaunchContextServiceImpl implements PlatformLaunchContextSe
                 + "\"sceneType\":" + jsonValue(launchContext.getSceneType()) + ","
                 + "\"taskId\":" + jsonValue(launchContext.getTaskId()) + ","
                 + "\"executionId\":" + jsonValue(launchContext.getExecutionId()) + ","
+                + "\"captureSessionId\":" + jsonValue(launchContext.getCaptureSessionId()) + ","
+                + "\"practiceAttemptId\":" + jsonValue(launchContext.getPracticeAttemptId()) + ","
+                + "\"examAttemptId\":" + jsonValue(launchContext.getExamAttemptId()) + ","
+                + "\"questionAttemptId\":" + jsonValue(launchContext.getQuestionAttemptId()) + ","
                 + "\"dataInstanceId\":" + jsonValue(launchContext.getDataInstanceId()) + ","
                 + "\"actorType\":" + jsonValue(launchContext.getActorType()) + ","
+                + "\"launchEntryType\":" + jsonValue(launchContext.getLaunchEntryType()) + ","
                 + "\"requiredExternalOrgId\":" + jsonValue(launchContext.getRequiredExternalOrgId()) + ","
                 + "\"requiredExternalRoleId\":" + jsonValue(launchContext.getRequiredExternalRoleId())
                 + "}";

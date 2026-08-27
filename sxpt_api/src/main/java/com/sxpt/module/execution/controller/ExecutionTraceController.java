@@ -103,6 +103,10 @@ public class ExecutionTraceController {
         executionTrace.setTaskStepId(request.getTaskStepId());
         executionTrace.setTeachingPointId(request.getTeachingPointId());
         executionTrace.setResourceId(request.getResourceId());
+        executionTrace.setDataSessionId(request.getDataSessionId());
+        executionTrace.setDataInstanceId(request.getDataInstanceId());
+        executionTrace.setBusinessSceneCode(request.getBusinessSceneCode());
+        executionTrace.setExternalBusinessId(request.getExternalBusinessId());
         executionTrace.setTraceType(request.getTraceType());
         executionTrace.setTraceTime(request.getTraceTime());
         executionTrace.setSequenceNo(request.getSequenceNo());
@@ -147,6 +151,10 @@ public class ExecutionTraceController {
         vo.setTaskStepId(trace.getTaskStepId());
         vo.setTeachingPointId(trace.getTeachingPointId());
         vo.setResourceId(trace.getResourceId());
+        vo.setDataSessionId(trace.getDataSessionId());
+        vo.setDataInstanceId(trace.getDataInstanceId());
+        vo.setBusinessSceneCode(trace.getBusinessSceneCode());
+        vo.setExternalBusinessId(trace.getExternalBusinessId());
         vo.setTraceType(trace.getTraceType());
         vo.setTraceTime(trace.getTraceTime());
         vo.setSequenceNo(trace.getSequenceNo());

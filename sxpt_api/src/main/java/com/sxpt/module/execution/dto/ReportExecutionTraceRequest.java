@@ -42,6 +42,18 @@ public class ReportExecutionTraceRequest {
     @Size(max = 64, message = "资源 ID 长度不能超过 64")
     private String resourceId;
 
+    @Size(max = 64, message = "数据会话 ID 长度不能超过 64")
+    private String dataSessionId;
+
+    @Size(max = 64, message = "教学数据实例 ID 长度不能超过 64")
+    private String dataInstanceId;
+
+    @Size(max = 128, message = "业务场景编码长度不能超过 128")
+    private String businessSceneCode;
+
+    @Size(max = 128, message = "原平台业务数据 ID 长度不能超过 128")
+    private String externalBusinessId;
+
     @NotBlank(message = "轨迹类型不能为空")
     @Size(max = 32, message = "轨迹类型长度不能超过 32")
     private String traceType;
@@ -128,6 +140,38 @@ public class ReportExecutionTraceRequest {
 
     public void setResourceId(String resourceId) {
         this.resourceId = resourceId;
+    }
+
+    public String getDataSessionId() {
+        return dataSessionId;
+    }
+
+    public void setDataSessionId(String dataSessionId) {
+        this.dataSessionId = dataSessionId;
+    }
+
+    public String getDataInstanceId() {
+        return dataInstanceId;
+    }
+
+    public void setDataInstanceId(String dataInstanceId) {
+        this.dataInstanceId = dataInstanceId;
+    }
+
+    public String getBusinessSceneCode() {
+        return businessSceneCode;
+    }
+
+    public void setBusinessSceneCode(String businessSceneCode) {
+        this.businessSceneCode = businessSceneCode;
+    }
+
+    public String getExternalBusinessId() {
+        return externalBusinessId;
+    }
+
+    public void setExternalBusinessId(String externalBusinessId) {
+        this.externalBusinessId = externalBusinessId;
     }
 
     public String getTraceType() {

@@ -122,6 +122,39 @@ class PlatformLaunchContextServiceImplTests {
     }
 
     /**
+     * 校验平台首页启动不要求预先绑定教学数据实例。
+     */
+    @Test
+    void createPlatformHomeLaunchContextShouldNotRequireDataInstance() {
+        PlatformLaunchContext launchContext = new PlatformLaunchContext();
+        launchContext.setId("launch_home_001");
+        launchContext.setTenantId("tenant_001");
+        launchContext.setUserId("user_001");
+        launchContext.setConnectorSystemId("connector_001");
+        launchContext.setSceneType("PRACTICE");
+        launchContext.setSdkMode("PRACTICE");
+        launchContext.setActorType("STUDENT");
+        launchContext.setTaskId("task_001");
+        launchContext.setExecutionId("exec_001");
+        launchContext.setPracticeAttemptId("attempt_001");
+        launchContext.setOriginHomeUrl("https://origin.example.com");
+
+        PlatformLaunchContextService.CreatedLaunchContext created =
+                service.createPlatformHomeLaunchContext(launchContext);
+
+        assertSame(launchContext, created.getLaunchContext());
+        assertNotNull(created.getLaunchToken());
+        assertEquals("PLATFORM_HOME", launchContext.getLaunchEntryType());
+        assertEquals("https://origin.example.com", launchContext.getTargetUrl());
+        assertEquals("https://origin.example.com", launchContext.getOriginHomeUrl());
+        assertEquals(LaunchStatus.CREATED.getValue(), launchContext.getLaunchStatus());
+        assertTrue(launchContext.getSdkConfigSnapshotJson().contains("\"practiceAttemptId\":\"attempt_001\""));
+        assertTrue(launchContext.getSdkConfigSnapshotJson().contains("\"launchEntryType\":\"PLATFORM_HOME\""));
+        verify(teachingDataInstanceMapper, times(0)).selectById(org.mockito.ArgumentMatchers.any());
+        verify(mapper).insert(launchContext);
+    }
+
+    /**
      * 校验缺少目标地址时拒绝创建启动上下文。
      */
     @Test

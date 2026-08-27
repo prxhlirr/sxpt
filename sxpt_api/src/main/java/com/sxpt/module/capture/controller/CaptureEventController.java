@@ -89,6 +89,10 @@ public class CaptureEventController {
         captureEvent.setTargetStableKey(request.getTargetStableKey());
         captureEvent.setInputValueMasked(request.getInputValueMasked());
         captureEvent.setEventPayloadJson(request.getEventPayloadJson());
+        captureEvent.setDataSessionId(request.getDataSessionId());
+        captureEvent.setDataInstanceId(request.getDataInstanceId());
+        captureEvent.setBusinessSceneCode(request.getBusinessSceneCode());
+        captureEvent.setExternalBusinessId(request.getExternalBusinessId());
         return captureEvent;
     }
 
@@ -128,6 +132,10 @@ public class CaptureEventController {
         vo.setTargetLocator(event.getTargetLocator());
         vo.setTargetStableKey(event.getTargetStableKey());
         vo.setInputValueMasked(event.getInputValueMasked());
+        vo.setDataSessionId(event.getDataSessionId());
+        vo.setDataInstanceId(event.getDataInstanceId());
+        vo.setBusinessSceneCode(event.getBusinessSceneCode());
+        vo.setExternalBusinessId(event.getExternalBusinessId());
         vo.setArchiveStatus(event.getArchiveStatus());
         vo.setStatus(event.getStatus());
         vo.setCreateTime(event.getCreateTime());
